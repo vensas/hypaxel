@@ -44,6 +44,11 @@ zip = "9.7.0"
 [[bench]]
 name = "write"
 harness = false
+required-features = ["chrono", "serde"]
+
+[[example]]
+name = "profile_rows"
+required-features = ["chrono"]
 
 [package.metadata.docs.rs]
 all-features = true

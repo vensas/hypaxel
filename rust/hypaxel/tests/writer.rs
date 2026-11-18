@@ -46,7 +46,7 @@ fn writes_all_value_types_in_both_string_modes() {
         assert_eq!(num(&book.value("Data", 1, 8)), u64::MAX as f64);
 
         let Data::DateTime(v) = book.value("Data", 2, 1) else { panic!("expected a date") };
-        assert!((v.as_f64() - 45366.573263888888).abs() < 1e-9, "{}", v.as_f64());
+        assert!((v.as_f64() - 45_366.573_263_888_89).abs() < 1e-9, "{}", v.as_f64());
         assert!(matches!(book.value("Data", 2, 2), Data::DateTime(d) if d.as_f64() == 45366.0));
         assert!(matches!(book.value("Data", 2, 3), Data::DateTime(d) if d.as_f64() == 0.25));
         assert!(matches!(book.value("Data", 2, 4), Data::DateTime(d) if d.as_f64() == 1.5));

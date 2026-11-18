@@ -163,12 +163,12 @@ unique string, float. Output goes to a `Vec<u8>`. Linux, Xeon 2.1 GHz, 4 vCPUs, 
 
 | Library | 100k rows (Criterion) | 1M rows | File (1M) |
 | --- | ---: | ---: | ---: |
-| **hypaxel** (tuples) | **CRIT_TUPLES** | **~0.75 s** | 50 MB |
-| **hypaxel** (serde records) | CRIT_SERDE | ~0.75 s | 50 MB |
-| hypaxel (shared strings) | CRIT_SHARED | ~1.4 s | 53 MB |
-| hypaxel (deflate level 6) | CRIT_L6 | ~3.1 s | 31 MB |
-| rust_xlsxwriter 0.102 (constant memory) | CRIT_RXW_CM | ~8.7 s | 57 MB |
-| rust_xlsxwriter 0.102 | CRIT_RXW | ~11.0 s | 59 MB |
+| **hypaxel** (tuples) | **74 ms** | **~0.75 s** | 50 MB |
+| **hypaxel** (serde records) | 75 ms | ~0.75 s | 50 MB |
+| hypaxel (shared strings) | 100 ms | ~1.4 s | 53 MB |
+| hypaxel (deflate level 6) | 316 ms | ~3.1 s | 31 MB |
+| rust_xlsxwriter 0.102 (constant memory) | 796 ms | ~8.7 s | 57 MB |
+| rust_xlsxwriter 0.102 | 1,019 ms | ~11.0 s | 59 MB |
 
 About half of the remaining time is deflate (zlib-rs, level 1). The other half is generating
 about 330 MB of XML at roughly 35 ns per cell.
