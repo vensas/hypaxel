@@ -329,3 +329,72 @@ test('memory does not grow with the amount of data streamed', async () => {
   const grownMegabytes = (last - baseline) / 1024 / 1024
   assert.ok(grownMegabytes < 25, `resident memory grew by ${grownMegabytes.toFixed(1)} MB over three more exports`)
 })
+
+async function part(buffer, name) {
+  return (await JSZip.loadAsync(buffer)).file(name).async('string')
+}
+
+test('row outline levels', async () => {
+  const writer = new Writer(STRICT)
+  const sheet = writer.addWorksheet('Tree', { rowOutlineLevels: 2, outlineSummaryAbove: true })
+  sheet.writeRow(['North', 300])
+  sheet.beginRow({ outlineLevel: 1 })
+  sheet.writeRow(['Store A', 120])
+  sheet.beginRow({ outlineLevel: 2, hidden: true, height: 20 })
+  sheet.writeRow(['Till', 60])
+  sheet.writeRow(['South', 1])
+  const buffer = writer.finish()
+
+  const xml = await part(buffer, 'xl/worksheets/sheet1.xml')
+  assert.match(xml, /<outlinePr summaryBelow="0"\/>/)
+  assert.match(xml, /outlineLevelRow="2"/)
+  assert.match(xml, /<row r="2" outlineLevel="1">/)
+  assert.match(xml, /<row r="3" ht="20" customHeight="1" hidden="1" outlineLevel="2">/)
+  const book = await read(buffer)
+  assert.deepEqual(values(book.getWorksheet('Tree')), [['North', 300], ['Store A', 120], ['Till', 60], ['South', 1]])
+
+  const other = new Writer().addWorksheet('S')
+  assert.throws(() => other.beginRow({ outlineLevel: 1 }), /row_outline_levels/)
+})
+
+test('excel tables', async () => {
+  const writer = new Writer(STRICT)
+  const sheet = writer.addWorksheet('Orders')
+  sheet.writeRows([['Product', 'Units'], ['Widget', 3], ['Gadget', 5]])
+  sheet.addTable(1, 1, sheet.row, 2, { name: 'Orders', columns: ['Product', 'Units'], style: 'TableStyleDark1' })
+  sheet.writeRows([['x', 1], ['y', 2]])
+  sheet.addTable(4, 1, 5, 2, { headerRow: false, style: 'none' })
+  const buffer = writer.finish()
+
+  const t1 = await part(buffer, 'xl/tables/table1.xml')
+  assert.match(t1, /name="Orders" displayName="Orders" ref="A1:B3"/)
+  assert.match(t1, /name="TableStyleDark1"/)
+  const t2 = await part(buffer, 'xl/tables/table2.xml')
+  assert.match(t2, /headerRowCount="0"/)
+  assert.doesNotMatch(t2, /TableStyle/)
+  await read(buffer)
+
+  const other = new Writer().addWorksheet('S')
+  assert.throws(() => other.addTable(1, 1, 3, 2), /column names/)
+  assert.throws(() => other.addTable(1, 1, 3, 1, { columns: ['a'], style: 'Fancy' }), /table style/)
+  assert.throws(() => other.addTable(1, 1, 3, 1, { columns: ['a'], name: 'A1' }), /invalid table name/)
+})
+
+test('auto-fit column widths', async () => {
+  const writer = new Writer(STRICT)
+  const sheet = writer.addWorksheet('Fit', { autofit: true, columnWidths: [30] })
+  sheet.writeRow(['fixed', 'A much longer product name', 1234567.5, true])
+  sheet.writeRow(['x', 'short', 1, false])
+  const fit = (await read(writer.finish())).getWorksheet('Fit')
+  assert.equal(fit.getColumn(1).width, 30)
+  assert.ok(fit.getColumn(2).width > 25 && fit.getColumn(2).width < 35)
+  assert.ok(fit.getColumn(3).width > 8 && fit.getColumn(3).width < 12)
+
+  const capped = new Writer()
+  const s = capped.addWorksheet('Capped', { autofit: { maxWidth: 12, sampleRows: 1 } })
+  s.writeRow(['x'.repeat(200)])
+  s.writeRow(['y'.repeat(400)])
+  assert.match(await part(capped.finish(), 'xl/worksheets/sheet1.xml'), /<col min="1" max="1" width="12" customWidth="1"\/>/)
+
+  assert.throws(() => new Writer().addWorksheet('S', { autofit: { sampleRows: 0 } }), /sample/)
+})

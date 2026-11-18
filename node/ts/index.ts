@@ -114,12 +114,41 @@ export interface WorksheetOptions {
   hidden?: boolean
   showGridLines?: boolean
   tabColor?: string
+  /**
+   * Sizes columns without an explicit width to their content. The sheet's output is held back until
+   * `sampleRows` rows (default 1,000) have been measured, then streams as usual.
+   */
+  autofit?: boolean | { sampleRows?: number; maxWidth?: number }
+  /** Deepest row outline level (1–7) used with {@link RowOptions.outlineLevel}; Excel needs it up front. */
+  rowOutlineLevels?: number
+  /** Places group buttons on the summary row above each group instead of below it. */
+  outlineSummaryAbove?: boolean
 }
 
 export interface RowOptions {
   /** Row height in points. */
   height?: number
   style?: Style
+  /** Outline (grouping) level 0–7; must not exceed {@link WorksheetOptions.rowOutlineLevels}. */
+  outlineLevel?: number
+  hidden?: boolean
+  /** Marks the summary row of a collapsed group. */
+  collapsed?: boolean
+}
+
+export interface TableOptions {
+  /** Workbook-unique name; defaults to `Table1`, `Table2`, …. */
+  name?: string
+  /** Column names. Required with a header row and must equal the header texts exactly. */
+  columns?: readonly string[]
+  /** Built-in style such as `'TableStyleMedium2'` (the default), or `'none'`. */
+  style?: string
+  headerRow?: boolean
+  autofilter?: boolean
+  rowStripes?: boolean
+  columnStripes?: boolean
+  firstColumn?: boolean
+  lastColumn?: boolean
 }
 
 const TAG_END_ROW = 0
@@ -368,6 +397,11 @@ export class Writer {
         hidden: options.hidden,
         showGridLines: options.showGridLines,
         tabColor: options.tabColor,
+        autofit: options.autofit !== undefined && options.autofit !== false,
+        autofitSampleRows: typeof options.autofit === 'object' ? options.autofit.sampleRows : undefined,
+        autofitMaxWidth: typeof options.autofit === 'object' ? options.autofit.maxWidth : undefined,
+        rowOutlineLevels: options.rowOutlineLevels,
+        outlineSummaryAbove: options.outlineSummaryAbove,
       }),
     )
     return new Worksheet(state, ++state.sheets, name)
@@ -469,12 +503,38 @@ export class Worksheet {
     this.#current().encoder.endRow()
   }
 
-  /** Starts the next row explicitly, to set its height or a row style. */
+  /**
+   * Starts the next row explicitly, to set its height, style, outline level or hidden state. A
+   * following {@link writeRow} fills this row rather than starting another.
+   */
   beginRow(options: RowOptions = {}): void {
     const state = this.#current()
     const style = state.encoder.styleId(options.style)
     state.encoder.flush()
-    guard(() => state.native.beginRow(options.height, style))
+    guard(() =>
+      state.native.beginRow({
+        height: options.height,
+        style,
+        outlineLevel: options.outlineLevel,
+        hidden: options.hidden,
+        collapsed: options.collapsed,
+      }),
+    )
+  }
+
+  /**
+   * Turns a range (1-based, inclusive) into an Excel table. With a header row, `options.columns`
+   * must list the header texts exactly as written in the range's first row.
+   */
+  addTable(firstRow: number, firstColumn: number, lastRow: number, lastColumn: number, options: TableOptions = {}): void {
+    const state = this.#current()
+    state.encoder.flush()
+    guard(() =>
+      state.native.addTable(firstRow, firstColumn, lastRow, lastColumn, {
+        ...options,
+        columns: options.columns === undefined ? undefined : [...options.columns],
+      }),
+    )
   }
 
   /** Leaves `count` cells of the current row empty. */
