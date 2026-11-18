@@ -1,0 +1,6 @@
+/target
+/node_modules
+/lib
+/binding.js
+/binding.d.ts
+*.node

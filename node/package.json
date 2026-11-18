@@ -1,0 +1,64 @@
+{
+  "name": "hypaxel",
+  "version": "0.1.0",
+  "description": "High-performance, constant-memory streaming XLSX (Excel) writer for Node.js, powered by Rust.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vensas/hypaxel.git",
+    "directory": "node"
+  },
+  "keywords": [
+    "excel",
+    "xlsx",
+    "spreadsheet",
+    "streaming",
+    "express",
+    "fastify",
+    "napi"
+  ],
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "binding.js",
+    "binding.d.ts",
+    "*.node",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "napi": {
+    "binaryName": "hypaxel",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc"
+    ]
+  },
+  "scripts": {
+    "build:native": "napi build --platform --release --js binding.js --dts binding.d.ts",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:native && npm run build:ts",
+    "test": "node --test test/*.test.mjs",
+    "bench": "node benchmarks/bench.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.10.12",
+    "@types/node": "^22.0.0",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "typescript": "^5.9.0"
+  }
+}
