@@ -1,0 +1,50 @@
+name: Go
+
+# Path filters on push compare only the commits in that push, so a push runs just the
+# workflows whose files it touched. Pull request runs compare the whole PR, so they are
+# limited to forks, whose pushes do not trigger workflows here.
+on:
+  push:
+    paths: ["go/**", ".github/workflows/go.yml"]
+  pull_request:
+    paths: ["go/**", ".github/workflows/go.yml"]
+
+defaults:
+  run:
+    working-directory: go
+
+jobs:
+  test:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.26", "1.27"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: go/tests/go.sum
+      - run: go test -race -cover ./...
+      - name: Read-back tests against excelize
+        working-directory: go/tests
+        run: go test ./...
+
+  lint:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache-dependency-path: go/tests/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - run: go vet ./...
+        working-directory: go/tests
+      - name: The library has no dependencies
+        run: test "$(go list -m all)" = "github.com/vensas/hypaxel/go"
