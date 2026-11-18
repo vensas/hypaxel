@@ -10,7 +10,7 @@
     <Authors>Hypaxel contributors</Authors>
     <Copyright>Copyright 2026 vensas GmbH</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <RepositoryUrl>https://github.com/esskar/hypaxel</RepositoryUrl>
+    <RepositoryUrl>https://github.com/vensas/hypaxel</RepositoryUrl>
     <PackageTags>excel;xlsx;spreadsheet;openxml;aspnetcore;streaming;performance</PackageTags>
     <VersionPrefix>0.1.0</VersionPrefix>
   </PropertyGroup>
