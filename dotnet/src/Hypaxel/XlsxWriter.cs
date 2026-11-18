@@ -30,6 +30,7 @@ public sealed partial class XlsxWriter : IAsyncDisposable, IDisposable
     private readonly Utf8XmlBuffer _xml;
     private readonly List<Worksheet> _sheets = [];
     private readonly HashSet<string> _sheetNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _tableNames = new(StringComparer.OrdinalIgnoreCase);
     private Stream? _entryStream;
     private Worksheet? _current;
     private bool _completed;
@@ -72,6 +73,13 @@ public sealed partial class XlsxWriter : IAsyncDisposable, IDisposable
 
     internal bool WriteCellReferences => _options.WriteCellReferences;
 
+    /// <summary>Tables added so far in the workbook; table ids and part names are numbered workbook-wide.</summary>
+    internal int TableCount => _tableNames.Count;
+
+    internal bool IsTableNameTaken(string name) => _tableNames.Contains(name);
+
+    internal void RegisterTable(string name) => _tableNames.Add(name);
+
     /// <summary>Worksheets added so far.</summary>
     public IReadOnlyList<Worksheet> Worksheets => _sheets;
 
@@ -90,6 +98,7 @@ public sealed partial class XlsxWriter : IAsyncDisposable, IDisposable
     {
         EnsureNotCompleted();
         ValidateSheetName(name);
+        options?.Validate(Styles);
         if (!_sheetNames.Add(name))
         {
             throw new ArgumentException($"A worksheet named '{name}' already exists (names are case-insensitive).", nameof(name));
@@ -201,9 +210,24 @@ public sealed partial class XlsxWriter : IAsyncDisposable, IDisposable
             return;
         }
 
-        _current.Complete();
+        var sheet = _current;
+        sheet.Complete();
         CloseEntry();
         _current = null;
+
+        if (sheet.Tables is { Count: > 0 } tables)
+        {
+            foreach (var table in tables)
+            {
+                OpenEntry($"xl/tables/table{table.Id}.xml");
+                table.WriteTo(_xml);
+                CloseEntry();
+            }
+
+            OpenEntry($"xl/worksheets/_rels/sheet{sheet.Index + 1}.xml.rels");
+            WorkbookParts.WriteWorksheetRelationships(_xml, tables);
+            CloseEntry();
+        }
     }
 
     private void WriteRemainingParts()
@@ -247,7 +271,7 @@ public sealed partial class XlsxWriter : IAsyncDisposable, IDisposable
         CloseEntry();
 
         OpenEntry("[Content_Types].xml");
-        WorkbookParts.WriteContentTypes(_xml, _sheets.Count, hasSharedStrings);
+        WorkbookParts.WriteContentTypes(_xml, _sheets.Count, TableCount, hasSharedStrings);
         CloseEntry();
 
         OpenEntry("_rels/.rels");

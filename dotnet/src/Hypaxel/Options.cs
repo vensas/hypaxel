@@ -107,6 +107,29 @@ public sealed class WorksheetOptions
     /// <summary>Optional tab color.</summary>
     public ExcelColor? TabColor { get; set; }
 
+    /// <summary>
+    /// Deepest row outline (grouping) level used on this worksheet, 0–7. Excel sizes the outline bar
+    /// from this value, which precedes the rows in the file, so it must be declared up front;
+    /// <see cref="RowOptions.OutlineLevel"/> cannot exceed it.
+    /// </summary>
+    public int RowOutlineLevels { get; set; }
+
+    /// <summary>Places the expand/collapse button of a row group on the summary row above it instead of below.</summary>
+    public bool OutlineSummaryAbove { get; set; }
+
+    /// <summary>
+    /// Sizes columns without an explicit width to fit their content, or null (the default) to keep
+    /// the default widths. See <see cref="AutoFitOptions"/>.
+    /// </summary>
+    public AutoFitOptions? AutoFit { get; set; }
+
+    /// <summary>Auto-fits columns that have no explicit width, measuring the first 1,000 rows by default.</summary>
+    public WorksheetOptions AutoFitColumns(AutoFitOptions? options = null)
+    {
+        AutoFit = options ?? new AutoFitOptions();
+        return this;
+    }
+
     /// <summary>Defines a column.</summary>
     public WorksheetOptions SetColumn(int column, ColumnDefinition definition)
     {
@@ -129,4 +152,84 @@ public sealed class WorksheetOptions
 
         return this;
     }
+
+    internal void Validate(StyleRegistry styles)
+    {
+        if (FrozenRows < 0 || FrozenRows >= CellReference.MaxRows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(FrozenRows), FrozenRows, "FrozenRows is out of range.");
+        }
+
+        if (FrozenColumns < 0 || FrozenColumns >= CellReference.MaxColumns)
+        {
+            throw new ArgumentOutOfRangeException(nameof(FrozenColumns), FrozenColumns, "FrozenColumns is out of range.");
+        }
+
+        foreach (var definition in Columns.Values)
+        {
+            if (!definition.Style.IsDefault)
+            {
+                styles.Validate(definition.Style);
+            }
+        }
+
+        if (RowOutlineLevels is < 0 or > 7)
+        {
+            throw new ArgumentOutOfRangeException(nameof(RowOutlineLevels), RowOutlineLevels, "RowOutlineLevels must be between 0 and 7.");
+        }
+
+        if (AutoFit is { } fit)
+        {
+            if (fit.SampleRows < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(AutoFit), fit.SampleRows, "The auto-fit sample needs at least one row.");
+            }
+
+            if (!(fit.MaxWidth > 0))
+            {
+                throw new ArgumentOutOfRangeException(nameof(AutoFit), fit.MaxWidth, "The auto-fit maximum width must be positive.");
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Column auto-fit settings for <see cref="WorksheetOptions.AutoFit"/>.
+/// </summary>
+/// <remarks>
+/// Column widths precede the cell data in the file, so the writer holds back the worksheet's XML until
+/// <see cref="SampleRows"/> rows have been written (or the worksheet ends), estimates the widths from
+/// those rows and then streams as usual. Memory is bounded by the sample: at most
+/// <see cref="SampleRows"/> rows or 8 MiB of XML, whichever comes first. Widths are estimated from the
+/// text, number format and font size of each cell; formulas and merged cells are not measured.
+/// </remarks>
+public sealed record AutoFitOptions
+{
+    /// <summary>Rows measured before the widths are fixed. Default: 1,000.</summary>
+    public int SampleRows { get; init; } = 1000;
+
+    /// <summary>Upper bound for a fitted width, in characters. Default: 255 (Excel's maximum).</summary>
+    public double MaxWidth { get; init; } = 255;
+}
+
+/// <summary>Settings for one row, used with <see cref="Worksheet.BeginRow(RowOptions)"/>.</summary>
+public sealed record RowOptions
+{
+    /// <summary>Height in points (0–409), or null for the default height.</summary>
+    public double? Height { get; init; }
+
+    /// <summary>Default format for the row's empty cells.</summary>
+    public StyleId Style { get; init; }
+
+    /// <summary>
+    /// Outline (grouping) level 0–7. Must not exceed <see cref="WorksheetOptions.RowOutlineLevels"/>
+    /// of the worksheet.
+    /// </summary>
+    public int OutlineLevel { get; init; }
+
+    /// <summary>Hides the row (e.g. a row inside a collapsed group).</summary>
+    public bool Hidden { get; init; }
+
+    /// <summary>Marks the summary row of a collapsed group (the group's rows should be hidden).</summary>
+    public bool Collapsed { get; init; }
 }

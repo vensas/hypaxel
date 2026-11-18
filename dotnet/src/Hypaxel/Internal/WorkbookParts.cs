@@ -97,7 +97,7 @@ internal static class WorkbookParts
         x.WriteRaw("</Relationships>"u8);
     }
 
-    public static void WriteContentTypes(Utf8XmlBuffer x, int sheetCount, bool hasSharedStrings)
+    public static void WriteContentTypes(Utf8XmlBuffer x, int sheetCount, int tableCount, bool hasSharedStrings)
     {
         x.WriteRaw(Xml.Declaration);
         x.WriteRaw("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"u8);
@@ -112,12 +112,35 @@ internal static class WorkbookParts
         }
 
         x.WriteRaw("<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>"u8);
+        for (var i = 1; i <= tableCount; i++)
+        {
+            x.WriteRaw("<Override PartName=\"/xl/tables/table"u8);
+            x.Write(i);
+            x.WriteRaw(".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml\"/>"u8);
+        }
+
         if (hasSharedStrings)
         {
             x.WriteRaw("<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>"u8);
         }
 
         x.WriteRaw("</Types>"u8);
+    }
+
+    public static void WriteWorksheetRelationships(Utf8XmlBuffer x, List<TableDefinition> tables)
+    {
+        x.WriteRaw(Xml.Declaration);
+        x.WriteRaw("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"u8);
+        for (var i = 0; i < tables.Count; i++)
+        {
+            x.WriteRaw("<Relationship Id=\"rId"u8);
+            x.Write(i + 1);
+            x.WriteRaw("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/table\" Target=\"../tables/table"u8);
+            x.Write(tables[i].Id);
+            x.WriteRaw(".xml\"/>"u8);
+        }
+
+        x.WriteRaw("</Relationships>"u8);
     }
 
     public static void WriteRootRelationships(Utf8XmlBuffer x)
