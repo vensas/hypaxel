@@ -27,7 +27,7 @@ you write it and compressed straight into the output, so memory stays flat wheth
 
 | Package | Purpose |
 | --- | --- |
-| `Hypaxel` | Core writer (`net8.0`, `net9.0`), no dependencies |
+| `Hypaxel` | Core writer (`net8.0`, `net9.0`, `net10.0`, `net11.0`), no dependencies |
 | `Hypaxel.AspNetCore` | `IResult` / `IActionResult` helpers for streaming workbooks as HTTP responses |
 
 ## Quick start
@@ -212,7 +212,7 @@ new XlsxWriterOptions
 cd dotnet
 dotnet build
 dotnet test
-dotnet run --project samples/Hypaxel.Samples.WebApi   # GET /orders.xlsx, /report.xlsx, /api/export
+dotnet run --project samples/Hypaxel.Samples.WebApi -f net10.0   # GET /orders.xlsx, /report.xlsx, /api/export
 ```
 
 ## License
