@@ -119,6 +119,22 @@ public final class StyleRegistry {
         return id;
     }
 
+    /** Font of a registered format, for column auto-fit. */
+    Font font(int style) {
+        return fonts.get(xfs.get(style).font);
+    }
+
+    /** Number format id of a registered format. */
+    int numberFormat(int style) {
+        return xfs.get(style).numberFormat;
+    }
+
+    /** Custom number format code of a registered format, or null for a built-in format. */
+    String customNumberFormat(int style) {
+        int id = xfs.get(style).numberFormat;
+        return id >= FIRST_CUSTOM_NUMBER_FORMAT ? numberFormats.get(id - FIRST_CUSTOM_NUMBER_FORMAT) : null;
+    }
+
     private int xfId(Xf xf) {
         Integer known = xfIds.get(xf);
         if (known != null) {

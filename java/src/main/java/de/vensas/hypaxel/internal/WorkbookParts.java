@@ -74,7 +74,7 @@ final class WorkbookParts {
         x.raw("</Relationships>");
     }
 
-    static void contentTypes(XmlBuffer x, int sheetCount, boolean sharedStrings) {
+    static void contentTypes(XmlBuffer x, int sheetCount, int tableCount, boolean sharedStrings) {
         x.raw(DECLARATION).raw("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
         x.raw("<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>");
         x.raw("<Default Extension=\"xml\" ContentType=\"application/xml\"/>");
@@ -84,10 +84,23 @@ final class WorkbookParts {
             x.raw(".xml\" ContentType=\"").raw(CT_PREFIX).raw("worksheet+xml\"/>");
         }
         x.raw("<Override PartName=\"/xl/styles.xml\" ContentType=\"").raw(CT_PREFIX).raw("styles+xml\"/>");
+        for (int i = 1; i <= tableCount; i++) {
+            x.raw("<Override PartName=\"/xl/tables/table").putLong(i);
+            x.raw(".xml\" ContentType=\"").raw(CT_PREFIX).raw("table+xml\"/>");
+        }
         if (sharedStrings) {
             x.raw("<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"").raw(CT_PREFIX).raw("sharedStrings+xml\"/>");
         }
         x.raw("</Types>");
+    }
+
+    static void sheetRels(XmlBuffer x, List<TableDefinition> tables) {
+        x.raw(DECLARATION).raw("<Relationships xmlns=\"").raw(NS_PACKAGE_REL).raw("\">");
+        for (int i = 0; i < tables.size(); i++) {
+            x.raw("<Relationship Id=\"rId").putLong(i + 1).raw("\" Type=\"").raw(NS_REL);
+            x.raw("/table\" Target=\"../tables/table").putLong(tables.get(i).id).raw(".xml\"/>");
+        }
+        x.raw("</Relationships>");
     }
 
     static void rootRels(XmlBuffer x) {

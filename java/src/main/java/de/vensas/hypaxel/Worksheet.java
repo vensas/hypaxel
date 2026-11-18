@@ -88,39 +88,67 @@ public final class Worksheet {
 
     // ------------------------------------------------------------------ rows
 
-    /** Starts the next row explicitly. Cells start one implicitly; use this to leave an empty styled row. */
+    /**
+     * Starts the next row explicitly. Cells start one implicitly; use this to leave an empty
+     * styled row. A following whole-row write such as {@link #addRow(Object...)} fills this row
+     * rather than starting another, as long as it has no cells yet.
+     */
     public Worksheet beginRow() {
-        engine().beginNextRow(Double.NaN, 0);
-        return this;
+        return beginRowAt(engine().row() + 1);
     }
 
     /** Starts the next row with a height in points, 0 to 409. */
     public Worksheet beginRow(double height) {
-        engine().beginNextRow(checkHeight(height), 0);
+        engine().beginRowAt(engine.row() + 1, checkHeight(height), 0, 0, false, false);
         return this;
     }
 
     /** Starts the next row with a format for its empty cells. */
     public Worksheet beginRow(StyleId style) {
-        engine().beginNextRow(Double.NaN, style.index());
+        engine().beginRowAt(engine.row() + 1, Double.NaN, style.index(), 0, false, false);
         return this;
     }
 
     /** Starts the next row with a height in points and a format for its empty cells. */
     public Worksheet beginRow(double height, StyleId style) {
-        engine().beginNextRow(checkHeight(height), style.index());
+        engine().beginRowAt(engine.row() + 1, checkHeight(height), style.index(), 0, false, false);
         return this;
+    }
+
+    /**
+     * Starts the next row with a height, format, outline (grouping) level or hidden state. Fill it
+     * with cell writes or a single whole-row write such as {@link #addRow(Object...)}.
+     *
+     * <pre>{@code
+     * Worksheet sheet = writer.addWorksheet("Tree", SheetOptions.builder().rowOutlineLevels(1).build());
+     * sheet.addRow("Region North", 300);
+     * sheet.beginRow(RowOptions.builder().outlineLevel(1).build()).addRow("Store A", 120);
+     * sheet.beginRow(RowOptions.builder().outlineLevel(1).build()).write("Store B").write(180).endRow();
+     * }</pre>
+     *
+     * @throws XlsxException if the outline level exceeds {@link SheetOptions#rowOutlineLevels()}
+     */
+    public Worksheet beginRow(RowOptions options) {
+        return beginRowAt(engine().row() + 1, options);
     }
 
     /** Starts the row with the given 1-based number, which must be greater than any row written so far. */
     public Worksheet beginRowAt(int rowNumber) {
-        engine().beginRowAt(rowNumber, Double.NaN, 0);
+        engine().beginRowAt(rowNumber, Double.NaN, 0, 0, false, false);
         return this;
     }
 
     /** Starts the row with the given 1-based number, a height in points and a format for its empty cells. */
     public Worksheet beginRowAt(int rowNumber, double height, StyleId style) {
-        engine().beginRowAt(rowNumber, checkHeight(height), style.index());
+        engine().beginRowAt(rowNumber, checkHeight(height), style.index(), 0, false, false);
+        return this;
+    }
+
+    /** Like {@link #beginRow(RowOptions)} for the row with the given 1-based number. */
+    public Worksheet beginRowAt(int rowNumber, RowOptions options) {
+        Objects.requireNonNull(options, "options");
+        engine().beginRowAt(rowNumber, options.height(), options.style().index(), options.outlineLevel(), options.hidden(),
+                options.collapsed());
         return this;
     }
 
@@ -152,15 +180,33 @@ public final class Worksheet {
         return this;
     }
 
-    /** Merges a range of cells; row and column numbers are 1-based and inclusive. */
+    /** Merges a range of cells; row and column numbers are 1-based and inclusive. The range cannot overlap a table. */
     public Worksheet mergeCells(int firstRow, int firstColumn, int lastRow, int lastColumn) {
         engine().merge(firstRow, firstColumn, lastRow, lastColumn);
         return this;
     }
 
-    /** Adds filter drop-downs to a range whose first row is the header; numbers are 1-based and inclusive. */
+    /**
+     * Adds filter drop-downs to a range whose first row is the header; numbers are 1-based and
+     * inclusive. The range cannot overlap a table, which has its own filter.
+     */
     public Worksheet autoFilter(int firstRow, int firstColumn, int lastRow, int lastColumn) {
         engine().autoFilter(firstRow, firstColumn, lastRow, lastColumn);
+        return this;
+    }
+
+    /**
+     * Turns a range of this worksheet into an Excel table; see {@link ExcelTable}. The range may
+     * include rows that are written later: it is recorded now and written when the worksheet
+     * completes.
+     *
+     * @throws XlsxException if the table is invalid ({@link XlsxException.Kind#INVALID_ARGUMENT},
+     *     {@link XlsxException.Kind#INVALID_TABLE_NAME}), its name is already used in the workbook
+     *     ({@link XlsxException.Kind#DUPLICATE_TABLE_NAME}), or its range overlaps another table,
+     *     merged cells or the worksheet auto filter ({@link XlsxException.Kind#OVERLAPPING_RANGE})
+     */
+    public Worksheet addTable(ExcelTable table) {
+        engine().addTable(Objects.requireNonNull(table, "table"));
         return this;
     }
 
@@ -388,7 +434,10 @@ public final class Worksheet {
 
     // ------------------------------------------------------------------ whole rows
 
-    /** Writes a complete row; each value is written as by {@link #writeValue(Object)}. */
+    /**
+     * Writes a complete row; each value is written as by {@link #writeValue(Object)}. The row is
+     * the one started with {@code beginRow} if it has no cells yet, otherwise the next one.
+     */
     public void addRow(Object... values) throws IOException {
         addStyledRow(StyleId.DEFAULT, values);
     }
@@ -397,7 +446,7 @@ public final class Worksheet {
     public void addStyledRow(StyleId style, Object... values) throws IOException {
         ValueWriter target = values();
         int index = style.index();
-        engine.beginNextRow(Double.NaN, 0);
+        engine.beginNextRow();
         for (Object value : values) {
             target.writeObject(value, index);
         }
@@ -407,7 +456,7 @@ public final class Worksheet {
     /** Writes a complete row from a collection or any other iterable. */
     public void addRow(Iterable<?> values) throws IOException {
         ValueWriter target = values();
-        engine.beginNextRow(Double.NaN, 0);
+        engine.beginNextRow();
         for (Object value : values) {
             target.writeObject(value, 0);
         }
@@ -456,7 +505,7 @@ public final class Worksheet {
         Objects.requireNonNull(rowWriter, "rowWriter");
         while (items.hasNext()) {
             T item = items.next();
-            engine().beginNextRow(Double.NaN, 0);
+            engine().beginNextRow();
             rowWriter.write(this, item);
             endRow();
         }
@@ -499,11 +548,10 @@ public final class Worksheet {
             styles[i] = format == null ? 0 : engine.addStyle(Style.builder().numberFormat(format).build());
         }
 
-        engine.closeOpenRow();
-        int firstRow = engine.row() + 1;
+        int firstRow = engine.nextRow();
         if (options.header()) {
             int headerStyle = options.headerStyle() == null ? engine.addStyle(DEFAULT_HEADER_STYLE) : options.headerStyle().index();
-            engine.beginNextRow(Double.NaN, 0);
+            engine.beginNextRow();
             for (int i = 0; i < columns; i++) {
                 engine.writeString(map.header(i), headerStyle);
             }
@@ -511,7 +559,7 @@ public final class Worksheet {
         }
         while (items.hasNext()) {
             T item = items.next();
-            engine().beginNextRow(Double.NaN, 0);
+            engine().beginNextRow();
             if (item != null) {
                 map.writeRow(target, type.cast(item), styles);
             }
