@@ -23,7 +23,7 @@ the HTTP client while your query is still running.
   the files are read back with calamine, openpyxl and LibreOffice.
 - **Safe Rust:** `#![deny(unsafe_code)]`.
 
-> Status: **Milestone 1: creating Excel files.** The .NET version lives in the repository root.
+> Status: **Milestone 1: creating Excel files.** The .NET version lives in [`dotnet/`](../dotnet/README.md).
 
 ## Crates
 
