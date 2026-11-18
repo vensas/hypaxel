@@ -8,6 +8,7 @@ description = "High-performance, constant-memory streaming XLSX (Excel) writer f
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 keywords = ["excel", "xlsx", "spreadsheet", "streaming", "fastapi", "pandas", "polars"]
 classifiers = [
     "Programming Language :: Rust",
