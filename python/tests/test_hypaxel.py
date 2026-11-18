@@ -378,3 +378,96 @@ def test_fastapi_streaming_response():
 
     r = client.get("/async.xlsx")
     assert load(r.content).active["B10001"].value == 9999 * 9999
+
+
+# --------------------------------------------------------------------------------------- layout
+
+
+def test_row_outline_levels():
+    w = Writer()
+    ws = w.add_worksheet("Tree", row_outline_levels=2, outline_summary_above=True)
+    ws.write_row(["North", 300])
+    ws.write_row(["Store A", 120], outline_level=1)
+    ws.write_row(["Till", 60], outline_level=2, hidden=True)
+    ws.begin_row(height=20, outline_level=1, collapsed=True)
+    ws.write_row(["Store B", 180])
+    data = w.finish()
+
+    xml = part(data, "xl/worksheets/sheet1.xml")
+    assert '<outlinePr summaryBelow="0"/>' in xml
+    assert 'outlineLevelRow="2"' in xml
+    assert '<row r="3" hidden="1" outlineLevel="2">' in xml
+    sheet = load(data)["Tree"]
+    assert sheet.row_dimensions[2].outline_level == 1
+    assert sheet.row_dimensions[3].hidden
+    assert rows(sheet)[3] == ("Store B", 180)
+    assert sheet.max_row == 4
+
+    ws = Writer().add_worksheet("S")
+    with pytest.raises(XlsxError, match="row_outline_levels"):
+        ws.write_row([1], outline_level=1)
+
+
+def test_tables():
+    w = Writer()
+    ws = w.add_worksheet("Orders")
+    ws.write_rows([["Product", "Units"], ["Widget", 3], ["Gadget", 5]])
+    ws.add_table(1, 1, ws.row, 2, columns=["Product", "Units"], name="Orders", style="TableStyleLight9")
+    ws.write_rows([["x", 1], ["y", 2]])
+    ws.add_table(4, 1, 5, 2, header_row=False, style=None)
+    data = w.finish()
+
+    tables = load(data)["Orders"].tables
+    assert set(tables) == {"Orders", "Table2"}
+    assert tables["Orders"].ref == "A1:B3"
+    assert tables["Orders"].tableStyleInfo.name == "TableStyleLight9"
+    assert [c.name for c in tables["Orders"].tableColumns] == ["Product", "Units"]
+    assert tables["Table2"].headerRowCount == 0
+
+    ws = Writer().add_worksheet("S")
+    with pytest.raises(XlsxError, match="column names"):
+        ws.add_table(1, 1, 3, 2)
+    with pytest.raises(XlsxError, match="invalid table name"):
+        ws.add_table(1, 1, 3, 1, columns=["a"], name="A1")
+    with pytest.raises(ValueError, match="table style"):
+        ws.add_table(1, 1, 3, 1, columns=["a"], style="Fancy")
+    ws.add_table(1, 1, 3, 1, columns=["a"])
+    with pytest.raises(XlsxError, match="overlap"):
+        ws.add_table(2, 1, 4, 1, columns=["b"])
+
+
+def test_autofit():
+    w = Writer()
+    ws = w.add_worksheet("Fit", autofit=True, column_widths=[30])
+    ws.write_row(["fixed", "A much longer product name", 1234567.5, True])
+    ws.write_row(["x", "short", 1, False])
+    sheet = load(w.finish())["Fit"]
+    assert sheet.column_dimensions["A"].width == 30
+    assert 25 < sheet.column_dimensions["B"].width < 35
+    assert 8 < sheet.column_dimensions["C"].width < 12
+    assert 5 < sheet.column_dimensions["D"].width < 7
+
+    w = Writer()
+    ws = w.add_worksheet("Capped", autofit=True, autofit_max_width=12, autofit_sample_rows=1)
+    ws.write_row(["x" * 200])
+    ws.write_row(["y" * 400])
+    assert load(w.finish())["Capped"].column_dimensions["A"].width == 12
+
+    with pytest.raises(XlsxError, match="sample"):
+        Writer().add_worksheet("S", autofit=True, autofit_sample_rows=0)
+
+
+def test_bulk_writers_fill_a_begun_row():
+    w = Writer()
+    ws = w.add_worksheet("S", row_outline_levels=1)
+    ws.begin_row(outline_level=1)
+    ws.write_rows([["a"], [], ["b"]])
+    ws.begin_row(hidden=True)
+    ws.write_columns([[1, 2]])
+    ws.begin_row(height=30)
+    ws.write_dicts([{"k": "v"}], keys=["k"])
+    sheet = load(w.finish())["S"]
+    assert rows(sheet) == [("a",), (None,), ("b",), (1,), (2,), ("v",)]
+    assert sheet.row_dimensions[1].outline_level == 1
+    assert sheet.row_dimensions[4].hidden
+    assert sheet.row_dimensions[6].height == 30
