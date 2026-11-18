@@ -19,7 +19,7 @@ package is a thin, idiomatic layer over the Rust core.
 | Object mapping | `IEnumerable<T>` / `IAsyncEnumerable<T>` with `[ExcelColumn]` | any `T: Serialize` (serde), sync or async `Stream` | dicts, dataclasses, pydantic, pandas, polars, async iterables |
 | I/O | any `Stream`, async only (Kestrel-safe) | any `io::Write` or tokio `AsyncWrite` | path, binary file, or in-memory chunks |
 | 1M rows × 10 columns | ~1.0 s, 0 B allocated in the write loop | ~0.73 s, ~200 KiB of buffers | ~0.9 s from Python tuples |
-| vs. popular library | ~20–30x faster than ClosedXML | ~11–14x faster than rust_xlsxwriter | ~50x faster than XlsxWriter, ~95x faster than openpyxl |
+| vs. popular library | ~20–25x faster than ClosedXML | ~11–14x faster than rust_xlsxwriter | ~50x faster than XlsxWriter, ~95x faster than openpyxl |
 
 ## Quick look
 

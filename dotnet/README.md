@@ -138,29 +138,66 @@ Supported member types: `string`, all integer types, `float`, `double`, `decimal
 ## Performance
 
 Writing 10 columns (int, 2× string, 2× double, decimal, DateTime, bool, long, unique string) to a
-`MemoryStream`. .NET 9, Xeon 2.1 GHz, 4 vCPUs. 100k rows measured with BenchmarkDotNet (ShortRun);
-1M rows measured with the `--quick` stopwatch runner.
+`MemoryStream`, on each supported .NET version.
 
-| Library | 100k rows | Allocated (100k) | 1M rows | Allocated (1M) | File (1M) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| **Hypaxel**, typed `Write` | **102 ms** | **7.6 KB** | ~1.0 s | **~0 MB** | 50 MB |
-| **Hypaxel**, `AddRowAsync` | 109 ms | 7.6 KB | ~1.1 s | ~0 MB | 50 MB |
-| **Hypaxel**, object mapping | **100 ms** | 10.3 KB | ~1.0 s | ~0 MB | 50 MB |
-| Hypaxel, shared strings | 145 ms | 10 MB | ~1.5 s | 88 MB | 53 MB |
-| SpreadCheetah 1.29 | 107 ms | 10.4 KB | ~1.1 s | ~0 MB | 50 MB |
-| ClosedXML 0.105 | 3,324 ms | 1,098 MB | — | — | — |
+Measured on an Apple M1 Max (10 cores, macOS 26.6) with .NET 8.0.34, 9.0.23, 10.0.15 and 11.0.0,
+against SpreadCheetah 1.29.0 and ClosedXML 0.105.1. 100k rows use BenchmarkDotNet 0.15.8 (ShortRun,
+in-process toolchain); 1M rows use the `--quick` stopwatch runner, which times a single run after
+one warm-up.
+
+**100k rows, mean time**
+
+| Library | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
+| --- | ---: | ---: | ---: | ---: |
+| Hypaxel, typed `Write` | 122 ms | 78 ms | 78 ms | 74 ms |
+| Hypaxel, `AddRowAsync` | 127 ms | 87 ms | 76 ms | 75 ms |
+| Hypaxel, object mapping | 118 ms | 78 ms | 80 ms | 75 ms |
+| Hypaxel, shared strings | 159 ms | 97 ms | 89 ms | 90 ms |
+| SpreadCheetah | 123 ms | 79 ms | 75 ms | 74 ms |
+| ClosedXML | 2,369 ms | 1,910 ms | 1,845 ms | 1,773 ms |
+
+**100k rows, allocated**
+
+| Library | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
+| --- | ---: | ---: | ---: | ---: |
+| Hypaxel, typed `Write` | 208 KB | 12 KB | 12 KB | 14 KB |
+| Hypaxel, `AddRowAsync` | 208 KB | 12 KB | 12 KB | 14 KB |
+| Hypaxel, object mapping | 212 KB | 15 KB | 15 KB | 17 KB |
+| Hypaxel, shared strings | 11.0 MB | 10.1 MB | 10.1 MB | 10.1 MB |
+| SpreadCheetah | 84 KB | 15 KB | 16 KB | 18 KB |
+| ClosedXML | 1,190 MB | 1,098 MB | 1,103 MB | 1,087 MB |
+
+**1M rows, time**
+
+| Library | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
+| --- | ---: | ---: | ---: | ---: |
+| Hypaxel, typed `Write` | 1.21 s | 0.80 s | 0.78 s | 0.73 s |
+| Hypaxel, `AddRowAsync` | 1.23 s | 0.83 s | 0.77 s | 0.76 s |
+| Hypaxel, object mapping | 1.26 s | 0.82 s | 0.81 s | 0.75 s |
+| Hypaxel, shared strings | 1.42 s | 1.12 s | 1.00 s | 0.99 s |
+| SpreadCheetah | 1.41 s | 0.85 s | 0.76 s | 0.74 s |
+
+At 1M rows Hypaxel and SpreadCheetah allocate less than 1 MB on every version; shared strings
+allocate 88 MB (96 MB on .NET 8). The file is about 50 MB (53 MB with shared strings), or about
+39 MB (41 MB) on .NET 8, whose compression produces smaller output. ClosedXML is not run at 1M rows.
+
+Hypaxel and SpreadCheetah are within measurement noise of each other; both are roughly 20 to 25
+times faster than ClosedXML and allocate a small fraction of its memory. .NET 8 is the slowest
+target and allocates more per workbook.
 
 Allocations stay constant as rows grow (except with shared strings, whose table grows with the
 number of distinct values). Memory per concurrent export is therefore bounded by the buffers:
 about 64 KiB of XML plus about 96 KiB of compressed output by default.
 
-Run them yourself:
+Run them yourself (pick the .NET version with `-f`):
 
 ```bash
 cd dotnet/benchmarks/Hypaxel.Benchmarks
-dotnet run -c Release -- --quick 1000000      # quick stopwatch run
-dotnet run -c Release -- --filter '*'         # full BenchmarkDotNet run
+dotnet run -c Release -f net10.0 -- --quick 1000000                         # quick stopwatch run
+dotnet run -c Release -f net10.0 -- --filter '*' --job short --inProcess    # BenchmarkDotNet run
 ```
+
+`--inProcess` is required on .NET 11, which BenchmarkDotNet 0.15.8 does not recognise otherwise.
 
 ### Why it's fast
 
