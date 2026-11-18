@@ -1,6 +1,7 @@
 //! Package-level parts written when the workbook completes.
 
 use crate::engine::{SheetMeta, push_column_name};
+use crate::table::TableMeta;
 use crate::xml;
 
 pub(crate) fn workbook(x: &mut Vec<u8>, sheets: &[SheetMeta], uses_formulas: bool, date_1904: bool) {
@@ -87,7 +88,7 @@ pub(crate) fn workbook_rels(x: &mut Vec<u8>, sheet_count: usize, shared_strings:
     x.extend_from_slice(b"</Relationships>");
 }
 
-pub(crate) fn content_types(x: &mut Vec<u8>, sheet_count: usize, shared_strings: bool) {
+pub(crate) fn content_types(x: &mut Vec<u8>, sheet_count: usize, table_count: u32, shared_strings: bool) {
     x.extend_from_slice(xml::DECLARATION);
     x.extend_from_slice(b"<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">");
     x.extend_from_slice(b"<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>");
@@ -101,10 +102,30 @@ pub(crate) fn content_types(x: &mut Vec<u8>, sheet_count: usize, shared_strings:
     x.extend_from_slice(
         b"<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>",
     );
+    for i in 1..=table_count {
+        x.extend_from_slice(b"<Override PartName=\"/xl/tables/table");
+        xml::push_int(x, i);
+        x.extend_from_slice(b".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml\"/>");
+    }
     if shared_strings {
         x.extend_from_slice(b"<Override PartName=\"/xl/sharedStrings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml\"/>");
     }
     x.extend_from_slice(b"</Types>");
+}
+
+pub(crate) fn sheet_rels(x: &mut Vec<u8>, tables: &[TableMeta]) {
+    x.extend_from_slice(xml::DECLARATION);
+    x.extend_from_slice(b"<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+    for (i, table) in tables.iter().enumerate() {
+        x.extend_from_slice(b"<Relationship Id=\"rId");
+        xml::push_int(x, i + 1);
+        x.extend_from_slice(
+            b"\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/table\" Target=\"../tables/table",
+        );
+        xml::push_int(x, table.id);
+        x.extend_from_slice(b".xml\"/>");
+    }
+    x.extend_from_slice(b"</Relationships>");
 }
 
 pub(crate) fn root_rels(x: &mut Vec<u8>) {

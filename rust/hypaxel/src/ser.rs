@@ -120,7 +120,7 @@ impl RecordContext {
         };
         let styles =
             names.iter().map(|name| options.column_styles.iter().find(|(n, _)| n == name).map_or(StyleId::DEFAULT, |&(_, s)| s)).collect();
-        let first_row = cells.row() + 1;
+        let first_row = cells.next_row();
         if options.header && !names.is_empty() {
             cells.begin_next_row();
             for name in &names {

@@ -10,7 +10,7 @@
 //!   number formatting, integer-only date serials, our own streaming ZIP (with ZIP64).
 //! - **Ergonomic:** rows from tuples (`sheet.add_row(("a", 1, 2.5))?`), any `T: Serialize` as a
 //!   record (`writer.write_sheet_records("Orders", &orders)?`), chrono dates, styles, merged
-//!   cells, frozen panes, auto filters, formulas.
+//!   cells, frozen panes, auto filters, Excel tables, row grouping, auto-fit columns, formulas.
 //!
 //! ```
 //! use hypaxel::{XlsxWriter, SheetOptions, Style, Styled, Formula, formats};
@@ -43,6 +43,7 @@
 mod cell;
 mod engine;
 mod error;
+mod fit;
 mod options;
 mod parts;
 #[cfg(feature = "serde")]
@@ -50,6 +51,7 @@ mod record_io;
 #[cfg(feature = "serde")]
 mod ser;
 mod style;
+mod table;
 mod writer;
 mod xml;
 mod zip;
@@ -57,8 +59,9 @@ mod zip;
 pub use cell::{Blank, Formula, IntoCell, IntoRow, Styled};
 pub use engine::{CellWriter, MAX_COLUMNS, MAX_ROWS, cell_ref, column_name};
 pub use error::{Error, Result};
-pub use options::{Column, Options, SheetOptions, StringStorage};
+pub use options::{AutoFit, Column, Options, RowOptions, SheetOptions, StringStorage};
 pub use style::{Alignment, Border, BorderLine, BorderStyle, Color, Font, HAlign, Style, StyleId, VAlign, formats};
+pub use table::{Table, TableStyle};
 pub use writer::{Sheet, XlsxWriter};
 
 /// Serde integration: record options and `serialize_with` helpers for native dates.
