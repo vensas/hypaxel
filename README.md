@@ -1,15 +1,19 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="Hypaxel: streaming XLSX writers for .NET, Rust and Python" width="100%">
+  <img src="docs/assets/banner.svg" alt="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, Go, Java and PHP" width="100%">
 </p>
 
 <p align="center">
-  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust and Python, built for web services.</b>
+  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, Go, Java and PHP, built for web services.</b>
 </p>
 
 <p align="center">
   <img alt=".NET 8 | 9 | 10 | 11" src="https://img.shields.io/badge/.NET-8_%7C_9_%7C_10_%7C_11-512bd4?style=flat-square">
   <img alt="Rust 1.85+" src="https://img.shields.io/badge/Rust-1.85%2B-dea584?style=flat-square">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square">
+  <img alt="Node.js 22+" src="https://img.shields.io/badge/Node.js-22%2B-5fa04e?style=flat-square">
+  <img alt="Go 1.26+" src="https://img.shields.io/badge/Go-1.26%2B-00add8?style=flat-square">
+  <img alt="Java 17+" src="https://img.shields.io/badge/Java-17%2B-e76f00?style=flat-square">
+  <img alt="PHP 8.2+" src="https://img.shields.io/badge/PHP-8.2%2B-777bb4?style=flat-square">
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache_2.0-22c55e?style=flat-square"></a>
 </p>
 
@@ -17,6 +21,10 @@
   <a href="dotnet/README.md">.NET</a> ·
   <a href="rust/README.md">Rust</a> ·
   <a href="python/README.md">Python</a> ·
+  <a href="node/README.md">Node.js</a> ·
+  <a href="go/README.md">Go</a> ·
+  <a href="java/README.md">Java</a> ·
+  <a href="php/README.md">PHP</a> ·
   <a href="#quick-look">Quick look</a> ·
   <a href="#features">Features</a> ·
   <a href="#roadmap">Roadmap</a>
@@ -34,21 +42,26 @@ query is still running.
           one cell at a time                 flushed as it fills
 ```
 
-The .NET and Rust implementations share one design but are independent and idiomatic. The Python
-package is a thin, idiomatic layer over the Rust core.
+All implementations share one design. .NET, Rust, Go, Java and PHP are independent native engines
+with no runtime dependencies; the Python and Node.js packages are thin, idiomatic layers over the
+Rust core.
 
 ## At a glance
 
-| | .NET | Rust | Python |
-| --- | --- | --- | --- |
-| Directory | [`dotnet/`](dotnet/README.md) | [`rust/`](rust/README.md) | [`python/`](python/README.md) |
-| Packages | `Hypaxel`, `Hypaxel.AspNetCore` | `hypaxel`, `hypaxel-axum` | `hypaxel` (wheels built with maturin) |
-| Targets | .NET 8, 9, 10, 11 | Rust 1.85+ (edition 2024) | CPython 3.10+ |
-| Web integration | ASP.NET Core: `Results.Extensions.Excel(...)`, `this.Excel(...)` | axum: `Xlsx::from_records(...)`, `Xlsx::from_stream(...)` | FastAPI/Starlette `XlsxResponse`, Django, Flask streaming generators |
-| Object mapping | `IEnumerable<T>` / `IAsyncEnumerable<T>` with `[ExcelColumn]` | any `T: Serialize` (serde), sync or async `Stream` | dicts, dataclasses, pydantic, pandas, polars, async iterables |
-| I/O | any `Stream`, async only (Kestrel-safe) | any `io::Write` or tokio `AsyncWrite` | path, binary file, or in-memory chunks |
-| 1M rows × 10 columns | ~1.0 s, 0 B allocated in the write loop | ~0.73 s, ~200 KiB of buffers | ~0.9 s from Python tuples |
-| vs. popular library | ~20–25x faster than ClosedXML | ~11–14x faster than rust_xlsxwriter | ~50x faster than XlsxWriter, ~95x faster than openpyxl |
+| | Package | Runs on | Engine | Web integration | 1M rows × 10 columns | Compared with |
+| --- | --- | --- | --- | --- | ---: | --- |
+| [.NET](dotnet/README.md) | `Hypaxel`, `Hypaxel.AspNetCore` | .NET 8, 9, 10, 11 | native | ASP.NET Core: `Results.Extensions.Excel(...)`, `this.Excel(...)` | ~0.8 s on .NET 9+ | ~20–25x faster than ClosedXML |
+| [Rust](rust/README.md) | `hypaxel`, `hypaxel-axum` | Rust 1.85+ | native | axum: `Xlsx::from_records(...)`, `Xlsx::from_stream(...)` | ~0.73 s | ~11–14x faster than rust_xlsxwriter |
+| [Python](python/README.md) | `hypaxel` | CPython 3.10+ | Rust core (PyO3) | FastAPI/Starlette `XlsxResponse`, Django, Flask | ~0.9 s | ~50x faster than XlsxWriter, ~95x faster than openpyxl |
+| [Node.js](node/README.md) | `hypaxel` | Node.js 22+ | Rust core (napi-rs) | `stream()` for Express, Fastify, Koa; `webStream()` for Next.js, Hono | ~1.2 s | ~6x faster than ExcelJS's streaming writer |
+| [Go](go/README.md) | `github.com/vensas/hypaxel/go` | Go 1.26+ | native | `hypaxelhttp.Handler`, `hypaxelhttp.Serve` | ~0.9 s | ~5–6x faster than excelize's `StreamWriter` |
+| [Java](java/README.md) | `de.vensas:hypaxel` | Java 17+ | native | any `OutputStream`: Servlet, Spring `StreamingResponseBody` | ~1.2 s | ~2.5–3x faster than FastExcel, ~8–9x faster than Apache POI SXSSF |
+| [PHP](php/README.md) | `vensas/hypaxel` | PHP 8.2+ | native | `Xlsx::download()`, Symfony `StreamedResponse`, Laravel `streamDownload()` | ~4.2 s (~2.9 s with JIT) | ~11x faster than OpenSpout, ~40x faster than PhpSpreadsheet |
+
+Timings come from each implementation's own benchmark, run at different times and partly on
+different machines, so compare each row with its "compared with" library, not the rows with each
+other. Each README has the full tables, versions and how to reproduce them. None of the packages
+is published to a registry yet.
 
 ## Quick look
 
@@ -65,6 +78,39 @@ app.MapGet("/orders.xlsx", (AppDb db) =>
 @app.get("/orders.xlsx")
 async def orders():
     return XlsxResponse(hypaxel.astream_records(fetch_orders()), filename="orders.xlsx")
+```
+
+**Node.js / Express**
+
+```ts
+app.get('/orders.xlsx', async (req, res) => {
+  res.setHeader('Content-Type', CONTENT_TYPE)
+  await pipeline(stream(db.orders.cursor()), res)
+})
+```
+
+**Go / net/http**
+
+```go
+http.Handle("/orders.xlsx", hypaxelhttp.Handler("orders", func(r *http.Request, w *hypaxel.Writer) error {
+	return hypaxel.WriteSheetSeq2(w, "Orders", db.Orders(r.Context()))
+}))
+```
+
+**Java / Spring MVC**
+
+```java
+StreamingResponseBody body = out -> {
+    try (XlsxWriter writer = XlsxWriter.create(out); Stream<Order> orders = repository.streamAll()) {
+        writer.writeWorksheet("Orders", Order.class, orders);
+    }
+};
+```
+
+**PHP**
+
+```php
+Xlsx::download('orders.xlsx', $pdo->query('SELECT id, customer, amount FROM orders', PDO::FETCH_ASSOC));
 ```
 
 **Rust / axum**
@@ -93,7 +139,11 @@ Shared by all three implementations (milestone 1: creating Excel files).
 dotnet/    .NET solution: src/, tests/, samples/, benchmarks/
 rust/      Cargo workspace: hypaxel/, hypaxel-axum/
 python/    PyO3 + maturin package over rust/hypaxel: src/ (bindings), hypaxel/ (Python API), tests/, benchmarks/
-.github/   CI: dotnet.yml, rust.yml, python.yml, each triggered only by changes to its own code
+node/      napi-rs package over rust/hypaxel: src/ (bindings), ts/ (TypeScript API), test/, benchmarks/
+go/        Go module: the library, hypaxelhttp/, and tests/ (nested module with read-back tests and benchmarks)
+java/      Maven project: src/, benchmarks/ (separate project)
+php/       Composer package: src/, tests/, benchmarks/, examples/
+.github/   CI: one workflow per implementation, each triggered only by changes to its own code
 ```
 
 ## Roadmap
@@ -101,7 +151,7 @@ python/    PyO3 + maturin package over rust/hypaxel: src/ (bindings), hypaxel/ (
 1. ✅ **Create Excel files** (this milestone)
 2. Hyperlinks, data validation, conditional formatting, images, tables, document properties
 3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
-   Python: an Arrow-native DataFrame path. More languages: Node.js/TypeScript (napi-rs), then PHP and Go
+   Python: an Arrow-native DataFrame path
 4. Streaming readers
 5. Read-modify-write for templates
 
