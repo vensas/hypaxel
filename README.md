@@ -19,6 +19,10 @@ you write it and compressed straight into the output, so memory stays flat wheth
 
 > Status: **Milestone 1 — creating Excel files.** Reading/editing is planned for later milestones (see roadmap).
 
+> **Rust:** a native Rust implementation with the same design lives in [`rust/`](rust/README.md):
+> the `hypaxel` crate (sync `io::Write` + tokio `AsyncWrite`, serde records, chrono dates) and
+> `hypaxel-axum` for streaming downloads from axum.
+
 ## Packages
 
 | Package | Purpose |
