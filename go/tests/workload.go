@@ -68,8 +68,17 @@ func Generate(count int) iter.Seq[Order] {
 
 // HypaxelTyped writes the workload cell by cell with the typed methods.
 func HypaxelTyped(dst io.Writer, rows iter.Seq[Order], opts ...hypaxel.Option) error {
+	return hypaxelTyped(dst, rows, hypaxel.SheetOptions{}, opts...)
+}
+
+// HypaxelAutoFit is HypaxelTyped with column auto-fit over the default 1,000-row sample.
+func HypaxelAutoFit(dst io.Writer, rows iter.Seq[Order]) error {
+	return hypaxelTyped(dst, rows, hypaxel.SheetOptions{AutoFit: &hypaxel.AutoFit{}})
+}
+
+func hypaxelTyped(dst io.Writer, rows iter.Seq[Order], sheet hypaxel.SheetOptions, opts ...hypaxel.Option) error {
 	w := hypaxel.NewWriter(dst, opts...)
-	s, err := w.AddSheet("Data")
+	s, err := w.AddSheetOptions("Data", sheet)
 	if err != nil {
 		return err
 	}

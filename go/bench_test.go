@@ -2,6 +2,7 @@ package hypaxel
 
 import (
 	"io"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -27,16 +28,26 @@ var benchValue = benchRow{
 
 // BenchmarkTypedRow writes one 10-column row per iteration with the typed cell methods.
 func BenchmarkTypedRow(b *testing.B) {
+	benchTypedRow(b, SheetOptions{}, MaxRows-1)
+}
+
+// BenchmarkTypedRowAutoFit is BenchmarkTypedRow with every row measured for auto-fit: a new
+// sheet starts after each 1,000-row sample.
+func BenchmarkTypedRowAutoFit(b *testing.B) {
+	benchTypedRow(b, SheetOptions{AutoFit: &AutoFit{}}, 1000)
+}
+
+func benchTypedRow(b *testing.B, opts SheetOptions, rowsPerSheet int) {
 	w := NewWriter(io.Discard)
-	s, err := w.AddSheet("Data")
+	s, err := w.AddSheetOptions("Data", opts)
 	if err != nil {
 		b.Fatal(err)
 	}
 	r := &benchValue
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
-		if i%MaxRows == MaxRows-1 {
-			if s, err = w.AddSheet(ColumnName(len(w.sheets) + 1)); err != nil {
+		if i%rowsPerSheet == rowsPerSheet-1 {
+			if s, err = w.AddSheetOptions(ColumnName(len(w.sheets)%MaxColumns+1)+strconv.Itoa(len(w.sheets)), opts); err != nil {
 				b.Fatal(err)
 			}
 		}

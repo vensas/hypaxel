@@ -28,6 +28,13 @@ type RowOptions struct {
 	Height float64
 	// Style applies to the cells of the row that are not written.
 	Style StyleID
+	// OutlineLevel is the row's grouping level, 0 to 7; it cannot exceed the sheet's
+	// [SheetOptions.RowOutlineLevels].
+	OutlineLevel int
+	// Hidden hides the row, for example inside a collapsed group.
+	Hidden bool
+	// Collapsed marks the summary row of a collapsed group, whose rows should be hidden.
+	Collapsed bool
 }
 
 func styleOf(style []StyleID) StyleID {
@@ -60,8 +67,13 @@ func (s *Sheet) Column() int {
 	return int(s.w.column)
 }
 
-// BeginRow starts a row explicitly, to give it a height, a style or a row number further
-// down. Cell writes start the next row implicitly, so it is not needed otherwise.
+// BeginRow starts a row explicitly, to give it a height, a style, an outline level, a hidden
+// state or a row number further down. Cell writes start the next row implicitly, so it is not
+// needed otherwise. Fill the row with cell writes, or with one whole-row write such as
+// [Sheet.WriteRow] or [Sheet.WriteStruct], which uses the begun row while it has no cells:
+//
+//	sheet.BeginRow(hypaxel.RowOptions{OutlineLevel: 1})
+//	sheet.WriteRow("Store A", 120)
 func (s *Sheet) BeginRow(opts RowOptions) error {
 	if !s.usable() {
 		return s.w.err
@@ -80,15 +92,21 @@ func (s *Sheet) BeginRow(opts RowOptions) error {
 		return fmt.Errorf("%w: row style %d", ErrInvalidStyle, opts.Style)
 	case !(opts.Height >= 0 && opts.Height <= 409):
 		return fmt.Errorf("%w: row height must be within 0..409 points", ErrInvalidArgument)
+	case opts.OutlineLevel < 0 || opts.OutlineLevel > 7:
+		return fmt.Errorf("%w: row outline level must be within 0..7", ErrInvalidArgument)
+	case opts.OutlineLevel > int(w.outlineLevels):
+		return fmt.Errorf("%w: row outline level exceeds the sheet's declared depth; declare the deepest level (SheetOptions.RowOutlineLevels) when adding the worksheet", ErrInvalidArgument)
 	}
 	if w.rowOpen {
 		w.closeRow()
 	}
-	w.openRow(uint32(row), opts.Height, opts.Style)
+	w.openRow(uint32(row), &opts)
+	w.rowExplicit = true
 	return w.err
 }
 
-func (w *Writer) openRow(row uint32, height float64, style StyleID) {
+// openRow starts row; opts is nil for a row started implicitly.
+func (w *Writer) openRow(row uint32, opts *RowOptions) {
 	w.row = row
 	w.column = 0
 	w.lastColumn = 0
@@ -98,28 +116,51 @@ func (w *Writer) openRow(row uint32, height float64, style StyleID) {
 	x := append(w.xml, `<row r="`...)
 	x = append(x, w.rowRef[:w.rowRefLen]...)
 	x = append(x, '"')
-	if height > 0 {
-		x = append(x, ` ht="`...)
-		x = appendFloat(x, height, 64)
-		x = append(x, `" customHeight="1"`...)
-	}
-	if style != 0 {
-		x = append(x, ` s="`...)
-		x = appendUint(x, uint64(style))
-		x = append(x, `" customFormat="1"`...)
+	if opts != nil {
+		x = appendRowAttributes(x, opts)
 	}
 	w.xml = append(x, '>')
 }
 
+func appendRowAttributes(x []byte, o *RowOptions) []byte {
+	if o.Height > 0 {
+		x = append(x, ` ht="`...)
+		x = appendFloat(x, o.Height, 64)
+		x = append(x, `" customHeight="1"`...)
+	}
+	if o.Style != 0 {
+		x = append(x, ` s="`...)
+		x = appendUint(x, uint64(o.Style))
+		x = append(x, `" customFormat="1"`...)
+	}
+	if o.Hidden {
+		x = append(x, ` hidden="1"`...)
+	}
+	if o.OutlineLevel > 0 {
+		x = append(x, ` outlineLevel="`...)
+		x = appendUint(x, uint64(o.OutlineLevel))
+		x = append(x, '"')
+	}
+	if o.Collapsed {
+		x = append(x, ` collapsed="1"`...)
+	}
+	return x
+}
+
+// beginNextRow starts the row a whole-row write goes to: the next one, or the open row when it
+// was begun explicitly and has no cells yet.
 func (w *Writer) beginNextRow() bool {
 	if w.rowOpen {
+		if w.rowExplicit && w.column == 0 {
+			return true
+		}
 		w.closeRow()
 	}
 	if w.row >= MaxRows {
 		w.fail(fmt.Errorf("%w: row %d", ErrRowOutOfRange, uint64(w.row)+1))
 		return false
 	}
-	w.openRow(w.row+1, 0, DefaultStyle)
+	w.openRow(w.row+1, nil)
 	return true
 }
 
@@ -134,6 +175,14 @@ func (w *Writer) nextCell() (row, column uint32) {
 func (w *Writer) closeRow() {
 	w.xml = append(w.xml, "</row>"...)
 	w.rowOpen = false
+	w.rowExplicit = false
+	if f := w.fit; f != nil {
+		f.rows++
+		if f.sampleComplete(len(w.xml)) {
+			w.endFit()
+		}
+		return
+	}
 	if len(w.xml) >= xmlBufferSize {
 		w.compress()
 	}
@@ -212,6 +261,9 @@ func (s *Sheet) MergeCells(firstRow, firstColumn, lastRow, lastColumn int) error
 	if firstRow == lastRow && firstColumn == lastColumn {
 		return fmt.Errorf("%w: a merged range must span more than one cell", ErrInvalidArgument)
 	}
+	if s.w.overlapsTable(r) {
+		return fmt.Errorf("%w: merged cells cannot overlap a table", ErrOverlappingRange)
+	}
 	s.w.merges = append(s.w.merges, r)
 	return nil
 }
@@ -225,6 +277,9 @@ func (s *Sheet) AutoFilter(firstRow, firstColumn, lastRow, lastColumn int) error
 	r, err := newRange(firstRow, firstColumn, lastRow, lastColumn)
 	if err != nil {
 		return err
+	}
+	if s.w.overlapsTable(r) {
+		return fmt.Errorf("%w: a worksheet auto filter cannot overlap a table (tables have their own filter)", ErrOverlappingRange)
 	}
 	s.w.sheets[len(s.w.sheets)-1].autoFilter = &r
 	return nil
@@ -274,8 +329,12 @@ func (s *Sheet) beginCell(style StyleID) bool {
 // WriteInt writes an integer cell. Excel stores numbers as float64, so precision is lost
 // beyond ±2^53.
 func (s *Sheet) WriteInt(v int64, style ...StyleID) {
-	if s.beginCell(styleOf(style)) {
+	st := styleOf(style)
+	if s.beginCell(st) {
 		w := s.w
+		if w.fit != nil {
+			w.fit.number(&w.styles, w.column, st, float64(v))
+		}
 		x := append(w.xml, "><v>"...)
 		x = strconv.AppendInt(x, v, 10)
 		w.xml = append(x, "</v></c>"...)
@@ -284,8 +343,12 @@ func (s *Sheet) WriteInt(v int64, style ...StyleID) {
 
 // WriteUint writes an unsigned integer cell.
 func (s *Sheet) WriteUint(v uint64, style ...StyleID) {
-	if s.beginCell(styleOf(style)) {
+	st := styleOf(style)
+	if s.beginCell(st) {
 		w := s.w
+		if w.fit != nil {
+			w.fit.number(&w.styles, w.column, st, float64(v))
+		}
 		x := append(w.xml, "><v>"...)
 		x = strconv.AppendUint(x, v, 10)
 		w.xml = append(x, "</v></c>"...)
@@ -302,6 +365,9 @@ func (s *Sheet) writeFloat(v float64, bitSize int, style StyleID) {
 		return
 	}
 	w := s.w
+	if w.fit != nil {
+		w.fit.number(&w.styles, w.column, style, v)
+	}
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		w.xml = append(w.xml, ` t="e"><v>#NUM!</v></c>`...)
 		return
@@ -313,7 +379,11 @@ func (s *Sheet) writeFloat(v float64, bitSize int, style StyleID) {
 
 // WriteBool writes a boolean cell.
 func (s *Sheet) WriteBool(v bool, style ...StyleID) {
-	if s.beginCell(styleOf(style)) {
+	st := styleOf(style)
+	if s.beginCell(st) {
+		if w := s.w; w.fit != nil {
+			w.fit.boolean(&w.styles, w.column, st, v)
+		}
 		if v {
 			s.w.xml = append(s.w.xml, ` t="b"><v>1</v></c>`...)
 		} else {
@@ -341,6 +411,9 @@ func (s *Sheet) writeString(v string, style StyleID) {
 	if !s.beginCell(style) {
 		return
 	}
+	if w.fit != nil {
+		w.fit.text(&w.styles, w.column, style, v)
+	}
 	if w.sst != nil {
 		index := w.sst.indexOf(v)
 		x := append(w.xml, ` t="s"><v>`...)
@@ -351,7 +424,7 @@ func (s *Sheet) writeString(v string, style StyleID) {
 	x := append(w.xml, ` t="inlineStr"><is>`...)
 	x = appendTextElement(x, v)
 	w.xml = append(x, "</is></c>"...)
-	if len(v) > 4096 && len(w.xml) >= xmlBufferSize {
+	if len(v) > 4096 && len(w.xml) >= xmlBufferSize && w.fit == nil {
 		w.compress()
 	}
 }
@@ -445,7 +518,11 @@ func (s *Sheet) writeTemporal(t time.Time, kind valueKind, style StyleID) {
 		s.writeString(string(t.AppendFormat(w.scratch[:0], layout)), style)
 		return
 	}
-	if s.beginCell(StyleID(w.styles.valueVariant(uint32(style), kind))) {
+	style = StyleID(w.styles.valueVariant(uint32(style), kind))
+	if s.beginCell(style) {
+		if w.fit != nil {
+			w.fit.number(&w.styles, w.column, style, float64(day))
+		}
 		x := append(w.xml, "><v>"...)
 		x = appendSerial(x, day, nanos)
 		w.xml = append(x, "</v></c>"...)

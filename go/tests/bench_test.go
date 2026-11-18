@@ -25,6 +25,7 @@ var cases = []struct {
 	{"HypaxelTyped", 0, func(dst io.Writer, rows iter.Seq[Order]) error { return HypaxelTyped(dst, rows) }},
 	{"HypaxelWriteRow", 0, HypaxelRow},
 	{"HypaxelStructs", 0, HypaxelStructs},
+	{"HypaxelAutoFit", 0, HypaxelAutoFit},
 	{"HypaxelSharedStrings", 0, func(dst io.Writer, rows iter.Seq[Order]) error {
 		return HypaxelTyped(dst, rows, hypaxel.WithSharedStrings(true))
 	}},

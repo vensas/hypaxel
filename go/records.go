@@ -357,21 +357,21 @@ func (s *Sheet) writeStructValue(plan *structPlan, v reflect.Value) error {
 	return s.endWrittenRow()
 }
 
-// table writes a sheet from a sequence of rows of one type: structs get a header row, a
+// rowSink writes a sheet from a sequence of rows of one type: structs get a header row, a
 // frozen pane and an auto filter, slices and arrays are written as plain rows.
-type table struct {
+type rowSink struct {
 	sheet *Sheet
 	plan  *structPlan
 }
 
-func newTable(w *Writer, name string, rowType reflect.Type) (*table, error) {
+func newRowSink(w *Writer, name string, rowType reflect.Type) (*rowSink, error) {
 	t := derefType(rowType)
 	if t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Interface {
 		sheet, err := w.AddSheet(name)
 		if err != nil {
 			return nil, err
 		}
-		return &table{sheet: sheet}, nil
+		return &rowSink{sheet: sheet}, nil
 	}
 	if w.closed {
 		return nil, ErrClosed
@@ -388,10 +388,10 @@ func newTable(w *Writer, name string, rowType reflect.Type) (*table, error) {
 	if err := sheet.writeHeader(plan, header); err != nil {
 		return nil, err
 	}
-	return &table{sheet: sheet, plan: plan}, nil
+	return &rowSink{sheet: sheet, plan: plan}, nil
 }
 
-func (t *table) write(v reflect.Value) error {
+func (t *rowSink) write(v reflect.Value) error {
 	s := t.sheet
 	if t.plan != nil {
 		return s.writeStructValue(t.plan, v)
@@ -418,7 +418,7 @@ func (t *table) write(v reflect.Value) error {
 	return s.endWrittenRow()
 }
 
-func (t *table) finish() error {
+func (t *rowSink) finish() error {
 	s := t.sheet
 	if t.plan != nil && s.usable() {
 		return s.AutoFilter(1, 1, max(s.Row(), 1), len(t.plan.fields))
@@ -433,7 +433,7 @@ func (t *table) finish() error {
 // auto filter. When T is a slice or array, such as []any, its elements are written as plain
 // rows without a header.
 func WriteSheet[T any](w *Writer, name string, rows []T) error {
-	t, err := newTable(w, name, reflect.TypeFor[T]())
+	t, err := newRowSink(w, name, reflect.TypeFor[T]())
 	if err != nil {
 		return err
 	}
@@ -448,7 +448,7 @@ func WriteSheet[T any](w *Writer, name string, rows []T) error {
 // WriteSheetSeq is like [WriteSheet] for a sequence, which is consumed lazily: memory stays
 // flat however many rows it yields.
 func WriteSheetSeq[T any](w *Writer, name string, rows iter.Seq[T]) error {
-	t, err := newTable(w, name, reflect.TypeFor[T]())
+	t, err := newRowSink(w, name, reflect.TypeFor[T]())
 	if err != nil {
 		return err
 	}
@@ -467,7 +467,7 @@ func WriteSheetSeq[T any](w *Writer, name string, rows iter.Seq[T]) error {
 // WriteSheetSeq2 is like [WriteSheetSeq] for a sequence that can fail, such as a database
 // cursor. It stops at the first non-nil error and returns it.
 func WriteSheetSeq2[T any](w *Writer, name string, rows iter.Seq2[T, error]) error {
-	t, err := newTable(w, name, reflect.TypeFor[T]())
+	t, err := newRowSink(w, name, reflect.TypeFor[T]())
 	if err != nil {
 		return err
 	}
@@ -488,7 +488,7 @@ func WriteSheetSeq2[T any](w *Writer, name string, rows iter.Seq2[T, error]) err
 // WriteSheetChan is like [WriteSheet] for rows received from a channel. It returns when the
 // channel is closed, or with the context's error when ctx is done first.
 func WriteSheetChan[T any](ctx context.Context, w *Writer, name string, rows <-chan T) error {
-	t, err := newTable(w, name, reflect.TypeFor[T]())
+	t, err := newRowSink(w, name, reflect.TypeFor[T]())
 	if err != nil {
 		return err
 	}
