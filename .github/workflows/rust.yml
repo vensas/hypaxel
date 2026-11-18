@@ -1,8 +1,10 @@
 name: Rust
 
+# Path filters on push compare only the commits in that push, so a push runs just the
+# workflows whose files it touched. Pull request runs compare the whole PR, so they are
+# limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    branches: [main]
     paths: ["rust/**", ".github/workflows/rust.yml"]
   pull_request:
     paths: ["rust/**", ".github/workflows/rust.yml"]
@@ -17,6 +19,7 @@ env:
 
 jobs:
   test:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +36,7 @@ jobs:
       - run: cargo build -p hypaxel --no-default-features --features tokio
 
   msrv:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

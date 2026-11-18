@@ -1,8 +1,10 @@
 name: Python
 
+# Path filters on push compare only the commits in that push, so a push runs just the
+# workflows whose files it touched. Pull request runs compare the whole PR, so they are
+# limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    branches: [main]
     paths: ["python/**", "rust/hypaxel/**", ".github/workflows/python.yml"]
   pull_request:
     paths: ["python/**", "rust/hypaxel/**", ".github/workflows/python.yml"]
@@ -13,6 +15,7 @@ defaults:
 
 jobs:
   test:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
