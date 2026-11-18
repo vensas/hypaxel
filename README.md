@@ -14,7 +14,7 @@ package is a thin, idiomatic layer over the Rust core.
 | --- | --- | --- | --- |
 | Directory | [`dotnet/`](dotnet/README.md) | [`rust/`](rust/README.md) | [`python/`](python/README.md) |
 | Packages | `Hypaxel`, `Hypaxel.AspNetCore` | `hypaxel`, `hypaxel-axum` | `hypaxel` (wheels built with maturin) |
-| Targets | .NET 8, .NET 9 | Rust 1.85+ (edition 2024) | CPython 3.9+ |
+| Targets | .NET 8, .NET 9 | Rust 1.85+ (edition 2024) | CPython 3.10+ |
 | Web integration | ASP.NET Core: `Results.Extensions.Excel(...)`, `this.Excel(...)` | axum: `Xlsx::from_records(...)`, `Xlsx::from_stream(...)` | FastAPI/Starlette `XlsxResponse`, Django, Flask streaming generators |
 | Object mapping | `IEnumerable<T>` / `IAsyncEnumerable<T>` with `[ExcelColumn]` | any `T: Serialize` (serde), sync or async `Stream` | dicts, dataclasses, pydantic, pandas, polars, async iterables |
 | I/O | any `Stream`, async only (Kestrel-safe) | any `io::Write` or tokio `AsyncWrite` | path, binary file, or in-memory chunks |
