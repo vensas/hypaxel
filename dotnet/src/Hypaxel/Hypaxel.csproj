@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>$(HypaxelTargetFrameworks)</TargetFrameworks>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsTrimmable>false</IsTrimmable>
+    <Description>High-performance, forward-only, low-allocation XLSX (Excel) writer for .NET. Streams directly to any Stream, including ASP.NET Core response bodies.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="Hypaxel.Tests" />
+  </ItemGroup>
+
+</Project>

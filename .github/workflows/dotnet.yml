@@ -1,0 +1,37 @@
+name: .NET
+
+# Path filters on push compare only the commits in that push, so a push runs just the
+# workflows whose files it touched. Pull request runs compare the whole PR, so they are
+# limited to forks, whose pushes do not trigger workflows here.
+on:
+  push:
+    paths: ["dotnet/**", ".github/workflows/dotnet.yml"]
+  pull_request:
+    paths: ["dotnet/**", ".github/workflows/dotnet.yml"]
+
+defaults:
+  run:
+    working-directory: dotnet
+
+jobs:
+  build:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+            11.0.x
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+      - run: dotnet test --no-build -c Release --logger "console;verbosity=normal"
+      - run: dotnet pack src/Hypaxel/Hypaxel.csproj --no-build -c Release -o artifacts
+      - run: dotnet pack src/Hypaxel.AspNetCore/Hypaxel.AspNetCore.csproj --no-build -c Release -o artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: dotnet/artifacts/*.nupkg

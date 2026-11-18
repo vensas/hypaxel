@@ -1,0 +1,55 @@
+[package]
+name = "hypaxel"
+description = "High-performance, forward-only, constant-memory XLSX (Excel) writer that streams to any io::Write or tokio AsyncWrite."
+readme = "../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[features]
+default = ["chrono", "serde"]
+## Write chrono dates, times, date-times and durations as native Excel dates.
+chrono = ["dep:chrono"]
+## Write any `T: Serialize` as rows (header from field names).
+serde = ["dep:serde"]
+## Async writing to any `tokio::io::AsyncWrite`, plus `Stream` record sources.
+tokio = ["dep:tokio", "dep:futures-util"]
+
+[dependencies]
+crc32fast = "1.5.5"
+flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
+hashbrown = "0.17.1"
+itoa = "1.0.19"
+chrono = { version = "0.4.45", default-features = false, features = ["std"], optional = true }
+serde = { version = "1.0.229", optional = true }
+tokio = { version = "1.54.1", default-features = false, features = ["io-util"], optional = true }
+futures-util = { version = "0.3.34", default-features = false, optional = true }
+zmij = "1.0.23"
+
+[dev-dependencies]
+calamine = "0.38.0"
+chrono = { version = "0.4.45", features = ["serde"] }
+criterion = "0.8.2"
+futures-util = "0.3.34"
+rust_xlsxwriter = { version = "0.102.0", features = ["constant_memory", "chrono"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["full"] }
+zip = "9.7.0"
+
+[[bench]]
+name = "write"
+harness = false
+required-features = ["chrono", "serde"]
+
+[[example]]
+name = "profile_rows"
+required-features = ["chrono"]
+
+[package.metadata.docs.rs]
+all-features = true

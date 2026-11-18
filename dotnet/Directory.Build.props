@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <HypaxelTargetFrameworks Condition="'$(HypaxelTargetFrameworks)' == ''">net8.0;net9.0;net10.0;net11.0</HypaxelTargetFrameworks>
+    <LangVersion>13.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+
+    <Authors>Hypaxel contributors</Authors>
+    <Copyright>Copyright 2026 vensas GmbH</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/esskar/hypaxel</RepositoryUrl>
+    <PackageTags>excel;xlsx;spreadsheet;openxml;aspnetcore;streaming;performance</PackageTags>
+    <VersionPrefix>0.1.0</VersionPrefix>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)../LICENSE" Pack="true" PackagePath="" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../NOTICE" Pack="true" PackagePath="" Visible="false" />
+  </ItemGroup>
+</Project>

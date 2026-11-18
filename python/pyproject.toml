@@ -1,0 +1,39 @@
+[build-system]
+requires = ["maturin>=1.9.3,<2"]
+build-backend = "maturin"
+
+[project]
+name = "hypaxel"
+description = "High-performance, constant-memory streaming XLSX (Excel) writer for Python, powered by Rust."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+keywords = ["excel", "xlsx", "spreadsheet", "streaming", "fastapi", "pandas", "polars"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+    "Typing :: Typed",
+]
+dynamic = ["version"]
+dependencies = []
+
+[project.optional-dependencies]
+pandas = ["pandas>=1.5"]
+polars = ["polars>=0.20"]
+starlette = ["starlette>=0.27"]
+
+[project.urls]
+Repository = "https://github.com/esskar/hypaxel"
+
+[tool.maturin]
+module-name = "hypaxel._hypaxel"
+python-source = "."
+python-packages = ["hypaxel"]
+include = [{ path = "hypaxel/py.typed", format = "wheel" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
