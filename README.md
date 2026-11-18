@@ -1,14 +1,43 @@
-# Hypaxel
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="Hypaxel: streaming XLSX writers for .NET, Rust and Python" width="100%">
+</p>
 
-**High-performance, constant-memory Excel (XLSX) writers for .NET, Rust and Python, built for web services.**
+<p align="center">
+  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust and Python, built for web services.</b>
+</p>
+
+<p align="center">
+  <img alt=".NET 8 | 9 | 10 | 11" src="https://img.shields.io/badge/.NET-8_%7C_9_%7C_10_%7C_11-512bd4?style=flat-square">
+  <img alt="Rust 1.85+" src="https://img.shields.io/badge/Rust-1.85%2B-dea584?style=flat-square">
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square">
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache_2.0-22c55e?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="dotnet/README.md">.NET</a> ·
+  <a href="rust/README.md">Rust</a> ·
+  <a href="python/README.md">Python</a> ·
+  <a href="#quick-look">Quick look</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#roadmap">Roadmap</a>
+</p>
+
+---
 
 Hypaxel writes `.xlsx` files as a forward-only stream. Each cell is serialized to UTF-8 XML the moment
 it is written and compressed straight into a small buffer that flushes to the destination. Memory stays
 flat whether you export 10 rows or 10 million, and the first bytes reach the HTTP client while your
 query is still running.
 
+```text
+ rows ──▶ ▓▓▓ UTF-8 XML ──▶ ▒▒▒ deflate ──▶ ░░░ small buffer ──▶ HTTP response / file
+          one cell at a time                 flushed as it fills
+```
+
 The .NET and Rust implementations share one design but are independent and idiomatic. The Python
 package is a thin, idiomatic layer over the Rust core.
+
+## At a glance
 
 | | .NET | Rust | Python |
 | --- | --- | --- | --- |
@@ -46,7 +75,9 @@ async fn orders(State(pool): State<PgPool>) -> Xlsx {
 }
 ```
 
-## Shared feature set (milestone 1: creating Excel files)
+## Features
+
+Shared by all three implementations (milestone 1: creating Excel files).
 
 - **Values:** strings, numbers, booleans, dates/times/durations (1900 and 1904 systems), formulas, styled blanks
 - **Styles:** fonts, fills, borders, alignment and number formats. Styles are de-duplicated
@@ -67,7 +98,7 @@ python/    PyO3 + maturin package over rust/hypaxel: src/ (bindings), hypaxel/ (
 
 ## Roadmap
 
-1. **Create Excel files** (this milestone)
+1. ✅ **Create Excel files** (this milestone)
 2. Hyperlinks, data validation, conditional formatting, images, tables, document properties
 3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
    Python: an Arrow-native DataFrame path. More languages: Node.js/TypeScript (napi-rs), then PHP and Go

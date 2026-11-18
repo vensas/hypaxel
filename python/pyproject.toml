@@ -26,7 +26,7 @@ polars = ["polars>=0.20"]
 starlette = ["starlette>=0.27"]
 
 [project.urls]
-Repository = "https://github.com/esskar/hypaxel"
+Repository = "https://github.com/vensas/hypaxel"
 
 [tool.maturin]
 module-name = "hypaxel._hypaxel"
