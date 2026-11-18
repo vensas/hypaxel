@@ -217,4 +217,4 @@ dotnet run --project samples/Hypaxel.Samples.WebApi   # GET /orders.xlsx, /repor
 
 ## License
 
-Not yet chosen.
+Licensed under the [Apache License, Version 2.0](../LICENSE). Copyright 2026 vensas GmbH.

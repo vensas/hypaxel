@@ -76,4 +76,4 @@ python/    PyO3 + maturin package over rust/hypaxel: src/ (bindings), hypaxel/ (
 
 ## License
 
-Not yet chosen.
+Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 vensas GmbH.
