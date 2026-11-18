@@ -78,6 +78,12 @@ impl<W> XlsxWriter<W> {
     pub fn get_ref(&self) -> &W {
         &self.out
     }
+
+    /// Gives mutable access to the destination, e.g. to take bytes already flushed into a `Vec<u8>`.
+    /// Writing to it directly would corrupt the workbook.
+    pub fn get_mut(&mut self) -> &mut W {
+        &mut self.out
+    }
 }
 
 impl<W: Write> XlsxWriter<W> {
