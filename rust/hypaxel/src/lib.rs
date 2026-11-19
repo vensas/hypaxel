@@ -1,6 +1,6 @@
 //! # Hypaxel
 //!
-//! High-performance, forward-only XLSX (Excel) writer.
+//! High-performance, forward-only XLSX (Excel) writer and streaming reader.
 //!
 //! - **Constant memory:** cells are serialized and compressed immediately; a million-row export
 //!   uses the same ~200 KiB of buffers as a ten-row one.
@@ -26,6 +26,24 @@
 //! sheet.write("Total").write_styled(Formula("SUM(B2:B3)"), money).end_row()?;
 //!
 //! let xlsx: Vec<u8> = writer.finish()?;
+//! # Ok::<(), hypaxel::Error>(())
+//! ```
+//!
+//! ## Reading
+//!
+//! [`XlsxReader`] streams rows from any `Read + Seek` source; memory is bounded by the shared
+//! string table plus one row.
+//!
+//! ```no_run
+//! use hypaxel::{Value, XlsxReader};
+//!
+//! let mut reader = XlsxReader::open("orders.xlsx")?;
+//! let mut rows = reader.worksheet("Orders")?;
+//! while let Some(row) = rows.next_row()? {
+//!     if let Value::Number(amount) = row.get(3) {
+//!         println!("row {}: {amount}", row.number());
+//!     }
+//! }
 //! # Ok::<(), hypaxel::Error>(())
 //! ```
 //!

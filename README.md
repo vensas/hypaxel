@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, Go, Java and PHP, built for web services.</b>
+  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, Go, Java and PHP, built for web services. Streaming readers for Rust and Python.</b>
 </p>
 
 <p align="center">
@@ -62,6 +62,20 @@ Timings come from each implementation's own benchmark, run at different times an
 different machines, so compare each row with its "compared with" library, not the rows with each
 other. Each README has the full tables, versions and how to reproduce them. None of the packages
 is published to a registry yet.
+
+**Reading** (Rust and Python so far) streams rows the same way, with memory bounded by the
+workbook's shared strings plus one row:
+
+| | Read 1M rows × 10 columns | Compared with |
+| --- | ---: | --- |
+| [Rust](rust/README.md#reading) `XlsxReader` | ~1.2–1.4 s, 7–57 MB peak | ~1.6–1.7x faster than calamine's cell reader, 15–115x less memory than calamine's `Range` |
+| [Python](python/README.md#reading) `iter_rows`, `read_dataframe` | ~1.8 s, 69 MB peak | ~20x faster than openpyxl (100k rows), ~2.6x faster than python-calamine with ~12x less memory |
+
+```python
+for row in hypaxel.iter_rows("orders.xlsx", "Orders"):
+    ...
+df = hypaxel.read_dataframe("orders.xlsx")          # pandas or polars
+```
 
 ## Quick look
 
@@ -123,7 +137,7 @@ async fn orders(State(pool): State<PgPool>) -> Xlsx {
 
 ## Features
 
-Shared by all three implementations (milestone 1: creating Excel files).
+Shared by all seven implementations (milestone 1: creating Excel files).
 
 - **Values:** strings, numbers, booleans, dates/times/durations (1900 and 1904 systems), formulas, styled blanks
 - **Styles:** fonts, fills, borders, alignment and number formats. Styles are de-duplicated
@@ -132,6 +146,11 @@ Shared by all three implementations (milestone 1: creating Excel files).
 - **Compact output:** cell references are only written after gaps
 - **Valid output:** checked against the Office Open XML schema validator and read back by independent readers
   (Open XML SDK, calamine, openpyxl, LibreOffice)
+
+Reading (Rust and Python): streamed rows of strings, numbers, booleans, errors and dates, times and
+durations recognised from number formats, in both date systems; sheet list with visibility; files
+from Excel, LibreOffice and other producers, including Strict Open XML; clear errors for legacy
+`.xls`, encrypted and damaged files; limits for untrusted input.
 
 ## Repository layout
 
@@ -152,7 +171,7 @@ php/       Composer package: src/, tests/, benchmarks/, examples/
 2. Hyperlinks, data validation, conditional formatting, images, document properties
 3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
    Python: an Arrow-native DataFrame path
-4. Streaming readers
+4. ✅ Streaming readers for Rust and Python; other languages when there is demand
 5. Read-modify-write for templates
 
 ## License

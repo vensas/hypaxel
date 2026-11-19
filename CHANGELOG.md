@@ -3,6 +3,31 @@
 All notable changes to Hypaxel are recorded here. Versions apply to every package (Rust crates,
 Python, Node.js, .NET, Java, Go and PHP).
 
+## 0.3.0 (unreleased)
+
+### Added
+
+- **Streaming XLSX reader (Rust, Python).** Rows are read one at a time, with memory bounded by
+  the shared string table plus one row.
+  - Rust: `XlsxReader::open` / `new` / `with_options`, `sheets()` (name, visibility, kind),
+    `worksheet(name)` / `worksheet_at(index)` → `Rows::next_row()` → `Row` (`number`, `cells`,
+    `get`, `values`). `Value` covers strings, numbers, booleans, errors and `ExcelDateTime` for
+    date, time and duration formats in both date systems, with chrono conversions.
+    `with_source` shares the parsed workbook across handles; `ReadOptions` caps the shared string
+    table.
+  - Python: `open_workbook` / `Reader` (paths, bytes, binary file objects), `iter_rows` /
+    `read_rows`, `iter_records` / `read_records` and `read_dataframe` (pandas or polars). Values
+    are `str`, `int`, `float`, `bool`, `datetime`, `time`, `timedelta`, error strings and `None`.
+  - Accepts Strict Open XML, prefixed namespaces, cells without references, rich and inline text
+    and ISO 8601 dates. Rejects DTDs, oversized tokens and ZIP entries that do not match their
+    declared size or CRC. Names legacy `.xls`, encrypted and non-spreadsheet files in the error.
+- Read benchmarks: `rust/hypaxel/examples/read_bench.rs` (against calamine) and
+  `python/benchmarks/read_bench.py` (against openpyxl, python-calamine, pandas and fastexcel).
+
+### Fixed
+
+- Rust, .NET: with the 1904 date system, 9999-12-31 is written as a date instead of text.
+
 ## 0.2.0 (unreleased)
 
 ### Added

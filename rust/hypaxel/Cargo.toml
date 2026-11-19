@@ -1,6 +1,6 @@
 [package]
 name = "hypaxel"
-description = "High-performance, forward-only, constant-memory XLSX (Excel) writer that streams to any io::Write or tokio AsyncWrite."
+description = "High-performance, constant-memory XLSX (Excel) writer that streams to any io::Write or tokio AsyncWrite, and streaming XLSX reader."
 readme = "../README.md"
 version.workspace = true
 edition.workspace = true
