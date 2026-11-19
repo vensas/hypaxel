@@ -238,8 +238,10 @@ public class XlsxReaderTests
         Assert.Throws<ArgumentOutOfRangeException>(() => reader.OpenWorksheet(-1));
     }
 
-    [Fact]
-    public void SeveralWorksheetsCanBeReadAtTheSameTime()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SeveralWorksheetsCanBeReadAtTheSameTime(bool background)
     {
         var bytes = Write(
             w =>
@@ -257,7 +259,7 @@ public class XlsxReaderTests
                 }
             },
             new XlsxWriterOptions { StringStorage = StringStorage.SharedStrings });
-        using var reader = Reader(bytes);
+        using var reader = Reader(bytes, new XlsxReaderOptions { BackgroundDecompression = background });
         using var first = reader.OpenWorksheet("A");
         using var second = reader.OpenWorksheet("B");
         for (var i = 0; i < 20_000; i++)
@@ -503,7 +505,7 @@ public class XlsxReaderTests
             },
             new XlsxWriterOptions { StringStorage = StringStorage.SharedStrings });
 
-        using var limited = Reader(bytes, new XlsxReaderOptions { MaxSharedStringsBytes = 1_000 });
+        using var limited = Reader(bytes, new XlsxReaderOptions { MaxSharedStringsBytes = 1_000, BackgroundDecompression = true });
         var error = Assert.Throws<XlsxReadException>(() => limited.OpenWorksheet("S"));
         Assert.Equal(XlsxReadErrorKind.LimitExceeded, error.Kind);
         Assert.Contains("MaxSharedStringsBytes", error.Message);
@@ -512,8 +514,10 @@ public class XlsxReaderTests
         Assert.Equal(1_000, reader.SharedStringCount);
     }
 
-    [Fact]
-    public void StreamsLargeSheets()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StreamsLargeSheets(bool background)
     {
         var bytes = Write(w =>
         {
@@ -523,7 +527,7 @@ public class XlsxReaderTests
                 s.AddRow(i, "constant text", i * 0.5, i % 2 == 0);
             }
         });
-        using var reader = Reader(bytes);
+        using var reader = Reader(bytes, new XlsxReaderOptions { BackgroundDecompression = background });
         using var rows = reader.OpenWorksheet("Big");
         var count = 0;
         var sum = 0.0;
@@ -540,9 +544,11 @@ public class XlsxReaderTests
     }
 
     [Theory]
-    [InlineData(CompressionLevel.NoCompression)]
-    [InlineData(CompressionLevel.Fastest)]
-    public void DamagedFilesFailWithTheDocumentedException(CompressionLevel compression)
+    [InlineData(CompressionLevel.NoCompression, false)]
+    [InlineData(CompressionLevel.Fastest, false)]
+    [InlineData(CompressionLevel.NoCompression, true)]
+    [InlineData(CompressionLevel.Fastest, true)]
+    public void DamagedFilesFailWithTheDocumentedException(CompressionLevel compression, bool background)
     {
         var bytes = Write(
             w =>
@@ -583,7 +589,7 @@ public class XlsxReaderTests
 
             try
             {
-                using var reader = Reader(damaged);
+                using var reader = Reader(damaged, new XlsxReaderOptions { BackgroundDecompression = background });
                 using var rows = reader.OpenWorksheet(0);
                 opened++;
                 while (rows.Read())

@@ -183,7 +183,7 @@ public sealed class XlsxReader : IDisposable
         }
 
         var sharedStrings = LoadSharedStrings();
-        return new WorksheetReader(info.Name, OpenXml(info.Part), sharedStrings, _styles, Is1904DateSystem);
+        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem);
     }
 
     /// <summary>Number of entries in the shared string table (loaded with the first worksheet).</summary>
@@ -200,7 +200,7 @@ public sealed class XlsxReader : IDisposable
             }
             else
             {
-                using var xml = OpenXml(_sharedStringsPart);
+                using var xml = OpenXml(_sharedStringsPart, _options.BackgroundDecompression);
                 _sharedStrings = SharedStringTableReader.Parse(xml, _options.MaxSharedStringsBytes);
             }
         }
@@ -223,10 +223,11 @@ public sealed class XlsxReader : IDisposable
         }
     }
 
-    private Utf8XmlReader OpenXml(string part)
+    private Utf8XmlReader OpenXml(string part, bool background = false)
     {
         var entry = _directory.Find(part) ?? throw XlsxReadException.Malformed(part, "The part is missing.");
-        return new Utf8XmlReader(ZipDirectory.Open(entry, _stream), part);
+        var stream = ZipDirectory.Open(entry, _stream);
+        return new Utf8XmlReader(background ? new PrefetchStream(stream) : stream, part);
     }
 
     private List<Relationship>? ReadRelationships(string part)

@@ -55,6 +55,117 @@ public class ReaderInternalsTests
         Assert.Equal(["T:\n", "<root id=7>", "<c r=A1 t=a>b>", "T:1 &amp; 2", "</c>", "<e/>", "C:<raw>", "</root>"], Events(xml));
     }
 
+    /// <summary>A reader positioned right after <c>&lt;row&gt;</c>, as the worksheet parser calls the scan.</summary>
+    private static Utf8XmlReader AfterRow(string cells, int buffer = 64 * 1024)
+    {
+        var reader = Xml("<row>" + cells + "</row>", buffer);
+        Assert.Equal(XmlToken.Start, reader.Next());
+        return reader;
+    }
+
+    private static string Bytes(Utf8XmlReader reader, int start, int length) =>
+        start < 0 ? "-" : Encoding.UTF8.GetString(reader.Bytes(start, length));
+
+    [Fact]
+    public void ScansCommonCellShapes()
+    {
+        using var reader = AfterRow("<c r=\"B2\" s='3' t=\"n\"><v>4.5</v></c><c/><c r=\"A1\"></c><c t=\"inlineStr\"><is><t xml:space=\"preserve\"> a &amp; b </t></is></c><c><is><t>x</t></is></c>");
+        Assert.True(reader.TryScanCell(out var cell));
+        Assert.Equal(CellShape.Value, cell.Shape);
+        Assert.Equal("B2", Bytes(reader, cell.ReferenceStart, cell.ReferenceLength));
+        Assert.Equal("3", Bytes(reader, cell.StyleStart, cell.StyleLength));
+        Assert.Equal("n", Bytes(reader, cell.TypeStart, cell.TypeLength));
+        Assert.Equal("4.5", Bytes(reader, cell.TextStart, cell.TextLength));
+
+        Assert.True(reader.TryScanCell(out cell));
+        Assert.Equal(CellShape.Empty, cell.Shape);
+        Assert.Equal("-", Bytes(reader, cell.ReferenceStart, cell.ReferenceLength));
+
+        Assert.True(reader.TryScanCell(out cell));
+        Assert.Equal(CellShape.Empty, cell.Shape);
+        Assert.Equal("A1", Bytes(reader, cell.ReferenceStart, cell.ReferenceLength));
+
+        Assert.True(reader.TryScanCell(out cell));
+        Assert.Equal(CellShape.Inline, cell.Shape);
+        Assert.Equal(" a &amp; b ", Bytes(reader, cell.TextStart, cell.TextLength));
+
+        Assert.True(reader.TryScanCell(out cell));
+        Assert.Equal(CellShape.Inline, cell.Shape);
+        Assert.Equal("-", Bytes(reader, cell.TypeStart, cell.TypeLength));
+
+        Assert.False(reader.TryScanCell(out _));
+        Assert.Equal(XmlToken.End, reader.Next());
+    }
+
+    [Theory]
+    [InlineData("<c r=\"A1\"><f>1+1</f><v>2</v></c>", "c")]
+    [InlineData("<x:c r=\"A1\"><x:v>1</x:v></x:c>", "c")]
+    [InlineData("<c x:r=\"A1\"><v>1</v></c>", "c")]
+    [InlineData("<c r = \"A1\"><v>1</v></c>", "c")]
+    [InlineData("<c\tr=\"A1\"><v>1</v></c>", "c")]
+    [InlineData("<c r=A1><v>1</v></c>", "c")]
+    [InlineData("<c r=\"A1\"><v><![CDATA[1]]></v></c>", "c")]
+    [InlineData("<c r=\"A1\"><v>1<!-- x --></v></c>", "c")]
+    [InlineData("<c t=\"inlineStr\"><is><r><t>a</t></r></is></c>", "c")]
+    [InlineData("<c t=\"inlineStr\"><is><t/></is></c>", "c")]
+    [InlineData("<c t=\"inlineStr\"><is><t>a</t><rPh><t>b</t></rPh></is></c>", "c")]
+    [InlineData("<c r=\"A1\"><v>1</v></c >", "c")]
+    [InlineData("<col min=\"1\"/>", "col")]
+    [InlineData("<cx/>", "cx")]
+    public void LeavesOtherShapesToTheGeneralParser(string xml, string name)
+    {
+        using var reader = AfterRow(xml);
+        Assert.False(reader.TryScanCell(out _));
+        Assert.True(reader.Next() is XmlToken.Start or XmlToken.Empty);
+        Assert.Equal(name, Encoding.UTF8.GetString(reader.Name));
+    }
+
+    [Fact]
+    public void LeavesTruncatedCellsToTheGeneralParser()
+    {
+        using var reader = Xml("<row><c r=\"A1\"><v>1</v>");
+        reader.Next();
+        Assert.False(reader.TryScanCell(out _));
+        Assert.Equal(XmlToken.Start, reader.Next());
+        Assert.Equal(XmlToken.Start, reader.Next());
+        Assert.Equal(XmlToken.Text, reader.Next());
+        Assert.Equal(XmlToken.End, reader.Next());
+        Assert.Throws<XlsxReadException>(() => reader.Next());
+    }
+
+    [Fact]
+    public void ScansCellsAcrossBufferRefills()
+    {
+        var cells = string.Concat(Enumerable.Range(1, 500).Select(i => $"<c r=\"A{i}\" s=\"1\"><v>{i}.25</v></c>"));
+        using var reader = AfterRow(cells, buffer: 16);
+        for (var i = 1; i <= 500; i++)
+        {
+            Assert.True(reader.TryScanCell(out var cell), $"cell {i}");
+            Assert.Equal($"{i}.25", Bytes(reader, cell.TextStart, cell.TextLength));
+            Assert.Equal($"A{i}", Bytes(reader, cell.ReferenceStart, cell.ReferenceLength));
+        }
+
+        Assert.False(reader.TryScanCell(out _));
+        Assert.Equal(XmlToken.End, reader.Next());
+    }
+
+    [Fact]
+    public void ScansPlainSharedStringItems()
+    {
+        using var reader = Xml("<sst><si><t>a</t></si><si><t xml:space=\"preserve\"> b </t></si><si><r><t>c</t></r></si><si><t>d</t><rPh><t>e</t></rPh></si><x:si><x:t>f</x:t></x:si></sst>");
+        Assert.Equal(XmlToken.Start, reader.Next());
+        Assert.True(reader.TryScanSharedString(out var start, out var length));
+        Assert.Equal("a", Bytes(reader, start, length));
+        Assert.True(reader.TryScanSharedString(out start, out length));
+        Assert.Equal(" b ", Bytes(reader, start, length));
+        Assert.False(reader.TryScanSharedString(out _, out _));
+        Assert.Equal(XmlToken.Start, reader.Next());
+        Assert.Equal("si", Encoding.UTF8.GetString(reader.Name));
+
+        using var mixed = Xml("<sst><si><t>a</t></si><si><r><t>b</t></r><r><t>c</t></r></si><si><t>d</t><rPh><t>e</t></rPh></si><x:si><x:t>f</x:t></x:si><si><t>g</t></si></sst>");
+        Assert.Equal(["a", "bc", "d", "f", "g"], SharedStringTableReader.Parse(mixed, long.MaxValue));
+    }
+
     [Fact]
     public void HandlesByteOrderMarks()
     {

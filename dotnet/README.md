@@ -257,6 +257,9 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
   `VeryHidden`) and `Kind` (`Worksheet`, `Chartsheet`, `Other`). `OpenWorksheet(name)` matches exactly,
   then ignoring case. Several worksheets of one reader can be open at once on one thread; use one reader
   per thread to read in parallel.
+- **Large single files:** `new XlsxReaderOptions { BackgroundDecompression = true }` inflates on a
+  second thread and reads about 30% faster when cores are idle (see [Reading performance](#reading-1)).
+  Leave it off for many concurrent reads.
 - **Streams:** the input must be seekable, because the ZIP directory is at the end of the file. Copy a
   non-seekable stream such as a raw request body into a `MemoryStream` or temporary file first. Reading is synchronous.
 
@@ -365,30 +368,37 @@ in its own process with the `--read-quick` stopwatch runner: one warm-up, then t
 Allocations are for one run; peak RSS is the whole process (`/usr/bin/time -l`), including the
 runtime. The machine was shared with other workloads, so expect a few percent of noise.
 
+> **To be re-measured.** The Hypaxel rows on .NET 10 were measured after the single-pass cell scan
+> was added. The Hypaxel cells marked † on other runtimes are from the previous version (about 25%
+> slower) and need a new run. The other libraries' rows are unchanged.
+
 **1M rows, time**
 
 | Reader | File | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 1.07 s | 1.13 s | 1.02 s | 1.01 s |
-| Hypaxel, `GetValue` (`ExcelValue`) | inline | 1.15 s | 1.16 s | 1.07 s | 1.06 s |
+| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 1.07 s † | 1.13 s † | 0.76 s | 1.01 s † |
+| Hypaxel, `GetValue` (`ExcelValue`) | inline | 1.15 s † | 1.16 s † | 0.79 s | 1.06 s † |
+| Hypaxel, `BackgroundDecompression` | inline | | | 0.53 s | |
 | Sylvan.Data.Excel | inline | 2.19 s | 2.03 s | 1.93 s | 1.94 s |
 | ExcelDataReader | inline | 5.06 s | 4.63 s | 4.21 s | 4.34 s |
 | MiniExcel | inline | | | 6.98 s | |
-| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 1.19 s | 1.24 s | 1.13 s | 1.14 s |
-| Hypaxel, `GetValue` (`ExcelValue`) | shared | 1.23 s | 1.28 s | 1.14 s | 1.16 s |
+| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 1.19 s † | 1.24 s † | 0.82 s | 1.14 s † |
+| Hypaxel, `GetValue` (`ExcelValue`) | shared | 1.23 s † | 1.28 s † | 0.83 s | 1.16 s † |
+| Hypaxel, `BackgroundDecompression` | shared | | | 0.58 s | |
 | Sylvan.Data.Excel | shared | 2.15 s | 2.02 s | 1.94 s | 2.00 s |
 | ExcelDataReader | shared | 5.24 s | 4.91 s | 4.34 s | 4.39 s |
 | MiniExcel | shared | | | 12.23 s | |
 
-MiniExcel was only run on .NET 10.
+MiniExcel and `BackgroundDecompression` were only run on .NET 10.
 
 **1M rows, memory (.NET 10)**
 
 | Reader | Inline: allocated | Inline: peak RSS | Shared: allocated | Shared: peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, `TryGetText`/`TryGetDouble` | 0.1 MB | 49 MB | 92 MB | 135 MB |
-| Hypaxel, `GetValue` (`ExcelValue`) | 153 MB | 55 MB | 92 MB | 135 MB |
-| Sylvan.Data.Excel | 154 MB | 76 MB | 85 MB | 156 MB |
+| Hypaxel, `TryGetText`/`TryGetDouble` | 0.1 MB | 49 MB | 92 MB | 141 MB |
+| Hypaxel, `GetValue` (`ExcelValue`) | 153 MB | 55 MB | 92 MB | 141 MB |
+| Hypaxel, `BackgroundDecompression` | 0.6 MB | 51 MB | 92 MB | 137 MB |
+| Sylvan.Data.Excel | 154 MB | 75 MB | 85 MB | 156 MB |
 | ExcelDataReader | 1,937 MB | 77 MB | 1,717 MB | 158 MB |
 | MiniExcel | 10,649 MB | 81 MB | 10,157 MB | 84 MB |
 
@@ -397,6 +407,21 @@ the strings you ask for: the 153 MB are the 3M cell strings, and reading text as
 allocates nothing. With shared strings, the 92 MB are the shared string table (1M distinct
 strings), which is loaded once and then read without allocating. By design, nothing else grows with
 the number of rows: the row buffers are sized by the widest row.
+
+**Background decompression.** `XlsxReaderOptions.BackgroundDecompression` inflates and checks each
+worksheet (and the shared string table) on a thread-pool thread while the calling thread parses. Measured on .NET 10, interleaved
+with the default on the same files:
+
+| | Default | `BackgroundDecompression` |
+| --- | ---: | ---: |
+| One reader, inline: time / CPU time | 0.77 s / 0.76 s | 0.53 s / 0.92 s |
+| One reader, shared: time / CPU time | 0.83 s / 0.84 s | 0.58 s / 0.97 s |
+| 4 readers at once (10 cores), inline: total time | 0.80–0.84 s | 0.56–0.59 s |
+| 10 readers at once (10 cores), inline: total time | 1.14–1.15 s | 1.54–1.56 s |
+
+It saves about 30% of the time when cores are idle, but costs about 20% more CPU. When every core
+is busy, as on a server reading many uploads at once, it makes the total slower. That is why it is
+off by default. Each open worksheet holds 1 MiB of buffers (four 256 KiB chunks) while it is on.
 
 ```bash
 cd dotnet/benchmarks/Hypaxel.Benchmarks
@@ -410,22 +435,26 @@ The test files are generated in the temp directory on first use.
 ### Why reading is fast
 
 - **A purpose-built UTF-8 pull parser** instead of `System.Xml.XmlReader`. Element and attribute names
-  are compared as bytes and never become strings, and number cells are parsed straight from the
-  input buffer. A prototype that did the same work with `XmlReader` (`DtdProcessing.Prohibit`, an
-  atomized `NameTable`) took 1.90 s and allocated 623 MB on the inline file, against 1.57 s and
-  161 MB for the first version of this parser. The fast paths below brought that to about 1.06 s.
-- **Fast paths for common cells.** `<c ...><v>42</v></c>` and `<c t="inlineStr"><is><t>…</t></is></c>`
-  are consumed in one step; anything else (namespaces, formulas, rich text, comments) goes through
-  the general event loop.
-- **Exact fast number parsing.** Decimals with up to 15 digits and no exponent are computed as
-  `digits / 10^k`, which is correctly rounded because both operands are exact doubles. Everything
-  else falls back to `double.TryParse`.
+  are compared as bytes and never become strings. A prototype that did the same work with `XmlReader`
+  (`DtdProcessing.Prohibit`, an atomized `NameTable`) took 1.90 s and allocated 623 MB on the inline
+  file, against 1.57 s and 161 MB for the first version of this parser.
+- **Whole cells in one pass.** The cell shapes nearly every producer writes (`<c r="B2" s="1"><v>42</v></c>`,
+  `<c t="inlineStr"><is><t>…</t></is></c>`, `<c/>`, `<c></c>`) and plain shared strings
+  (`<si><t>…</t></si>`) are matched with their attributes in a single scan over a 4 KiB lookahead.
+  Anything else (namespace prefixes, formulas, rich text, CDATA, comments) goes through the general
+  parser. Measured against the previous version, interleaved: 1.02 s → 0.79 s inline and 1.12 s → 0.86 s
+  shared.
+- **Values parsed in place.** Numbers, shared-string indexes and booleans are parsed straight from the
+  input buffer (about 4% faster than copying them out first). Decimals with up to 15 digits and no
+  exponent are computed as `digits / 10^k`, which is correctly rounded because both operands are exact
+  doubles. Everything else falls back to `double.TryParse`.
 - **Reused row buffers.** Cells are stored as compact structs in a reused array, with text in one
   reused `char` buffer. Values are materialized only when you ask for them.
 - **Cheap integrity checks.** Inflate runs on the runtime's native zlib through `DeflateStream`. The
   reader verifies CRC-32 itself (only .NET 11's `ZipArchive` does), using the ARM64 CRC instructions
   where available and a slicing-by-8 table elsewhere. Inflating the worksheet alone takes 0.14–0.23 s on
-  this dataset. The slicing-by-8 path (x64) has not been benchmarked.
+  this dataset; `BackgroundDecompression` moves it off the parsing thread. The slicing-by-8 path (x64)
+  has not been benchmarked.
 
 ## Options
 

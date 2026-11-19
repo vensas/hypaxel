@@ -246,15 +246,26 @@ internal sealed class ZipDirectory
         return new EntryStream(inner, entry);
     }
 
+    private static long LockedLength(Stream source)
+    {
+        lock (source)
+        {
+            return source.Length;
+        }
+    }
+
     private static void ReadExactAt(Stream source, long offset, Span<byte> buffer)
     {
-        if (offset < 0 || offset > source.Length - buffer.Length)
+        if (offset < 0 || offset > LockedLength(source) - buffer.Length)
         {
             throw XlsxReadException.InvalidFile("The ZIP archive is truncated.");
         }
 
-        source.Position = offset;
-        source.ReadExactly(buffer);
+        lock (source)
+        {
+            source.Position = offset;
+            source.ReadExactly(buffer);
+        }
     }
 }
 
@@ -289,12 +300,19 @@ internal sealed class SubReadStream(Stream source, long start, long length) : St
             buffer = buffer[..(int)remaining];
         }
 
-        if (source.Position != _position)
+        // Entries may be inflated on background threads (XlsxReaderOptions.BackgroundDecompression) while
+        // other parts are read, so seeking and reading the shared source is one atomic step.
+        int read;
+        lock (source)
         {
-            source.Position = _position;
+            if (source.Position != _position)
+            {
+                source.Position = _position;
+            }
+
+            read = source.Read(buffer);
         }
 
-        var read = source.Read(buffer);
         _position += read;
         return read;
     }

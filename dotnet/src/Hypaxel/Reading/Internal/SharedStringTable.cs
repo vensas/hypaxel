@@ -10,6 +10,24 @@ internal static class SharedStringTableReader
         long bytes = 0;
         while (true)
         {
+            if (xml.TryScanSharedString(out var start, out var length))
+            {
+                text.Clear();
+                if (XmlText.Decode(text, xml.Bytes(start, length), entities: true, excelEscapes: true) is { } error)
+                {
+                    throw xml.Malformed(error);
+                }
+
+                bytes += System.Text.Encoding.UTF8.GetByteCount(text.Span);
+                if (bytes > maxBytes)
+                {
+                    throw TooLarge(xml, maxBytes);
+                }
+
+                strings.Add(text.Length == 0 ? string.Empty : text.Span.ToString());
+                continue;
+            }
+
             var token = xml.Next();
             if (token == XmlToken.Eof)
             {

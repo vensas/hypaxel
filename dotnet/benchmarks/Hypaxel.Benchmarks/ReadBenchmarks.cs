@@ -23,6 +23,7 @@ public static class ReadCases
     [
         ("Hypaxel (ExcelValue)", HypaxelValues),
         ("Hypaxel (typed, no alloc)", HypaxelTyped),
+        ("Hypaxel (background inflate)", path => HypaxelTyped(path, new XlsxReaderOptions { BackgroundDecompression = true })),
         ("Sylvan.Data.Excel", Sylvan),
         ("ExcelDataReader", ExcelDataReaderCase),
         ("MiniExcel", MiniExcelCase),
@@ -99,11 +100,13 @@ public static class ReadCases
         return new(cells, sum, chars, trues);
     }
 
-    public static Checksum HypaxelTyped(string path)
+    public static Checksum HypaxelTyped(string path) => HypaxelTyped(path, null);
+
+    public static Checksum HypaxelTyped(string path, XlsxReaderOptions? options)
     {
         long cells = 0, chars = 0, trues = 0;
         double sum = 0;
-        using var reader = XlsxReader.Open(path);
+        using var reader = XlsxReader.Open(path, options);
         using var rows = reader.OpenWorksheet(0);
         while (rows.Read())
         {
@@ -283,7 +286,7 @@ public static class ReadCases
                 var peakText = peak > 0 ? string.Create(CultureInfo.InvariantCulture, $"  {peak / 1048576.0,6:N0} MB peak WS") : "";
                 Console.WriteLine(string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{mode,-6} {name,-26} {best,8:N0} ms  {allocated / 1048576.0,9:N1} MB allocated{peakText}  {new FileInfo(path).Length / 1048576.0,5:N1} MB file  {ok}"));
+                    $"{mode,-6} {name,-30} {best,8:N0} ms  {allocated / 1048576.0,9:N1} MB allocated{peakText}  {new FileInfo(path).Length / 1048576.0,5:N1} MB file  {ok}"));
             }
         }
     }
@@ -310,6 +313,9 @@ public class ReadBenchmarks
 
     [Benchmark(Description = "Hypaxel (typed, no alloc)")]
     public Checksum HypaxelTyped() => ReadCases.HypaxelTyped(_inline);
+
+    [Benchmark(Description = "Hypaxel (background inflate)")]
+    public Checksum HypaxelBackground() => ReadCases.HypaxelTyped(_inline, new XlsxReaderOptions { BackgroundDecompression = true });
 
     [Benchmark(Description = "Hypaxel (shared strings)")]
     public Checksum HypaxelShared() => ReadCases.HypaxelValues(_shared);

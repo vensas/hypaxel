@@ -12,6 +12,19 @@ public sealed class XlsxReaderOptions
     /// </remarks>
     public long MaxSharedStringsBytes { get; set; } = 1L << 30;
 
+    /// <summary>
+    /// Decompresses worksheets and the shared string table on a thread-pool thread, up to four 256 KiB chunks
+    /// ahead of the parser, so that inflating and parsing overlap. Default: false.
+    /// </summary>
+    /// <remarks>
+    /// Turn it on to read one large workbook sooner when the machine has idle cores: reading takes about 30%
+    /// less time, but about 20% more CPU in total, and each open worksheet holds 1 MiB of buffers. Leave it
+    /// off on servers that read many workbooks at once: when every core is busy, the extra CPU makes the total
+    /// slower. Errors are reported on the reading thread exactly as without it, and disposing the
+    /// <see cref="WorksheetReader"/> stops the background work.
+    /// </remarks>
+    public bool BackgroundDecompression { get; set; }
+
     /// <summary>When true the stream passed to the reader is disposed together with it. Default: false.</summary>
     public bool OwnsStream { get; set; }
 

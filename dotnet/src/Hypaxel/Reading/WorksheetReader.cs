@@ -193,6 +193,27 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         var sorted = true;
         while (true)
         {
+            if (_xml.TryScanCell(out var scanned))
+            {
+                var scannedColumn = scanned.ReferenceStart < 0 ? column + 1 : ParseColumn(_xml.Bytes(scanned.ReferenceStart, scanned.ReferenceLength));
+                var scannedType = scanned.TypeStart < 0 ? CellType.Number : ParseCellType(_xml.Bytes(scanned.TypeStart, scanned.TypeLength));
+                var scannedStyle = scanned.StyleStart < 0 ? 0 : Math.Max(ParseDigits(_xml.Bytes(scanned.StyleStart, scanned.StyleLength)), 0);
+                CheckCell(scannedColumn, scannedType);
+                if (scannedColumn <= column)
+                {
+                    sorted = false;
+                }
+
+                column = scannedColumn;
+                if (scanned.Shape != CellShape.Empty)
+                {
+                    ReadScannedCell(scanned, scannedType, scannedStyle, column);
+                    CheckRowText();
+                }
+
+                continue;
+            }
+
             var token = _xml.Next();
             if (token == XmlToken.End)
             {
@@ -235,26 +256,12 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
                         cellType = ParseCellType(attributes.Value);
                         break;
                     case (byte)'s':
-                        style = ParseDigits(attributes.Value);
-                        if (style < 0)
-                        {
-                            style = 0;
-                        }
-
+                        style = Math.Max(ParseDigits(attributes.Value), 0);
                         break;
                 }
             }
 
-            if (nextColumn is < 1 or > CellReference.MaxColumns)
-            {
-                throw _xml.Malformed($"Row {_row.Number} has a cell with an invalid reference.");
-            }
-
-            if (cellType == (CellType)255)
-            {
-                throw _xml.Malformed($"Row {_row.Number} has a cell with an unknown type.");
-            }
-
+            CheckCell(nextColumn, cellType);
             if (nextColumn <= column)
             {
                 sorted = false;
@@ -267,15 +274,88 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
             }
 
             ReadCell(cellType, style, column);
-            if (_row.Text.Length > MaxRowText)
-            {
-                throw XlsxReadException.LimitExceeded(_xml.Part, $"Row {_row.Number} holds more than {MaxRowText} characters of text.");
-            }
+            CheckRowText();
         }
 
         if (!sorted)
         {
             _row.SortAndDeduplicate();
+        }
+    }
+
+    private void CheckCell(int column, CellType cellType)
+    {
+        if (column is < 1 or > CellReference.MaxColumns)
+        {
+            throw _xml.Malformed($"Row {_row.Number} has a cell with an invalid reference.");
+        }
+
+        if (cellType == (CellType)255)
+        {
+            throw _xml.Malformed($"Row {_row.Number} has a cell with an unknown type.");
+        }
+    }
+
+    private void CheckRowText()
+    {
+        if (_row.Text.Length > MaxRowText)
+        {
+            throw XlsxReadException.LimitExceeded(_xml.Part, $"Row {_row.Number} holds more than {MaxRowText} characters of text.");
+        }
+    }
+
+    /// <summary>Adds the value of a cell matched by <see cref="Utf8XmlReader.TryScanCell"/>.</summary>
+    private void ReadScannedCell(in ScannedCell scanned, CellType cellType, int style, int column)
+    {
+        var textStart = _row.Text.Length;
+        _scratchLength = 0;
+        var raw = _xml.Bytes(scanned.TextStart, scanned.TextLength);
+        if (scanned.Shape == CellShape.Inline)
+        {
+            // <is> only carries a value in inline string cells.
+            if (cellType != CellType.InlineString)
+            {
+                return;
+            }
+
+            DecodeText(raw);
+        }
+        else if (cellType is CellType.FormulaString or CellType.InlineString or CellType.Error || raw.IndexOf((byte)'&') >= 0)
+        {
+            CollectValue(cellType, raw);
+        }
+        else
+        {
+            // Plain values are parsed straight from the input buffer.
+            AddCell(cellType, style, column, textStart, raw);
+            return;
+        }
+
+        AddCell(cellType, style, column, textStart);
+    }
+
+    /// <summary>Appends the raw content of a <c>&lt;v&gt;</c> element to the row text (text types) or the value scratch.</summary>
+    private void CollectValue(CellType cellType, ReadOnlySpan<byte> raw)
+    {
+        if (cellType is CellType.FormulaString or CellType.InlineString or CellType.Error)
+        {
+            DecodeText(raw);
+        }
+        else if (raw.IndexOf((byte)'&') < 0)
+        {
+            AppendScratch(raw);
+        }
+        else
+        {
+            AppendDecoded(raw);
+        }
+    }
+
+    private void DecodeText(ReadOnlySpan<byte> raw)
+    {
+        if (XmlText.Decode(_row.Text, raw, entities: true, excelEscapes: true) is { } error)
+        {
+            throw _xml.Malformed(error);
         }
     }
 
@@ -293,22 +373,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
               || _xml.TryReadSimpleElement("<is><t xml:space=\"preserve\">"u8, "</t></is></c>"u8, out raw)
             : _xml.TryReadSimpleElement("<v>"u8, "</v></c>"u8, out raw))
         {
-            if (isText)
-            {
-                if (XmlText.Decode(text, raw, entities: true, excelEscapes: true) is { } error)
-                {
-                    throw _xml.Malformed(error);
-                }
-            }
-            else if (raw.IndexOf((byte)'&') < 0)
-            {
-                AppendScratch(raw);
-            }
-            else
-            {
-                AppendDecoded(raw);
-            }
-
+            CollectValue(cellType, raw);
             AddCell(cellType, style, column, textStart);
             return;
         }
@@ -386,11 +451,14 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         AppendScratch(decoded.Span);
     }
 
-    private void AddCell(CellType cellType, int style, int column, int textStart)
+    private void AddCell(CellType cellType, int style, int column, int textStart) =>
+        AddCell(cellType, style, column, textStart, _scratch.AsSpan(0, _scratchLength));
+
+    private void AddCell(CellType cellType, int style, int column, int textStart, ReadOnlySpan<byte> value)
     {
         var text = _row.Text;
         var cell = new RawCell { Column = column, Start = textStart, Length = text.Length - textStart };
-        var value = _scratch.AsSpan(0, _scratchLength).Trim(" \t\r\n\f"u8);
+        value = value.Trim(" \t\r\n\f"u8);
         switch (cellType)
         {
             case CellType.FormulaString or CellType.InlineString:
