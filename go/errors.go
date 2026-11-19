@@ -28,6 +28,15 @@ var (
 	ErrUnsupported = errors.New("hypaxel: unsupported value")
 	// ErrSheetClosed reports a write to a worksheet that is no longer the current one.
 	ErrSheetClosed = errors.New("hypaxel: worksheet is closed")
+	// ErrInvalidTableName reports a table name that does not start with a letter, '_' or '\',
+	// contains characters other than letters, digits, '_', '.' and '\', is longer than 255
+	// characters, or looks like a cell reference such as "A1" or "R1C1".
+	ErrInvalidTableName = errors.New("hypaxel: invalid table name")
+	// ErrDuplicateTableName reports a table name already used in the workbook (case-insensitive).
+	ErrDuplicateTableName = errors.New("hypaxel: duplicate table name")
+	// ErrOverlappingRange reports a table that overlaps another table, merged cells or the
+	// worksheet auto filter, or merged cells or an auto filter that overlap a table.
+	ErrOverlappingRange = errors.New("hypaxel: overlapping range")
 	// ErrClosed reports use of a Writer after Close.
 	ErrClosed = errors.New("hypaxel: writer is closed")
 )

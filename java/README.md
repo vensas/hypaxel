@@ -19,7 +19,7 @@ export 10 rows or a million, and a download can start while your query is still 
 - **Object mapping:** records and JavaBeans become rows through cached method handles, with
   `@ExcelColumn` for headers, order, number formats and widths.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
-  panes, auto filters, hidden sheets, tab colors.
+  panes, auto filters, Excel tables, auto-fit columns, row grouping, hidden sheets, tab colors.
 
 Hypaxel for Java is a native port of the [`hypaxel` Rust crate](../rust/README.md). The
 [.NET](../dotnet/README.md), [Python](../python/README.md) and [Node.js](../node/README.md)
@@ -36,12 +36,12 @@ Not published yet: build from source, see [Development](#development). The coord
 <dependency>
   <groupId>de.vensas</groupId>
   <artifactId>hypaxel</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
 ```kotlin
-implementation("de.vensas:hypaxel:0.1.0")
+implementation("de.vensas:hypaxel:0.2.0")
 ```
 
 Requires Java 17 or later.
@@ -212,13 +212,14 @@ to bottom and cells left to right.
 | `writeBlank(style)` | Empty cell that carries a format |
 | `writeValue(object, style?)` | Next cell by runtime type |
 | `endRow()` | Ends the row and hands buffered output to the destination |
-| `beginRow(height?, style?)`, `beginRowAt(row, ...)` | Starts a row with a height or row style, or at a given row number |
+| `beginRow(height?, style?)`, `beginRow(RowOptions)`, `beginRowAt(row, ...)` | Starts a row with a height, row style, outline level or hidden state, or at a given row number. A following `addRow` fills it |
 | `skipCells(n)`, `skipRows(n)` | Leave cells or rows empty |
 | `addRow(values...)`, `addRow(iterable)`, `addStyledRow(style, values...)` | One complete row |
 | `addRows(iterable \| stream)` | One row per `Object[]` or `Iterable` element |
 | `writeRows(items, (row, item) -> ...)` | One row per item, written with the typed overloads |
 | `writeObjects(type, items, ObjectOptions?)` | One row per object, see [Object mapping](#object-mapping) |
 | `mergeCells(r1, c1, r2, c2)`, `autoFilter(r1, c1, r2, c2)` | Ranges, 1-based and inclusive |
+| `addTable(ExcelTable)` | Excel table over a range, see [Excel tables](#excel-tables) |
 | `rowNumber()`, `columnNumber()` | Current position, 1-based |
 
 In rows passed as objects, `Cell.styled(value, style)`, `Cell.formula("SUM(A1:A9)")` and
@@ -237,7 +238,75 @@ or `Border.builder()`, 13 line styles), alignment (`align`, `verticalAlign`, `wr
 
 **Worksheet options** (`SheetOptions.builder()`): `freezeRows`, `freezeColumns`, `columnWidths`,
 `column(index, Column)` for width, column style and hidden columns, `hideGridLines`, `hidden`,
-`tabColor`. They precede the cell data in the file, so they are fixed when the worksheet is added.
+`tabColor`, `autoFitColumns`, `rowOutlineLevels`, `outlineSummaryAbove`. They precede the cell data
+in the file, so they are fixed when the worksheet is added. Merges, filters and tables can be added
+at any time before the worksheet completes.
+
+## Auto-fit columns
+
+Turn on auto-fit and columns without an explicit width are sized to their content:
+
+```java
+Worksheet sheet = writer.addWorksheet("Orders", SheetOptions.builder().freezeRows(1).autoFitColumns().build());
+
+// Or tune the sample and cap the width (in characters):
+SheetOptions.builder().autoFit(AutoFit.builder().sampleRows(500).maxWidth(60).build()).build();
+```
+
+Column widths come before the cell data in the file, so the writer holds back the worksheet's XML
+while it measures the first `sampleRows` rows (1,000 by default). It then writes the widths and
+streams the rest as usual. Memory is bounded by the sample: at most `sampleRows` rows or 8 MiB of
+XML, whichever comes first. Rows after the sample are not measured.
+
+Widths are estimated from the text, the number format (dates, `#,##0.00`, percentages, ...) and
+the font size and weight of each cell. Formulas and blank cells are not measured. Widths you set
+with `columnWidths` or `column` always win. Without auto-fit, writing a cell costs nothing extra.
+
+## Excel tables
+
+`addTable` turns a range into an Excel table (a `ListObject`), with a header row, filter buttons,
+banded rows and a name you can use in formulas such as `=SUM(Orders[Units])`:
+
+```java
+Worksheet sheet = writer.addWorksheet("Orders");
+sheet.addRow("Product", "Units");
+sheet.addRow("Widget", 3);
+sheet.addRow("Gadget", 5);
+
+sheet.addTable(ExcelTable.builder(1, 1, sheet.rowNumber(), 2)
+        .name("Orders")                  // optional: Table1, Table2, ... otherwise
+        .columns("Product", "Units")     // must match the header row
+        .style(TableStyle.medium(9))     // light(1-21), medium(1-28), dark(1-11) or NONE
+        .build());
+```
+
+With a header row (the default), `columns` must list the header texts exactly as written, because
+Excel identifies table columns by those names. `headerRow(false)` makes a table without one, whose
+columns are named `Column1`, `Column2`, ... unless you name them. Table names are unique in the
+workbook, ignoring case, and follow Excel's name rules. Tables cannot overlap each other, merged
+cells or the worksheet auto filter; violations throw an `XlsxException`. The range may include rows
+you have not written yet.
+
+## Row grouping
+
+Rows can be grouped into collapsible outline levels. Declare the deepest level when you add the
+worksheet, because Excel reads it before the rows:
+
+```java
+Worksheet sheet = writer.addWorksheet("Regions", SheetOptions.builder()
+        .rowOutlineLevels(1)        // deepest level used, 0-7
+        .outlineSummaryAbove()      // the group's button sits on the row above it
+        .build());
+
+sheet.addRow("North", 300);
+sheet.beginRow(RowOptions.builder().outlineLevel(1).build()).addRow("Store A", 120);   // addRow fills the begun row
+sheet.beginRow(RowOptions.builder().outlineLevel(1).hidden().build())                  // a collapsed group's rows are hidden
+        .write("Store B").write(180).endRow();
+```
+
+`RowOptions` also sets `height`, `style` and `collapsed` (on the summary row of a collapsed group).
+A row started with `beginRow` that has no cells yet is filled by the next `addRow`, `addRows`,
+`writeRows` or `writeObjects`; once it has cells, those start a new row as before.
 
 ## Options
 

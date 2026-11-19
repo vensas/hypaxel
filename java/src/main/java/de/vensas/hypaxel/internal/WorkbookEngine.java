@@ -1,6 +1,8 @@
 package de.vensas.hypaxel.internal;
 
+import de.vensas.hypaxel.AutoFit;
 import de.vensas.hypaxel.Column;
+import de.vensas.hypaxel.ExcelTable;
 import de.vensas.hypaxel.SheetOptions;
 import de.vensas.hypaxel.StringStorage;
 import de.vensas.hypaxel.Style;
@@ -10,9 +12,11 @@ import de.vensas.hypaxel.XlsxOptions;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Turns cell calls into compressed XLSX bytes held in memory. It performs no I/O of its own: the
@@ -55,6 +59,9 @@ public final class WorkbookEngine {
     private final SharedStrings sharedStrings;
     private final List<SheetInfo> sheets = new ArrayList<>();
     private final List<int[]> merges = new ArrayList<>();
+    private final Set<String> tableNames = new HashSet<>();
+    private List<TableDefinition> tables = new ArrayList<>();
+    private int tableCount;
     private final int flushThreshold;
     private final int xmlBufferSize;
     private final boolean cellReferences;
@@ -62,6 +69,14 @@ public final class WorkbookEngine {
 
     private boolean sheetOpen;
     private boolean rowOpen;
+    /**
+     * The open row was started explicitly; until it has a cell, the next whole-row write fills it
+     * instead of starting another row.
+     */
+    private boolean rowExplicit;
+    private int rowOutlineLevels;
+    /** Present while the current worksheet's auto-fit sample is held back. */
+    private ColumnFit fit;
     private boolean usesFormulas;
     private int row;
     private int column;
@@ -105,7 +120,7 @@ public final class WorkbookEngine {
     }
 
     private void compressIfFull() {
-        if (xml.length() >= xmlBufferSize) {
+        if (xml.length() >= xmlBufferSize && fit == null) {
             compressXml();
         }
     }
@@ -154,6 +169,8 @@ public final class WorkbookEngine {
         column = 0;
         lastColumn = 0;
         rowOpen = false;
+        rowExplicit = false;
+        rowOutlineLevels = options.rowOutlineLevels();
         merges.clear();
         writeSheetHeader(index, options);
     }
@@ -162,8 +179,15 @@ public final class WorkbookEngine {
         XmlBuffer x = xml;
         x.raw(WorkbookParts.DECLARATION).raw("<worksheet xmlns=\"").raw(WorkbookParts.NS_MAIN);
         x.raw("\" xmlns:r=\"").raw(WorkbookParts.NS_REL).raw("\">");
-        if (o.tabColor() != null) {
-            x.raw("<sheetPr><tabColor rgb=\"").putArgb(o.tabColor().argb()).raw("\"/></sheetPr>");
+        if (o.tabColor() != null || o.outlineSummaryAbove()) {
+            x.raw("<sheetPr>");
+            if (o.tabColor() != null) {
+                x.raw("<tabColor rgb=\"").putArgb(o.tabColor().argb()).raw("\"/>");
+            }
+            if (o.outlineSummaryAbove()) {
+                x.raw("<outlinePr summaryBelow=\"0\"/>");
+            }
+            x.raw("</sheetPr>");
         }
         x.raw("<sheetViews><sheetView workbookViewId=\"0\"");
         if (index == 0) {
@@ -189,27 +213,34 @@ public final class WorkbookEngine {
         } else {
             x.raw("/></sheetViews>");
         }
-        x.raw("<sheetFormatPr defaultRowHeight=\"15\"/>");
-        if (!o.columns().isEmpty()) {
+        x.raw("<sheetFormatPr defaultRowHeight=\"15\"");
+        if (o.rowOutlineLevels() > 0) {
+            x.raw(" outlineLevelRow=\"").putLong(o.rowOutlineLevels()).raw('"');
+        }
+        x.raw("/>");
+        AutoFit autoFit = o.autoFit();
+        if (autoFit != null) {
+            // <cols> is inserted here once the sample has been measured.
+            fit = new ColumnFit(styles, autoFit, o.columns(), x.length());
+        } else if (!o.columns().isEmpty()) {
             x.raw("<cols>");
             for (Map.Entry<Integer, Column> entry : o.columns().entrySet()) {
-                Column definition = entry.getValue();
-                x.raw("<col min=\"").putLong(entry.getKey()).raw("\" max=\"").putLong(entry.getKey());
-                x.raw("\" width=\"").putDouble(definition.hasWidth() ? definition.width() : 9.140625).raw('"');
-                if (definition.hasWidth()) {
-                    x.raw(" customWidth=\"1\"");
-                }
-                if (definition.style().index() != 0) {
-                    x.raw(" style=\"").putLong(definition.style().index()).raw('"');
-                }
-                if (definition.hidden()) {
-                    x.raw(" hidden=\"1\"");
-                }
-                x.raw("/>");
+                ColumnFit.writeColumn(x, entry.getKey(), entry.getValue(), entry.getValue().width());
             }
             x.raw("</cols>");
         }
         x.raw("<sheetData>");
+    }
+
+    /** Inserts the fitted {@code <cols>} into the held-back XML and resumes streaming. */
+    private void endFit() {
+        ColumnFit sample = fit;
+        fit = null;
+        XmlBuffer cols = new XmlBuffer(1024);
+        sample.writeColumns(cols);
+        xml.insert(sample.colsAt(), cols);
+        compressIfFull();
+        xml.shrink(xmlBufferSize + 4096);
     }
 
     public void completeSheet() {
@@ -218,6 +249,9 @@ public final class WorkbookEngine {
         }
         if (rowOpen) {
             closeRow();
+        }
+        if (fit != null) {
+            endFit();
         }
         XmlBuffer x = xml;
         x.raw("</sheetData>");
@@ -233,9 +267,29 @@ public final class WorkbookEngine {
             }
             x.raw("</mergeCells>");
         }
-        x.raw("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/></worksheet>");
+        x.raw("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
+        if (!tables.isEmpty()) {
+            x.raw("<tableParts count=\"").putLong(tables.size()).raw("\">");
+            for (int i = 1; i <= tables.size(); i++) {
+                x.raw("<tablePart r:id=\"rId").putLong(i).raw("\"/>");
+            }
+            x.raw("</tableParts>");
+        }
+        x.raw("</worksheet>");
         finishPart();
         sheetOpen = false;
+
+        if (!tables.isEmpty()) {
+            for (TableDefinition table : tables) {
+                zip.startEntry("xl/tables/table" + table.id + ".xml");
+                table.writeXml(xml);
+                finishPart();
+            }
+            zip.startEntry("xl/worksheets/_rels/sheet" + sheets.size() + ".xml.rels");
+            WorkbookParts.sheetRels(xml, tables);
+            finishPart();
+            tables = new ArrayList<>();
+        }
     }
 
     /** Completes the workbook: open worksheet, shared strings, styles, workbook, relationships, central directory. */
@@ -266,7 +320,7 @@ public final class WorkbookEngine {
         WorkbookParts.workbookRels(xml, sheets.size(), shared);
         finishPart();
         zip.startEntry("[Content_Types].xml");
-        WorkbookParts.contentTypes(xml, sheets.size(), shared);
+        WorkbookParts.contentTypes(xml, sheets.size(), tableCount, shared);
         finishPart();
         zip.startEntry("_rels/.rels");
         WorkbookParts.rootRels(xml);
@@ -300,7 +354,11 @@ public final class WorkbookEngine {
         return column;
     }
 
-    public void beginRowAt(int rowNumber, double height, int style) {
+    /**
+     * Starts a row explicitly; a NaN height is the default height. Until it has a cell, the next
+     * whole-row write ({@link #beginNextRow()}) fills it.
+     */
+    public void beginRowAt(int rowNumber, double height, int style, int outlineLevel, boolean hidden, boolean collapsed) {
         if (rowNumber < 1 || rowNumber > MAX_ROWS) {
             throw rowOutOfRange(rowNumber);
         }
@@ -311,49 +369,82 @@ public final class WorkbookEngine {
         if (!Double.isNaN(height) && !(height >= 0 && height <= 409)) {
             throw new XlsxException(Kind.INVALID_ARGUMENT, "row height must be within 0..409 points");
         }
+        if (outlineLevel < 0 || outlineLevel > 7) {
+            throw new XlsxException(Kind.INVALID_ARGUMENT, "row outline level must be within 0..7");
+        }
+        if (outlineLevel > rowOutlineLevels) {
+            throw new XlsxException(Kind.INVALID_ARGUMENT, "row outline level " + outlineLevel
+                    + " exceeds the worksheet's declared depth of " + rowOutlineLevels
+                    + "; declare the deepest level with SheetOptions.Builder.rowOutlineLevels when adding the worksheet");
+        }
         if (rowOpen) {
             closeRow();
         }
-        openRow(rowNumber, height, style);
-    }
-
-    public void beginNextRow(double height, int style) {
-        beginRowAt(row + 1, height, style);
-    }
-
-    private void openRow(int rowNumber, double height, int style) {
-        row = rowNumber;
-        column = 0;
-        lastColumn = 0;
-        rowOpen = true;
+        openRow(rowNumber);
         XmlBuffer x = xml;
-        x.raw(ROW_OPEN).putLong(rowNumber).raw('"');
         if (!Double.isNaN(height)) {
             x.raw(" ht=\"").putDouble(height).raw("\" customHeight=\"1\"");
         }
         if (style != 0) {
             x.raw(" s=\"").putLong(style).raw("\" customFormat=\"1\"");
         }
+        if (hidden) {
+            x.raw(" hidden=\"1\"");
+        }
+        if (outlineLevel > 0) {
+            x.raw(" outlineLevel=\"").putLong(outlineLevel).raw('"');
+        }
+        if (collapsed) {
+            x.raw(" collapsed=\"1\"");
+        }
         x.raw('>');
+        rowExplicit = true;
+    }
+
+    /**
+     * Starts the row of a whole-row write: an explicitly started row that has no cells yet,
+     * otherwise the next row.
+     */
+    public void beginNextRow() {
+        if (rowOpen) {
+            if (rowExplicit && column == 0) {
+                return;
+            }
+            closeRow();
+        }
+        openNextRow();
+    }
+
+    /** The 1-based row that the next whole-row write lands in. */
+    public int nextRow() {
+        return rowOpen && rowExplicit && column == 0 ? row : row + 1;
+    }
+
+    /** Writes {@code <row r="N"} and leaves the element open for attributes. */
+    private void openRow(int rowNumber) {
+        row = rowNumber;
+        column = 0;
+        lastColumn = 0;
+        rowOpen = true;
+        xml.raw(ROW_OPEN).putLong(rowNumber).raw('"');
     }
 
     private void openNextRow() {
         if (row >= MAX_ROWS) {
             throw rowOutOfRange((long) row + 1);
         }
-        openRow(row + 1, Double.NaN, 0);
+        openRow(row + 1);
+        xml.raw('>');
     }
 
     private void closeRow() {
         xml.raw(ROW_CLOSE);
         rowOpen = false;
-        compressIfFull();
-    }
-
-    public void closeOpenRow() {
-        if (rowOpen) {
-            closeRow();
+        rowExplicit = false;
+        if (fit != null && fit.rowClosed(xml.length())) {
+            endFit();
         }
+        compressIfFull();
     }
 
     /** Ends the current row; with no open row, leaves an empty row. */
@@ -398,12 +489,53 @@ public final class WorkbookEngine {
         if (firstRow == lastRow && firstColumn == lastColumn) {
             throw new XlsxException(Kind.INVALID_ARGUMENT, "a merged range must span more than one cell");
         }
-        merges.add(new int[] {firstRow, firstColumn, lastRow, lastColumn});
+        int[] range = {firstRow, firstColumn, lastRow, lastColumn};
+        if (overlapsTable(range)) {
+            throw new XlsxException(Kind.OVERLAPPING_RANGE, "merged cells cannot overlap a table");
+        }
+        merges.add(range);
     }
 
     public void autoFilter(int firstRow, int firstColumn, int lastRow, int lastColumn) {
         validateRange(firstRow, firstColumn, lastRow, lastColumn);
-        sheets.get(sheets.size() - 1).autoFilter = new int[] {firstRow, firstColumn, lastRow, lastColumn};
+        int[] range = {firstRow, firstColumn, lastRow, lastColumn};
+        if (overlapsTable(range)) {
+            throw new XlsxException(Kind.OVERLAPPING_RANGE,
+                    "a worksheet auto filter cannot overlap a table (tables have their own filter)");
+        }
+        sheets.get(sheets.size() - 1).autoFilter = range;
+    }
+
+    /** Records a table of the current worksheet; it is written when the worksheet completes. */
+    public void addTable(ExcelTable table) {
+        TableDefinition definition = TableDefinition.create(table, tableCount + 1,
+                name -> tableNames.contains(name.toLowerCase(Locale.ROOT)));
+        int[] range = definition.range;
+        if (overlapsTable(range)) {
+            throw new XlsxException(Kind.OVERLAPPING_RANGE, "tables cannot overlap each other");
+        }
+        for (int[] merge : merges) {
+            if (TableDefinition.overlaps(merge, range)) {
+                throw new XlsxException(Kind.OVERLAPPING_RANGE, "a table cannot overlap merged cells");
+            }
+        }
+        int[] filter = sheets.get(sheets.size() - 1).autoFilter;
+        if (filter != null && TableDefinition.overlaps(filter, range)) {
+            throw new XlsxException(Kind.OVERLAPPING_RANGE,
+                    "a table cannot overlap the worksheet auto filter (tables have their own filter)");
+        }
+        tableCount++;
+        tableNames.add(definition.name.toLowerCase(Locale.ROOT));
+        tables.add(definition);
+    }
+
+    private boolean overlapsTable(int[] range) {
+        for (TableDefinition table : tables) {
+            if (TableDefinition.overlaps(table.range, range)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ cells
@@ -442,12 +574,19 @@ public final class WorkbookEngine {
 
     /** Writes an integer cell. Excel stores numbers as doubles: beyond 2^53 precision is lost. */
     public void writeLong(long value, int style) {
-        beginCell(style).raw(VALUE_OPEN).putLong(value).raw(VALUE_CLOSE);
+        XmlBuffer x = beginCell(style);
+        if (fit != null) {
+            fit.number(column, style, value);
+        }
+        x.raw(VALUE_OPEN).putLong(value).raw(VALUE_CLOSE);
     }
 
     /** Writes a number cell; NaN and infinities become the {@code #NUM!} error. */
     public void writeDouble(double value, int style) {
         XmlBuffer x = beginCell(style);
+        if (fit != null) {
+            fit.number(column, style, value);
+        }
         if (Double.isFinite(value)) {
             x.raw(VALUE_OPEN).putDouble(value).raw(VALUE_CLOSE);
         } else {
@@ -456,7 +595,11 @@ public final class WorkbookEngine {
     }
 
     public void writeBoolean(boolean value, int style) {
-        beginCell(style).raw(value ? BOOL_TRUE : BOOL_FALSE);
+        XmlBuffer x = beginCell(style);
+        if (fit != null) {
+            fit.text(column, style, value ? "TRUE" : "FALSE");
+        }
+        x.raw(value ? BOOL_TRUE : BOOL_FALSE);
     }
 
     public void writeString(String value, int style) {
@@ -466,6 +609,9 @@ public final class WorkbookEngine {
                     + ((rowOpen ? column : 0) + 1) + " has " + length + " characters; the limit is " + MAX_TEXT_LENGTH);
         }
         XmlBuffer x = beginCell(style);
+        if (fit != null) {
+            fit.text(column, style, value);
+        }
         if (sharedStrings != null) {
             x.raw(SHARED_OPEN).putLong(sharedStrings.indexOf(value)).raw(VALUE_CLOSE);
         } else {
@@ -517,13 +663,23 @@ public final class WorkbookEngine {
     /** Writes a date serial from a value of {@link #serialDay} and the nanoseconds of the day. */
     public void writeSerial(long serialDay, long nanosOfDay, ValueKind kind, int style) {
         checkStyle(style);
-        beginCell(styles.valueVariant(style, kind)).raw(VALUE_OPEN).putSerial(false, serialDay, nanosOfDay).raw(VALUE_CLOSE);
+        int variant = styles.valueVariant(style, kind);
+        XmlBuffer x = beginCell(variant);
+        if (fit != null) {
+            fit.number(column, variant, serialDay);
+        }
+        x.raw(VALUE_OPEN).putSerial(false, serialDay, nanosOfDay).raw(VALUE_CLOSE);
     }
 
     /** Writes a time of day or a duration as a signed number of days. */
     public void writeDays(boolean negative, long days, long nanosOfDay, ValueKind kind, int style) {
         checkStyle(style);
-        beginCell(styles.valueVariant(style, kind)).raw(VALUE_OPEN).putSerial(negative, days, nanosOfDay).raw(VALUE_CLOSE);
+        int variant = styles.valueVariant(style, kind);
+        XmlBuffer x = beginCell(variant);
+        if (fit != null) {
+            fit.number(column, variant, negative ? -days : days);
+        }
+        x.raw(VALUE_OPEN).putSerial(negative, days, nanosOfDay).raw(VALUE_CLOSE);
     }
 
     // ------------------------------------------------------------------ validation
@@ -543,7 +699,7 @@ public final class WorkbookEngine {
         }
     }
 
-    private static void validateRange(int firstRow, int firstColumn, int lastRow, int lastColumn) {
+    static void validateRange(int firstRow, int firstColumn, int lastRow, int lastColumn) {
         boolean rowsValid = firstRow >= 1 && lastRow >= firstRow && lastRow <= MAX_ROWS;
         boolean columnsValid = firstColumn >= 1 && lastColumn >= firstColumn && lastColumn <= MAX_COLUMNS;
         if (!rowsValid || !columnsValid) {

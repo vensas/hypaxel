@@ -14,7 +14,7 @@ can start while your query is still running.
 - **Real Excel types:** `number`, `string`, `boolean`, `Date`, `bigint`, formulas. `null`,
   `undefined` and invalid dates become empty cells.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
-  panes, auto filters, hidden sheets, tab colors.
+  panes, auto filters, Excel tables, row grouping, auto-fit columns, hidden sheets, tab colors.
 - **Typed:** written in TypeScript (strict), ships its own type declarations, works from ESM and CommonJS.
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md) through [napi-rs](https://napi.rs).
@@ -123,9 +123,23 @@ Worksheets are written one at a time: adding a worksheet completes the previous 
 | `writeRows(rows, style?)` | Many rows; returns the count |
 | `writeRecords(records, keys, styles?)` | One row per object, taking `keys` in order |
 | `write(value, style?)`, `endRow()` | Cell-by-cell writing |
-| `beginRow({ height, style })` | Start a row with a height or row style |
+| `beginRow({ height, style, outlineLevel, hidden, collapsed })` | Start a row with row properties; the next `writeRow` fills it |
 | `skipCells(n)`, `skipRows(n)` | Leave cells or rows empty |
 | `mergeCells(r1, c1, r2, c2)`, `autofilter(r1, c1, r2, c2)` | Ranges, 1-based and inclusive |
+| `addTable(r1, c1, r2, c2, { columns, name, style, ... })` | Excel table; `columns` must equal the header texts |
+
+```js
+const sheet = writer.addWorksheet('Regions', { autofit: true, rowOutlineLevels: 1, outlineSummaryAbove: true })
+sheet.writeRow(['Region', 'Revenue'])
+sheet.writeRow(['North', 300])
+sheet.beginRow({ outlineLevel: 1 })
+sheet.writeRow(['Store A', 120])
+sheet.addTable(1, 1, sheet.row, 2, { name: 'Regions', columns: ['Region', 'Revenue'], style: 'TableStyleMedium9' })
+```
+
+`autofit` (or `{ sampleRows, maxWidth }`) holds back the sheet's output until the sample (default
+1,000 rows, at most 8 MiB of XML) has been measured, then streams as usual. `rowOutlineLevels`
+declares the deepest grouping level up front, because Excel reads it before the rows.
 
 ## Options
 

@@ -194,9 +194,10 @@ Worksheets are written one at a time: adding a worksheet completes the previous 
 | `WriteRow(values...)`, `WriteRowStyled(style, values...)` | One row from values |
 | `WriteStrings(values, style?)` | One row of text, such as a header |
 | `WriteStruct(v)`, `WriteStructHeader(v, style?)` | One row from a struct, and its header row |
-| `BeginRow(RowOptions{Index, Height, Style})` | Start a row with a height, a row style or a row number further down |
+| `BeginRow(RowOptions{Index, Height, Style, OutlineLevel, Hidden, Collapsed})` | Start a row with a height, a row style, a grouping level or a row number further down |
 | `SkipCells(n)`, `SkipRows(n)` | Leave cells or rows empty |
 | `MergeCells(r1, c1, r2, c2)`, `AutoFilter(r1, c1, r2, c2)` | Ranges, 1-based and inclusive |
+| `AddTable(Table{...})` | Turn a range into an Excel table |
 | `Row()`, `Column()` | Current position |
 
 **Package functions**
@@ -223,7 +224,66 @@ through those methods.
 | `Font` | `Name`, `Size`, `Bold`, `Italic`, `Underline`, `Strike`, `Color` |
 | `Border` | `Left`, `Right`, `Top`, `Bottom`, each a `BorderLine{Style, Color}` with 13 line styles |
 | `Alignment` | `Horizontal`, `Vertical`, `WrapText`, `ShrinkToFit`, `Indent`, `Rotation` |
-| `SheetOptions` | `Columns` (`Width`, `Style`, `Hidden`), `FrozenRows`, `FrozenColumns`, `HideGridLines`, `Hidden`, `TabColor` |
+| `SheetOptions` | `Columns` (`Width`, `Style`, `Hidden`), `FrozenRows`, `FrozenColumns`, `HideGridLines`, `Hidden`, `TabColor`, `RowOutlineLevels`, `OutlineSummaryAbove`, `AutoFit` |
+
+### Grouped rows
+
+Give rows an outline level to make them collapsible. The deepest level is declared when the
+worksheet is added, because Excel reads it before the rows:
+
+```go
+sheet, _ := w.AddSheetOptions("Regions", hypaxel.SheetOptions{RowOutlineLevels: 2, OutlineSummaryAbove: true})
+sheet.WriteRow("North", 300)
+sheet.BeginRow(hypaxel.RowOptions{OutlineLevel: 1})
+sheet.WriteRow("Store A", 120)
+sheet.BeginRow(hypaxel.RowOptions{OutlineLevel: 2, Hidden: true})
+sheet.WriteRow("Till 1", 60)
+```
+
+A row begun with `BeginRow` is filled by the next whole-row write (`WriteRow`, `WriteStrings`,
+`WriteStruct`, ...) as long as it has no cells yet. `Hidden` and `Collapsed` mark the rows of a
+collapsed group and its summary row. `OutlineSummaryAbove` puts the expand button above the group.
+
+### Excel tables
+
+`AddTable` turns a range into a named, styled table with filter buttons. With a header row (the
+default), `Columns` must repeat the header texts exactly:
+
+```go
+sheet.WriteRow("Product", "Units")
+sheet.WriteRow("Widget", 3)
+sheet.WriteRow("Gadget", 5)
+err := sheet.AddTable(hypaxel.Table{
+	FirstRow: 1, FirstColumn: 1, LastRow: sheet.Row(), LastColumn: 2,
+	Name:    "Orders",
+	Columns: []string{"Product", "Units"},
+	Style:   hypaxel.TableStyleMedium(9),
+})
+```
+
+The range may include rows not written yet. Names are unique in the workbook and follow Excel's
+name rules; an empty `Name` gives `Table1`, `Table2`, ... `Style` defaults to Medium 2;
+`TableStyleNone` and `TableStyleLight(n)`, `TableStyleMedium(n)`, `TableStyleDark(n)` select the
+others. `NoHeaderRow`, `NoFilterButtons`, `NoRowStripes`, `ColumnStripes`,
+`HighlightFirstColumn` and `HighlightLastColumn` adjust the rest. Tables cannot overlap each
+other, merged cells or the worksheet's `AutoFilter`.
+
+### Auto-fit columns
+
+`AutoFit` sizes columns without an explicit width to their content:
+
+```go
+sheet, _ := w.AddSheetOptions("Report", hypaxel.SheetOptions{
+	AutoFit: &hypaxel.AutoFit{},          // measure the first 1,000 rows, widths up to 255
+	Columns: []hypaxel.Column{{Width: 12}}, // explicit widths win
+})
+```
+
+Column widths come before the cells in the file, so the worksheet's XML is held back until
+`SampleRows` rows are written (default 1,000), 8 MiB of XML is reached or the sheet ends. Then
+the widths are fixed and streaming continues as usual; memory is bounded by the sample. Widths are
+estimated from the text, number format, font size and boldness of each cell. Formulas, blank
+cells and rows after the sample are not measured. `MaxWidth` caps a fitted width.
 
 ## Options
 
@@ -237,21 +297,22 @@ through those methods.
 
 ## Errors
 
-Functions that validate their arguments (`AddSheet`, `BeginRow`, `MergeCells`, `AutoFilter`)
-return the error and leave the workbook usable. The cell methods return nothing, so that hot loops
-stay cheap: a failed cell write or a failed write to the destination is recorded, and every later
-call (`EndRow`, `WriteRow`, `Close`, ...) returns it. After such an error the output is incomplete
-and must be discarded.
+Functions that validate their arguments (`AddSheet`, `BeginRow`, `MergeCells`, `AutoFilter`,
+`AddTable`) return the error and leave the workbook usable. The cell methods return nothing, so
+that hot loops stay cheap: a failed cell write or a failed write to the destination is recorded,
+and every later call (`EndRow`, `WriteRow`, `Close`, ...) returns it. After such an error the
+output is incomplete and must be discarded.
 
 Test for causes with `errors.Is`: `ErrInvalidSheetName`, `ErrDuplicateSheetName`, `ErrRowOrder`,
 `ErrRowOutOfRange`, `ErrTooManyColumns`, `ErrTextTooLong`, `ErrInvalidStyle`, `ErrInvalidArgument`,
-`ErrNoVisibleSheet`, `ErrUnsupported`, `ErrSheetClosed`, `ErrClosed`. Errors from the destination
-are returned unchanged.
+`ErrInvalidTableName`, `ErrDuplicateTableName`, `ErrOverlappingRange`, `ErrNoVisibleSheet`,
+`ErrUnsupported`, `ErrSheetClosed`, `ErrClosed`. Errors from the destination are returned
+unchanged.
 
 ## Notes and limits
 
 - **Write order:** rows are written top to bottom, and one worksheet at a time. Column widths
-  and frozen panes are set when the worksheet is added.
+  (unless auto-fitted), frozen panes and the outline depth are set when the worksheet is added.
 - **Excel limits apply:** 1,048,576 rows, 16,384 columns and 32,767 characters per cell, 31
   characters per worksheet name.
 - **Readers that need cell references:** by default Hypaxel omits cell references that follow

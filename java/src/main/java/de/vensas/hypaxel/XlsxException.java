@@ -22,6 +22,15 @@ public final class XlsxException extends RuntimeException {
         TOO_MANY_COLUMNS,
         /** A cell holds at most 32,767 characters. */
         TEXT_TOO_LONG,
+        /**
+         * Table names start with a letter, {@code _} or {@code \}, contain only letters, digits,
+         * {@code _}, {@code .} and {@code \}, and do not look like a cell reference.
+         */
+        INVALID_TABLE_NAME,
+        /** Table names are unique in the workbook, ignoring case. */
+        DUPLICATE_TABLE_NAME,
+        /** A range overlaps a table, merged range or auto filter it may not share cells with. */
+        OVERLAPPING_RANGE,
         /** The style was not registered with this writer. */
         INVALID_STYLE,
         /** An argument is outside its allowed range. */

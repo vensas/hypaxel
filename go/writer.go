@@ -3,7 +3,10 @@ package hypaxel
 import (
 	"fmt"
 	"io"
+	"math"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -80,11 +83,20 @@ type Writer struct {
 	merges []cellRange
 	plans  map[reflect.Type]*structPlan
 
-	current      *Sheet
-	row          uint32
-	column       uint32
-	lastColumn   uint32
-	rowOpen      bool
+	current    *Sheet
+	row        uint32
+	column     uint32
+	lastColumn uint32
+	rowOpen    bool
+	// rowExplicit marks an open row started with BeginRow; until it has a cell, the next
+	// whole-row write fills it instead of starting another row.
+	rowExplicit   bool
+	outlineLevels uint8
+	// fit is set while the current sheet's auto-fit sample is held back.
+	fit          *fitState
+	tables       []tableMeta
+	tableNames   []string
+	tableCount   int
 	rowRef       [8]byte
 	rowRefLen    int
 	usesFormulas bool
@@ -143,6 +155,29 @@ type SheetOptions struct {
 	HideGridLines bool
 	Hidden        bool
 	TabColor      Color
+	// RowOutlineLevels is the deepest row outline level (0 to 7) that [RowOptions.OutlineLevel]
+	// uses on this sheet. Excel sizes the outline bar from it, so it is declared up front.
+	RowOutlineLevels int
+	// OutlineSummaryAbove places the expand/collapse button of a row group on the summary row
+	// above the group instead of below it.
+	OutlineSummaryAbove bool
+	// AutoFit sizes columns without an explicit width to fit their content; nil keeps the
+	// default widths.
+	AutoFit *AutoFit
+}
+
+// AutoFit configures column auto-fit for [SheetOptions.AutoFit]. The zero value measures the
+// first 1,000 rows and allows widths up to 255.
+//
+// Column widths precede the cell data in the file, so the Writer holds back the sheet's XML
+// until SampleRows rows are written (or 8 MiB of XML, or the sheet ends), estimates the widths
+// from those rows and then streams as usual. Widths are estimated from the text, number format
+// and font size of each cell; formulas and merged cells are not measured.
+type AutoFit struct {
+	// SampleRows is the number of rows measured before the widths are fixed; zero means 1,000.
+	SampleRows int
+	// MaxWidth caps a fitted width, in characters; zero means 255, Excel's maximum.
+	MaxWidth float64
 }
 
 // AddSheet adds a worksheet with default options. The previous worksheet is completed and can
@@ -171,9 +206,17 @@ func (w *Writer) AddSheetOptions(name string, opts SheetOptions) (*Sheet, error)
 	w.xml = append(w.xml, ".xml"...)
 	w.zip.startEntry(string(w.xml))
 	w.current = &Sheet{w: w}
-	w.row, w.column, w.lastColumn, w.rowOpen = 0, 0, 0, false
+	w.row, w.column, w.lastColumn, w.rowOpen, w.rowExplicit = 0, 0, 0, false, false
 	w.merges = w.merges[:0]
-	w.xml = appendSheetHeader(w.xml[:0], index, &opts)
+	w.outlineLevels = uint8(opts.RowOutlineLevels)
+	x := appendSheetHeader(w.xml[:0], index, &opts)
+	if opts.AutoFit != nil {
+		// <cols> is inserted here once the sample has been measured.
+		w.fit = newFitState(*opts.AutoFit, opts.Columns, len(x))
+	} else {
+		x = appendCols(x, opts.Columns)
+	}
+	w.xml = append(x, "<sheetData>"...)
 	return w.current, nil
 }
 
@@ -198,6 +241,17 @@ func (w *Writer) validateSheet(name string, opts *SheetOptions) error {
 			return fmt.Errorf("%w: column style %d", ErrInvalidStyle, column.Style)
 		}
 	}
+	if opts.RowOutlineLevels < 0 || opts.RowOutlineLevels > 7 {
+		return fmt.Errorf("%w: row outline levels must be within 0..7", ErrInvalidArgument)
+	}
+	if fit := opts.AutoFit; fit != nil {
+		if fit.SampleRows < 0 {
+			return fmt.Errorf("%w: the auto-fit sample cannot be negative", ErrInvalidArgument)
+		}
+		if math.IsNaN(fit.MaxWidth) || fit.MaxWidth < 0 {
+			return fmt.Errorf("%w: the auto-fit maximum width must be positive", ErrInvalidArgument)
+		}
+	}
 	return nil
 }
 
@@ -208,10 +262,17 @@ func (w *Writer) validStyle(style StyleID) bool {
 func appendSheetHeader(x []byte, index int, o *SheetOptions) []byte {
 	x = append(x, xmlDeclaration...)
 	x = append(x, `<worksheet xmlns="`+nsMain+`" xmlns:r="`+nsRel+`">`...)
-	if o.TabColor != 0 {
-		x = append(x, `<sheetPr><tabColor rgb="`...)
-		x = appendARGB(x, o.TabColor)
-		x = append(x, `"/></sheetPr>`...)
+	if o.TabColor != 0 || o.OutlineSummaryAbove {
+		x = append(x, "<sheetPr>"...)
+		if o.TabColor != 0 {
+			x = append(x, `<tabColor rgb="`...)
+			x = appendARGB(x, o.TabColor)
+			x = append(x, `"/>`...)
+		}
+		if o.OutlineSummaryAbove {
+			x = append(x, `<outlinePr summaryBelow="0"/>`...)
+		}
+		x = append(x, "</sheetPr>"...)
 	}
 	x = append(x, `<sheetViews><sheetView workbookViewId="0"`...)
 	if index == 0 {
@@ -249,10 +310,19 @@ func appendSheetHeader(x []byte, index int, o *SheetOptions) []byte {
 	} else {
 		x = append(x, "/></sheetViews>"...)
 	}
-	x = append(x, `<sheetFormatPr defaultRowHeight="15"/>`...)
+	x = append(x, `<sheetFormatPr defaultRowHeight="15"`...)
+	if o.RowOutlineLevels > 0 {
+		x = append(x, ` outlineLevelRow="`...)
+		x = appendUint(x, uint64(o.RowOutlineLevels))
+		x = append(x, '"')
+	}
+	return append(x, "/>"...)
+}
 
+// appendCols writes the non-zero column definitions, if any.
+func appendCols(x []byte, columns []Column) []byte {
 	wroteCols := false
-	for i, column := range o.Columns {
+	for i, column := range columns {
 		if column == (Column{}) {
 			continue
 		}
@@ -260,31 +330,51 @@ func appendSheetHeader(x []byte, index int, o *SheetOptions) []byte {
 			x = append(x, "<cols>"...)
 			wroteCols = true
 		}
-		x = append(x, `<col min="`...)
-		x = appendUint(x, uint64(i+1))
-		x = append(x, `" max="`...)
-		x = appendUint(x, uint64(i+1))
-		x = append(x, `" width="`...)
-		if column.Width > 0 {
-			x = appendFloat(x, min(column.Width, 255), 64)
-			x = append(x, `" customWidth="1"`...)
-		} else {
-			x = append(x, `9.140625"`...)
-		}
-		if column.Style != 0 {
-			x = append(x, ` style="`...)
-			x = appendUint(x, uint64(column.Style))
-			x = append(x, '"')
-		}
-		if column.Hidden {
-			x = append(x, ` hidden="1"`...)
-		}
-		x = append(x, "/>"...)
+		x = appendCol(x, i+1, column)
 	}
 	if wroteCols {
 		x = append(x, "</cols>"...)
 	}
-	return append(x, "<sheetData>"...)
+	return x
+}
+
+func appendCol(x []byte, index int, column Column) []byte {
+	x = append(x, `<col min="`...)
+	x = appendUint(x, uint64(index))
+	x = append(x, `" max="`...)
+	x = appendUint(x, uint64(index))
+	x = append(x, `" width="`...)
+	if column.Width > 0 {
+		x = appendFloat(x, min(column.Width, 255), 64)
+		x = append(x, `" customWidth="1"`...)
+	} else {
+		x = append(x, `9.140625"`...)
+	}
+	if column.Style != 0 {
+		x = append(x, ` style="`...)
+		x = appendUint(x, uint64(column.Style))
+		x = append(x, '"')
+	}
+	if column.Hidden {
+		x = append(x, ` hidden="1"`...)
+	}
+	return append(x, "/>"...)
+}
+
+// endFit inserts the fitted <cols> into the held-back XML and resumes streaming.
+func (w *Writer) endFit() {
+	f := w.fit
+	if f == nil {
+		return
+	}
+	w.fit = nil
+	w.xml = slices.Insert(w.xml, f.colsAt, f.appendCols(nil)...)
+	if len(w.xml) >= xmlBufferSize {
+		w.compress()
+	}
+	if cap(w.xml) > 2*(xmlBufferSize+4096) {
+		w.xml = append(make([]byte, 0, xmlBufferSize+4096), w.xml...)
+	}
 }
 
 func (w *Writer) completeSheet() {
@@ -294,6 +384,7 @@ func (w *Writer) completeSheet() {
 	if w.rowOpen {
 		w.closeRow()
 	}
+	w.endFit()
 	x := append(w.xml, "</sheetData>"...)
 	if f := w.sheets[len(w.sheets)-1].autoFilter; f != nil {
 		x = append(x, `<autoFilter ref="`...)
@@ -311,10 +402,33 @@ func (w *Writer) completeSheet() {
 		}
 		x = append(x, "</mergeCells>"...)
 	}
-	w.xml = append(x, `<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>`...)
+	x = append(x, `<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`...)
+	if len(w.tables) > 0 {
+		x = append(x, `<tableParts count="`...)
+		x = appendUint(x, uint64(len(w.tables)))
+		x = append(x, `">`...)
+		for i := range w.tables {
+			x = append(x, `<tablePart r:id="rId`...)
+			x = appendUint(x, uint64(i+1))
+			x = append(x, `"/>`...)
+		}
+		x = append(x, "</tableParts>"...)
+	}
+	w.xml = append(x, "</worksheet>"...)
 	w.compress()
 	w.zip.finishEntry()
 	w.current = nil
+
+	if len(w.tables) > 0 {
+		for i := range w.tables {
+			t := &w.tables[i]
+			w.writePart("xl/tables/table"+strconv.Itoa(t.id)+".xml", t.appendXML)
+		}
+		w.writePart("xl/worksheets/_rels/sheet"+strconv.Itoa(len(w.sheets))+".xml.rels", func(x []byte) []byte {
+			return appendSheetRels(x, w.tables)
+		})
+		w.tables = w.tables[:0]
+	}
 }
 
 func (w *Writer) writePart(name string, build func(x []byte) []byte) {
@@ -360,11 +474,12 @@ func (w *Writer) Err() error {
 
 // Flush writes everything produced so far to the destination, including rows still held in
 // the compressor. Calling it often costs compression ratio; it is not needed for normal use.
+// Rows held back for [AutoFit] stay held back until the sample is complete.
 func (w *Writer) Flush() error {
 	if w.closed {
 		return w.closeErr()
 	}
-	if w.current != nil {
+	if w.current != nil && w.fit == nil {
 		if len(w.xml) > 0 {
 			w.zip.write(w.xml)
 			w.xml = w.xml[:0]
@@ -436,7 +551,7 @@ func (w *Writer) Close() error {
 		return appendWorkbookRels(x, len(w.sheets), shared)
 	})
 	w.writePart("[Content_Types].xml", func(x []byte) []byte {
-		return appendContentTypes(x, len(w.sheets), shared)
+		return appendContentTypes(x, len(w.sheets), w.tableCount, shared)
 	})
 	w.writePart("_rels/.rels", appendRootRels)
 	w.zip.finish()

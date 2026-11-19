@@ -103,11 +103,28 @@ pub struct SheetOptions {
     pub show_grid_lines: bool,
     pub hidden: bool,
     pub tab_color: Option<Color>,
+    /// Deepest row outline level used on this sheet (0–7). Excel sizes the outline bar from this
+    /// value, which precedes the rows in the file, so it must be declared up front.
+    pub row_outline_levels: u8,
+    /// Puts the expand/collapse button of a row group above it (summary row first) instead of below.
+    pub outline_summary_above: bool,
+    /// Sizes columns without an explicit width to fit their content.
+    pub autofit: Option<AutoFit>,
 }
 
 impl Default for SheetOptions {
     fn default() -> Self {
-        SheetOptions { columns: BTreeMap::new(), frozen_rows: 0, frozen_columns: 0, show_grid_lines: true, hidden: false, tab_color: None }
+        SheetOptions {
+            columns: BTreeMap::new(),
+            frozen_rows: 0,
+            frozen_columns: 0,
+            show_grid_lines: true,
+            hidden: false,
+            tab_color: None,
+            row_outline_levels: 0,
+            outline_summary_above: false,
+            autofit: None,
+        }
     }
 }
 
@@ -151,6 +168,111 @@ impl SheetOptions {
 
     pub fn tab_color(mut self, color: Color) -> Self {
         self.tab_color = Some(color);
+        self
+    }
+
+    /// Declares the deepest row outline level (1–7) that [`RowOptions::outline_level`] will use.
+    pub fn row_outline_levels(mut self, levels: u8) -> Self {
+        self.row_outline_levels = levels;
+        self
+    }
+
+    /// Places group buttons on the summary row above each group rather than below it.
+    pub fn outline_summary_above(mut self) -> Self {
+        self.outline_summary_above = true;
+        self
+    }
+
+    /// Auto-fits columns that have no explicit width, measuring the first 1,000 rows.
+    pub fn autofit_columns(mut self) -> Self {
+        self.autofit = Some(AutoFit::default());
+        self
+    }
+
+    pub fn autofit(mut self, autofit: AutoFit) -> Self {
+        self.autofit = Some(autofit);
+        self
+    }
+}
+
+/// Column auto-fit settings.
+///
+/// Column widths precede the cell data in the file, so the writer holds back the sheet's XML until
+/// `sample_rows` rows have been written (or the sheet ends), estimates the widths from those rows and
+/// then streams as usual. Memory is bounded by the sample: at most `sample_rows` rows or 8 MiB of XML,
+/// whichever comes first. Widths are estimated from the text, number format and font size of each
+/// cell; formulas and merged cells are not measured.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutoFit {
+    /// Rows measured before the widths are fixed. Default: 1,000.
+    pub sample_rows: u32,
+    /// Upper bound for a fitted width, in characters. Default: 255 (Excel's maximum).
+    pub max_width: f64,
+}
+
+impl Default for AutoFit {
+    fn default() -> Self {
+        AutoFit { sample_rows: 1000, max_width: 255.0 }
+    }
+}
+
+impl AutoFit {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn sample_rows(mut self, rows: u32) -> Self {
+        self.sample_rows = rows;
+        self
+    }
+
+    pub fn max_width(mut self, width: f64) -> Self {
+        self.max_width = width;
+        self
+    }
+}
+
+/// Settings for one row, used with [`Sheet::begin_row_with`](crate::Sheet::begin_row_with).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct RowOptions {
+    /// Height in points (0–409).
+    pub height: Option<f64>,
+    /// Format for empty cells in this row.
+    pub style: StyleId,
+    /// Outline (grouping) level 0–7; must not exceed [`SheetOptions::row_outline_levels`].
+    pub outline_level: u8,
+    pub hidden: bool,
+    /// Marks the summary row of a collapsed group (the group's rows should be hidden).
+    pub collapsed: bool,
+}
+
+impl RowOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn height(mut self, points: f64) -> Self {
+        self.height = Some(points);
+        self
+    }
+
+    pub fn style(mut self, style: StyleId) -> Self {
+        self.style = style;
+        self
+    }
+
+    pub fn outline_level(mut self, level: u8) -> Self {
+        self.outline_level = level;
+        self
+    }
+
+    pub fn hidden(mut self) -> Self {
+        self.hidden = true;
+        self
+    }
+
+    pub fn collapsed(mut self) -> Self {
+        self.collapsed = true;
         self
     }
 }

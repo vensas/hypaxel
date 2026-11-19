@@ -6,8 +6,8 @@
 
 use chrono::DateTime;
 use hypaxel::{
-    Alignment, Blank, Border, BorderLine, BorderStyle, Color, Formula, HAlign, Options, SheetOptions, StringStorage, Style, StyleId,
-    VAlign, XlsxWriter,
+    Alignment, AutoFit, Blank, Border, BorderLine, BorderStyle, Color, Formula, HAlign, Options, RowOptions, SheetOptions, StringStorage,
+    Style, StyleId, Table, TableStyle, VAlign, XlsxWriter,
 };
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -77,6 +77,55 @@ pub struct NativeSheetOptions {
     pub hidden: Option<bool>,
     pub show_grid_lines: Option<bool>,
     pub tab_color: Option<String>,
+    pub autofit: Option<bool>,
+    pub autofit_sample_rows: Option<u32>,
+    pub autofit_max_width: Option<f64>,
+    pub row_outline_levels: Option<u8>,
+    pub outline_summary_above: Option<bool>,
+}
+
+#[napi(object)]
+#[derive(Default)]
+pub struct NativeRowOptions {
+    pub height: Option<f64>,
+    pub style: Option<u32>,
+    pub outline_level: Option<u8>,
+    pub hidden: Option<bool>,
+    pub collapsed: Option<bool>,
+}
+
+#[napi(object)]
+#[derive(Default)]
+pub struct NativeTableOptions {
+    pub name: Option<String>,
+    pub columns: Option<Vec<String>>,
+    /// `TableStyleMedium2` etc.; `"none"` for no table style.
+    pub style: Option<String>,
+    pub header_row: Option<bool>,
+    pub autofilter: Option<bool>,
+    pub row_stripes: Option<bool>,
+    pub column_stripes: Option<bool>,
+    pub first_column: Option<bool>,
+    pub last_column: Option<bool>,
+}
+
+fn parse_table_style(name: Option<&str>) -> Result<TableStyle> {
+    let Some(name) = name else { return Ok(TableStyle::default()) };
+    if name.eq_ignore_ascii_case("none") {
+        return Ok(TableStyle::None);
+    }
+    let invalid = || invalid(format!("unknown table style {name:?}; expected e.g. 'TableStyleMedium2' or 'none'"));
+    let rest = name.strip_prefix("TableStyle").ok_or_else(invalid)?;
+    let (kind, number): (fn(u8) -> TableStyle, &str) = if let Some(n) = rest.strip_prefix("Light") {
+        (TableStyle::Light, n)
+    } else if let Some(n) = rest.strip_prefix("Medium") {
+        (TableStyle::Medium, n)
+    } else if let Some(n) = rest.strip_prefix("Dark") {
+        (TableStyle::Dark, n)
+    } else {
+        return Err(invalid());
+    };
+    Ok(kind(number.parse().map_err(|_| invalid())?))
 }
 
 fn parse_color(s: &str) -> Result<Color> {
@@ -265,6 +314,18 @@ impl NativeWriter {
         if let Some(c) = &o.tab_color {
             sheet = sheet.tab_color(parse_color(c)?);
         }
+        if o.autofit.unwrap_or(false) {
+            let defaults = AutoFit::default();
+            sheet = sheet.autofit(
+                AutoFit::new()
+                    .sample_rows(o.autofit_sample_rows.unwrap_or(defaults.sample_rows))
+                    .max_width(o.autofit_max_width.unwrap_or(defaults.max_width)),
+            );
+        }
+        sheet = sheet.row_outline_levels(o.row_outline_levels.unwrap_or(0));
+        if o.outline_summary_above.unwrap_or(false) {
+            sheet = sheet.outline_summary_above();
+        }
         self.inner()?.add_worksheet_with(&name, &sheet).map_err(core)?;
         Ok(())
     }
@@ -328,12 +389,46 @@ impl NativeWriter {
         Ok(rows)
     }
 
-    /// Starts the next row explicitly, to set its height (points) or a row style.
+    /// Starts the next row explicitly, to set its height (points), style, outline level or hidden state.
     #[napi]
-    pub fn begin_row(&mut self, height: Option<f64>, style: Option<u32>) -> Result<()> {
-        let style = self.style(style.unwrap_or(0))?;
+    pub fn begin_row(&mut self, options: Option<NativeRowOptions>) -> Result<()> {
+        let o = options.unwrap_or_default();
+        let row = RowOptions {
+            height: o.height,
+            style: self.style(o.style.unwrap_or(0))?,
+            outline_level: o.outline_level.unwrap_or(0),
+            hidden: o.hidden.unwrap_or(false),
+            collapsed: o.collapsed.unwrap_or(false),
+        };
         let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        sheet.begin_row(height, style).map_err(core)?;
+        sheet.begin_row_with(&row).map_err(core)?;
+        Ok(())
+    }
+
+    #[napi]
+    pub fn add_table(
+        &mut self,
+        first_row: u32,
+        first_col: u32,
+        last_row: u32,
+        last_col: u32,
+        options: Option<NativeTableOptions>,
+    ) -> Result<()> {
+        let o = options.unwrap_or_default();
+        let mut table = Table::new(first_row, first_col, last_row, last_col)
+            .columns(o.columns.unwrap_or_default())
+            .style(parse_table_style(o.style.as_deref())?)
+            .header_row(o.header_row.unwrap_or(true))
+            .autofilter(o.autofilter.unwrap_or(true))
+            .row_stripes(o.row_stripes.unwrap_or(true))
+            .column_stripes(o.column_stripes.unwrap_or(false))
+            .highlight_first_column(o.first_column.unwrap_or(false))
+            .highlight_last_column(o.last_column.unwrap_or(false));
+        if let Some(name) = o.name {
+            table = table.name(name);
+        }
+        let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
+        sheet.add_table(&table).map_err(core)?;
         Ok(())
     }
 

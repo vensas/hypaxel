@@ -19,6 +19,9 @@ public final class SheetOptions {
     private final boolean showGridLines;
     private final boolean hidden;
     private final Color tabColor;
+    private final int rowOutlineLevels;
+    private final boolean outlineSummaryAbove;
+    private final AutoFit autoFit;
 
     private SheetOptions(Builder builder) {
         columns = Collections.unmodifiableSortedMap(new TreeMap<>(builder.columns));
@@ -27,6 +30,9 @@ public final class SheetOptions {
         showGridLines = builder.showGridLines;
         hidden = builder.hidden;
         tabColor = builder.tabColor;
+        rowOutlineLevels = builder.rowOutlineLevels;
+        outlineSummaryAbove = builder.outlineSummaryAbove;
+        autoFit = builder.autoFit;
     }
 
     /** Returns a builder with the default options. */
@@ -64,6 +70,21 @@ public final class SheetOptions {
         return tabColor;
     }
 
+    /** Returns the deepest row outline level used on the worksheet, 0 to 7. */
+    public int rowOutlineLevels() {
+        return rowOutlineLevels;
+    }
+
+    /** Returns whether group buttons sit on the summary row above each group rather than below it. */
+    public boolean outlineSummaryAbove() {
+        return outlineSummaryAbove;
+    }
+
+    /** Returns the column auto-fit settings, or null when columns keep their default widths. */
+    public AutoFit autoFit() {
+        return autoFit;
+    }
+
     /** Builder for {@link SheetOptions}. */
     public static final class Builder {
         private final TreeMap<Integer, Column> columns = new TreeMap<>();
@@ -72,6 +93,9 @@ public final class SheetOptions {
         private boolean showGridLines = true;
         private boolean hidden;
         private Color tabColor;
+        private int rowOutlineLevels;
+        private boolean outlineSummaryAbove;
+        private AutoFit autoFit;
 
         private Builder() {
         }
@@ -129,6 +153,36 @@ public final class SheetOptions {
         /** Sets the color of the worksheet tab. */
         public Builder tabColor(Color color) {
             tabColor = color;
+            return this;
+        }
+
+        /**
+         * Declares the deepest row outline level, 1 to 7, that {@link RowOptions.Builder#outlineLevel(int)}
+         * will use. Excel sizes the outline bar from this value, which precedes the rows in the
+         * file, so it must be declared up front.
+         */
+        public Builder rowOutlineLevels(int levels) {
+            if (levels < 0 || levels > 7) {
+                throw new XlsxException(XlsxException.Kind.INVALID_ARGUMENT, "row outline levels must be within 0..7");
+            }
+            rowOutlineLevels = levels;
+            return this;
+        }
+
+        /** Places the expand/collapse button of a row group on the summary row above it instead of below. */
+        public Builder outlineSummaryAbove() {
+            outlineSummaryAbove = true;
+            return this;
+        }
+
+        /** Sizes columns without an explicit width to fit their content, measuring the first 1,000 rows. */
+        public Builder autoFitColumns() {
+            return autoFit(AutoFit.DEFAULT);
+        }
+
+        /** Sizes columns without an explicit width to fit their content; null keeps the default widths. See {@link AutoFit}. */
+        public Builder autoFit(AutoFit settings) {
+            autoFit = settings;
             return this;
         }
 

@@ -123,6 +123,72 @@ Supported member types: `string`, all integer types, `float`, `double`, `decimal
 `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, `Guid`, enums (written as names),
 `char`, nullable versions of all of these, and any other type via `ToString()`.
 
+## Auto-fit columns
+
+Turn on `AutoFit` and columns without an explicit width are sized to their content:
+
+```csharp
+var sheet = writer.AddWorksheet("Orders", new WorksheetOptions { FrozenRows = 1 }.AutoFitColumns());
+
+// Or tune the sample and cap the width (in characters):
+new WorksheetOptions { AutoFit = new AutoFitOptions { SampleRows = 500, MaxWidth = 60 } };
+```
+
+Column widths come before the cell data in the file, so the writer holds back the sheet's XML
+while it measures the first `SampleRows` rows (1,000 by default). It then writes the widths and
+streams the rest as usual. Memory is bounded by the sample: at most `SampleRows` rows or 8 MiB
+of XML, whichever comes first. Rows after the sample are not measured.
+
+Widths are estimated from the text, the number format (dates, `#,##0.00`, percentages, …) and the
+font size and weight of each cell. Formulas and blank cells are not measured. Widths you set with
+`SetColumn` / `SetColumnWidths` always win.
+
+## Excel tables
+
+`AddTable` turns a range into an Excel table (a `ListObject`), with a header row, filter buttons,
+banded rows and names you can use in formulas such as `=SUM(Orders[Units])`:
+
+```csharp
+var sheet = writer.AddWorksheet("Orders");
+await sheet.AddRowAsync("Product", "Units");
+await sheet.AddRowAsync("Widget", 3);
+await sheet.AddRowAsync("Gadget", 5);
+
+sheet.AddTable(new ExcelTable(1, 1, sheet.RowNumber, 2)
+{
+    Name = "Orders",                    // optional: Table1, Table2, … otherwise
+    Columns = ["Product", "Units"],     // must match the header row
+    Style = TableStyle.Medium(9),       // Light(1–21), Medium(1–28), Dark(1–11) or None
+});
+```
+
+With a header row (the default), `Columns` must list the header texts exactly as written, because
+Excel identifies table columns by those names. Table names are unique in the workbook and follow
+Excel's name rules. Tables cannot overlap each other, merged cells or the worksheet auto filter.
+The range may include rows you have not written yet.
+
+## Row grouping
+
+Rows can be grouped into collapsible outline levels. Declare the deepest level when you add the
+worksheet, because Excel reads it before the rows:
+
+```csharp
+var sheet = writer.AddWorksheet("Regions", new WorksheetOptions
+{
+    RowOutlineLevels = 1,           // deepest level used, 0–7
+    OutlineSummaryAbove = true,     // the group's button sits on the row above it
+});
+
+await sheet.AddRowAsync("North", 300);
+sheet.BeginRow(new RowOptions { OutlineLevel = 1 });                  // AddRow fills the begun row
+await sheet.AddRowAsync("Store A", 120);
+
+sheet.BeginRow(new RowOptions { OutlineLevel = 1, Hidden = true });   // a collapsed group's rows are hidden
+await sheet.AddRowAsync("Store B", 180);
+```
+
+`RowOptions` also sets `Height`, `Style` and `Collapsed` (on the summary row of a collapsed group).
+
 ## Features (milestone 1)
 
 | Area | Supported |
@@ -130,8 +196,8 @@ Supported member types: `string`, all integer types, `float`, `double`, `decimal
 | Values | strings, numbers, booleans, dates/times/durations, formulas, styled blanks, `#NUM!` for NaN/∞ |
 | Dates | 1900 and 1904 date systems. Unstyled dates get the viewer's locale date format. Dates before 1900 are written as ISO text |
 | Styles | font (name, size, bold, italic, underline, strike, color), solid fill, borders (13 line styles), alignment, number formats |
-| Worksheet | multiple sheets, column widths/styles/hidden, row height/style, frozen rows/columns, gridlines, tab color, hidden sheets |
-| Ranges | merged cells, auto filter |
+| Worksheet | multiple sheets, column widths/styles/hidden, auto-fit columns, row height/style/hidden, row outline levels, frozen rows/columns, gridlines, tab color, hidden sheets |
+| Ranges | merged cells, auto filter, Excel tables (built-in styles) |
 | Strings | inline (default) or shared string table. Full XML escaping, control characters as `_xHHHH_`, lone surrogates replaced |
 | I/O | any writable `Stream` (seekable or not), file path helper, async and sync APIs |
 
@@ -231,14 +297,15 @@ new XlsxWriterOptions
 
 - Rows are written top to bottom, and cells left to right. Use `SkipCells` / `SkipRows` / `BeginRow(n)` to leave gaps.
 - One worksheet is open at a time. Adding the next worksheet completes the previous one.
-- Column definitions and frozen panes go in `WorksheetOptions` when you create the sheet, because
-  they come before the cell data in the file. Merges and filters can be added at any time before the sheet completes.
+- Column definitions, frozen panes and the outline depth go in `WorksheetOptions` when you create the sheet,
+  because they come before the cell data in the file. Merges, filters and tables can be added at any time
+  before the sheet completes.
 - Formulas are stored without cached results. Excel recalculates them when the file opens.
 
 ## Roadmap
 
 1. **Create Excel files** (this milestone)
-2. Hyperlinks, data validation, conditional formatting, images, tables (ListObjects), document properties
+2. Hyperlinks, data validation, conditional formatting, images, document properties
 3. Source generator for object mapping (AOT/trimming-friendly)
 4. Streaming reader (`XlsxReader`) with low-allocation row enumeration
 5. Read-modify-write for templates

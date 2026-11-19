@@ -6,8 +6,10 @@ use std::hash::BuildHasher;
 use hashbrown::{DefaultHashBuilder, HashTable};
 
 use crate::error::{Error, Result};
-use crate::options::{Options, SheetOptions, StringStorage};
+use crate::fit::{FitState, write_col};
+use crate::options::{Options, RowOptions, SheetOptions, StringStorage};
 use crate::style::{StyleId, StyleRegistry, ValueKind};
+use crate::table::{Table, TableMeta, overlaps};
 use crate::xml;
 use crate::zip::ZipStream;
 
@@ -76,11 +78,20 @@ pub struct CellWriter {
     column: u32,
     last_column: u32,
     row_open: bool,
+    /// The open row was started explicitly (`begin_row*`); until it has a cell, the next
+    /// whole-row write fills it instead of starting another row.
+    row_explicit: bool,
     row_ref: [u8; 8],
     row_ref_len: usize,
     merges: Vec<(u32, u32, u32, u32)>,
     error: Option<Error>,
     uses_formulas: bool,
+    /// Present while the current sheet's auto-fit sample is held back.
+    fit: Option<Box<FitState>>,
+    row_outline_levels: u8,
+    tables: Vec<TableMeta>,
+    table_names: Vec<String>,
+    table_count: u32,
 }
 
 impl CellWriter {
@@ -99,11 +110,17 @@ impl CellWriter {
             column: 0,
             last_column: 0,
             row_open: false,
+            row_explicit: false,
             row_ref: [0; 8],
             row_ref_len: 0,
             merges: Vec::new(),
             error: None,
             uses_formulas: false,
+            fit: None,
+            row_outline_levels: 0,
+            tables: Vec::new(),
+            table_names: Vec::new(),
+            table_count: 0,
         }
     }
 
@@ -127,7 +144,7 @@ impl CellWriter {
 
     #[inline]
     fn maybe_compress(&mut self) {
-        if self.xml.len() >= self.opts.xml_buffer_size {
+        if self.xml.len() >= self.opts.xml_buffer_size && self.fit.is_none() {
             self.compress_xml();
         }
     }
@@ -182,6 +199,17 @@ impl CellWriter {
         if options.columns.keys().any(|&c| c == 0 || c > MAX_COLUMNS) {
             return Err(Error::InvalidArgument("column index must be within 1..=16384"));
         }
+        if options.row_outline_levels > 7 {
+            return Err(Error::InvalidArgument("row outline levels must be within 0..=7"));
+        }
+        if let Some(fit) = &options.autofit {
+            if fit.sample_rows == 0 {
+                return Err(Error::InvalidArgument("the auto-fit sample needs at least one row"));
+            }
+            if fit.max_width.is_nan() || fit.max_width <= 0.0 {
+                return Err(Error::InvalidArgument("the auto-fit maximum width must be positive"));
+            }
+        }
 
         self.complete_sheet();
         let index = self.sheets.len();
@@ -192,7 +220,9 @@ impl CellWriter {
         self.column = 0;
         self.last_column = 0;
         self.row_open = false;
+        self.row_explicit = false;
         self.merges.clear();
+        self.row_outline_levels = options.row_outline_levels;
         self.write_sheet_header(index, options);
         Ok(())
     }
@@ -205,10 +235,17 @@ impl CellWriter {
         x.extend_from_slice(b"\" xmlns:r=\"");
         x.extend_from_slice(xml::NS_REL);
         x.extend_from_slice(b"\">");
-        if let Some(color) = o.tab_color {
-            x.extend_from_slice(b"<sheetPr><tabColor rgb=\"");
-            x.extend_from_slice(format!("{:08X}", color.0).as_bytes());
-            x.extend_from_slice(b"\"/></sheetPr>");
+        if o.tab_color.is_some() || o.outline_summary_above {
+            x.extend_from_slice(b"<sheetPr>");
+            if let Some(color) = o.tab_color {
+                x.extend_from_slice(b"<tabColor rgb=\"");
+                x.extend_from_slice(format!("{:08X}", color.0).as_bytes());
+                x.extend_from_slice(b"\"/>");
+            }
+            if o.outline_summary_above {
+                x.extend_from_slice(b"<outlinePr summaryBelow=\"0\"/>");
+            }
+            x.extend_from_slice(b"</sheetPr>");
         }
         x.extend_from_slice(b"<sheetViews><sheetView workbookViewId=\"0\"");
         if index == 0 {
@@ -244,33 +281,37 @@ impl CellWriter {
         } else {
             x.extend_from_slice(b"/></sheetViews>");
         }
-        x.extend_from_slice(b"<sheetFormatPr defaultRowHeight=\"15\"/>");
-        if !o.columns.is_empty() {
+        x.extend_from_slice(b"<sheetFormatPr defaultRowHeight=\"15\"");
+        if o.row_outline_levels > 0 {
+            x.extend_from_slice(b" outlineLevelRow=\"");
+            xml::push_int(x, o.row_outline_levels);
+            x.push(b'"');
+        }
+        x.extend_from_slice(b"/>");
+        if let Some(autofit) = o.autofit {
+            // `<cols>` is inserted here once the sample has been measured.
+            self.fit = Some(Box::new(FitState::new(autofit, o.columns.clone(), x.len())));
+        } else if !o.columns.is_empty() {
             x.extend_from_slice(b"<cols>");
             for (&index, column) in &o.columns {
-                x.extend_from_slice(b"<col min=\"");
-                xml::push_int(x, index);
-                x.extend_from_slice(b"\" max=\"");
-                xml::push_int(x, index);
-                x.extend_from_slice(b"\" width=\"");
-                xml::push_f64(x, column.width.map_or(9.140625, |w| w.clamp(0.0, 255.0)));
-                x.push(b'"');
-                if column.width.is_some() {
-                    x.extend_from_slice(b" customWidth=\"1\"");
-                }
-                if column.style.0 != 0 {
-                    x.extend_from_slice(b" style=\"");
-                    xml::push_int(x, column.style.0);
-                    x.push(b'"');
-                }
-                if column.hidden {
-                    x.extend_from_slice(b" hidden=\"1\"");
-                }
-                x.extend_from_slice(b"/>");
+                write_col(x, index, column);
             }
             x.extend_from_slice(b"</cols>");
         }
         x.extend_from_slice(b"<sheetData>");
+    }
+
+    /// Inserts the fitted `<cols>` into the held-back XML and resumes streaming.
+    #[cold]
+    fn end_fit(&mut self) {
+        let Some(fit) = self.fit.take() else { return };
+        let mut cols = Vec::new();
+        fit.write_cols(&mut cols);
+        self.xml.splice(fit.cols_at..fit.cols_at, cols);
+        if self.xml.len() >= self.opts.xml_buffer_size {
+            self.compress_xml();
+        }
+        self.xml.shrink_to(self.opts.xml_buffer_size + 4096);
     }
 
     pub(crate) fn complete_sheet(&mut self) {
@@ -280,7 +321,9 @@ impl CellWriter {
         if self.row_open {
             self.close_row();
         }
+        self.end_fit();
         let autofilter = self.sheets.last().and_then(|s| s.autofilter);
+        let tables = std::mem::take(&mut self.tables);
         let x = &mut self.xml;
         x.extend_from_slice(b"</sheetData>");
         if let Some((r1, c1, r2, c2)) = autofilter {
@@ -299,12 +342,30 @@ impl CellWriter {
             }
             x.extend_from_slice(b"</mergeCells>");
         }
-        x.extend_from_slice(
-            b"<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/></worksheet>",
-        );
+        x.extend_from_slice(b"<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>");
+        if !tables.is_empty() {
+            x.extend_from_slice(b"<tableParts count=\"");
+            xml::push_int(x, tables.len());
+            x.extend_from_slice(b"\">");
+            for i in 1..=tables.len() {
+                x.extend_from_slice(b"<tablePart r:id=\"rId");
+                xml::push_int(x, i);
+                x.extend_from_slice(b"\"/>");
+            }
+            x.extend_from_slice(b"</tableParts>");
+        }
+        x.extend_from_slice(b"</worksheet>");
         self.compress_xml();
         self.zip.finish_entry();
         self.sheet_open = false;
+
+        if !tables.is_empty() {
+            for table in &tables {
+                self.write_part(&format!("xl/tables/table{}.xml", table.id), |_, x| table.write_xml(x));
+            }
+            let sheet = self.sheets.len();
+            self.write_part(&format!("xl/worksheets/_rels/sheet{sheet}.xml.rels"), |_, x| crate::parts::sheet_rels(x, &tables));
+        }
     }
 
     pub(crate) fn has_open_sheet(&self) -> bool {
@@ -345,7 +406,7 @@ impl CellWriter {
         self.write_part("xl/styles.xml", |w, x| w.styles.write_xml(x));
         self.write_part("xl/workbook.xml", |w, x| crate::parts::workbook(x, &w.sheets, w.uses_formulas, w.opts.date_1904));
         self.write_part("xl/_rels/workbook.xml.rels", |w, x| crate::parts::workbook_rels(x, w.sheets.len(), shared));
-        self.write_part("[Content_Types].xml", |w, x| crate::parts::content_types(x, w.sheets.len(), shared));
+        self.write_part("[Content_Types].xml", |w, x| crate::parts::content_types(x, w.sheets.len(), w.table_count, shared));
         self.write_part("_rels/.rels", |_, x| crate::parts::root_rels(x));
         self.zip.finish();
         Ok(())
@@ -363,30 +424,39 @@ impl CellWriter {
         self.column
     }
 
-    pub(crate) fn begin_row_at(&mut self, row: u32, height: Option<f64>, style: StyleId) -> Result<()> {
+    pub(crate) fn begin_row_at(&mut self, row: u32, options: &RowOptions) -> Result<()> {
         if row == 0 || row > MAX_ROWS {
             return Err(Error::RowOutOfRange(row as u64));
         }
         if row <= self.row {
             return Err(Error::RowOrder { row, previous: self.row });
         }
-        if style.0 >= self.styles.len() {
-            return Err(Error::InvalidStyle(style.0));
+        if options.style.0 >= self.styles.len() {
+            return Err(Error::InvalidStyle(options.style.0));
         }
-        if let Some(h) = height {
+        if let Some(h) = options.height {
             if !(0.0..=409.0).contains(&h) {
                 return Err(Error::InvalidArgument("row height must be within 0..=409 points"));
             }
         }
+        if options.outline_level > 7 {
+            return Err(Error::InvalidArgument("row outline level must be within 0..=7"));
+        }
+        if options.outline_level > self.row_outline_levels {
+            return Err(Error::InvalidArgument(
+                "row outline level exceeds the sheet's declared depth; declare the deepest level (row_outline_levels) when adding the worksheet",
+            ));
+        }
         if self.row_open {
             self.close_row();
         }
-        self.open_row(row, height, style);
+        self.open_row(row, Some(options));
+        self.row_explicit = true;
         Ok(())
     }
 
     #[inline]
-    fn open_row(&mut self, row: u32, height: Option<f64>, style: StyleId) {
+    fn open_row(&mut self, row: u32, options: Option<&RowOptions>) {
         self.row = row;
         self.column = 0;
         self.last_column = 0;
@@ -400,22 +470,44 @@ impl CellWriter {
         x.extend_from_slice(b"<row r=\"");
         x.extend_from_slice(digits);
         x.push(b'"');
-        if let Some(h) = height {
-            x.extend_from_slice(b" ht=\"");
-            xml::push_f64(x, h);
-            x.extend_from_slice(b"\" customHeight=\"1\"");
-        }
-        if style.0 != 0 {
-            x.extend_from_slice(b" s=\"");
-            xml::push_int(x, style.0);
-            x.extend_from_slice(b"\" customFormat=\"1\"");
+        if let Some(o) = options {
+            if let Some(h) = o.height {
+                x.extend_from_slice(b" ht=\"");
+                xml::push_f64(x, h);
+                x.extend_from_slice(b"\" customHeight=\"1\"");
+            }
+            if o.style.0 != 0 {
+                x.extend_from_slice(b" s=\"");
+                xml::push_int(x, o.style.0);
+                x.extend_from_slice(b"\" customFormat=\"1\"");
+            }
+            if o.hidden {
+                x.extend_from_slice(b" hidden=\"1\"");
+            }
+            if o.outline_level > 0 {
+                x.extend_from_slice(b" outlineLevel=\"");
+                xml::push_int(x, o.outline_level);
+                x.push(b'"');
+            }
+            if o.collapsed {
+                x.extend_from_slice(b" collapsed=\"1\"");
+            }
         }
         x.push(b'>');
+    }
+
+    /// Row that the next whole-row write lands in.
+    #[cfg_attr(not(feature = "serde"), allow(dead_code))]
+    pub(crate) fn next_row(&self) -> u32 {
+        if self.row_open && self.row_explicit && self.column == 0 { self.row } else { self.row + 1 }
     }
 
     #[inline]
     pub(crate) fn begin_next_row(&mut self) {
         if self.row_open {
+            if self.row_explicit && self.column == 0 {
+                return;
+            }
             self.close_row();
         }
         if self.row >= MAX_ROWS {
@@ -423,13 +515,20 @@ impl CellWriter {
             // Keep writing into the last row so the XML stays well-formed.
             self.row -= 1;
         }
-        self.open_row(self.row + 1, None, StyleId::DEFAULT);
+        self.open_row(self.row + 1, None);
     }
 
     #[inline]
     pub(crate) fn close_row(&mut self) {
         self.xml.extend_from_slice(b"</row>");
         self.row_open = false;
+        self.row_explicit = false;
+        if let Some(fit) = self.fit.as_deref_mut() {
+            fit.rows += 1;
+            if fit.sample_complete(self.xml.len()) {
+                self.end_fit();
+            }
+        }
         self.maybe_compress();
     }
 
@@ -468,15 +567,42 @@ impl CellWriter {
         if r1 == r2 && c1 == c2 {
             return Err(Error::InvalidArgument("a merged range must span more than one cell"));
         }
+        if self.tables.iter().any(|t| overlaps(t.range, (r1, c1, r2, c2))) {
+            return Err(Error::OverlappingRange("merged cells cannot overlap a table"));
+        }
         self.merges.push((r1, c1, r2, c2));
         Ok(())
     }
 
     pub(crate) fn autofilter(&mut self, r1: u32, c1: u32, r2: u32, c2: u32) -> Result<()> {
         validate_range(r1, c1, r2, c2)?;
+        if self.tables.iter().any(|t| overlaps(t.range, (r1, c1, r2, c2))) {
+            return Err(Error::OverlappingRange("a worksheet auto filter cannot overlap a table (tables have their own filter)"));
+        }
         if let Some(sheet) = self.sheets.last_mut() {
             sheet.autofilter = Some((r1, c1, r2, c2));
         }
+        Ok(())
+    }
+
+    pub(crate) fn add_table(&mut self, table: &Table) -> Result<()> {
+        let names = &self.table_names;
+        let meta = TableMeta::new(table, self.table_count + 1, |name| {
+            let lower = name.to_lowercase();
+            names.contains(&lower)
+        })?;
+        if self.tables.iter().any(|t| overlaps(t.range, meta.range)) {
+            return Err(Error::OverlappingRange("tables cannot overlap each other"));
+        }
+        if self.merges.iter().any(|&m| overlaps(m, meta.range)) {
+            return Err(Error::OverlappingRange("a table cannot overlap merged cells"));
+        }
+        if self.sheets.last().and_then(|s| s.autofilter).is_some_and(|f| overlaps(f, meta.range)) {
+            return Err(Error::OverlappingRange("a table cannot overlap the worksheet auto filter (tables have their own filter)"));
+        }
+        self.table_count += 1;
+        self.table_names.push(meta.name.to_lowercase());
+        self.tables.push(meta);
         Ok(())
     }
 
@@ -525,6 +651,9 @@ impl CellWriter {
     #[inline]
     pub fn write_i64(&mut self, value: i64, style: StyleId) {
         if self.begin_cell(style) {
+            if let Some(fit) = self.fit.as_deref_mut() {
+                fit.number(&self.styles, self.column, style.0, value as f64);
+            }
             let x = &mut self.xml;
             x.extend_from_slice(b"><v>");
             xml::push_int(x, value);
@@ -536,6 +665,9 @@ impl CellWriter {
     #[inline]
     pub fn write_u64(&mut self, value: u64, style: StyleId) {
         if self.begin_cell(style) {
+            if let Some(fit) = self.fit.as_deref_mut() {
+                fit.number(&self.styles, self.column, style.0, value as f64);
+            }
             let x = &mut self.xml;
             x.extend_from_slice(b"><v>");
             xml::push_int(x, value);
@@ -547,6 +679,9 @@ impl CellWriter {
     #[inline]
     pub fn write_f64(&mut self, value: f64, style: StyleId) {
         if self.begin_cell(style) {
+            if let Some(fit) = self.fit.as_deref_mut() {
+                fit.number(&self.styles, self.column, style.0, value);
+            }
             let x = &mut self.xml;
             if value.is_finite() {
                 x.extend_from_slice(b"><v>");
@@ -561,6 +696,9 @@ impl CellWriter {
     #[inline]
     pub fn write_bool(&mut self, value: bool, style: StyleId) {
         if self.begin_cell(style) {
+            if let Some(fit) = self.fit.as_deref_mut() {
+                fit.text(&self.styles, self.column, style.0, if value { "TRUE" } else { "FALSE" });
+            }
             self.xml.extend_from_slice(if value { b" t=\"b\"><v>1</v></c>" } else { b" t=\"b\"><v>0</v></c>" });
         }
     }
@@ -581,6 +719,9 @@ impl CellWriter {
         }
         if !self.begin_cell(style) {
             return;
+        }
+        if let Some(fit) = self.fit.as_deref_mut() {
+            fit.text(&self.styles, self.column, style.0, value);
         }
         match &mut self.sst {
             Some(sst) => {
@@ -652,6 +793,9 @@ impl CellWriter {
         };
         let style = StyleId(self.styles.value_variant(style.0, kind));
         if self.begin_cell(style) {
+            if let Some(fit) = self.fit.as_deref_mut() {
+                fit.number(&self.styles, self.column, style.0, day as f64);
+            }
             let x = &mut self.xml;
             x.extend_from_slice(b"><v>");
             xml::push_serial(x, day, nanos);

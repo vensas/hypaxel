@@ -92,6 +92,23 @@ public final class XmlBuffer {
         buf = Arrays.copyOf(buf, (int) Math.max(required, doubled));
     }
 
+    /** Inserts the content of {@code other} at an earlier position of this buffer. */
+    public void insert(int position, XmlBuffer other) {
+        int length = other.pos;
+        ensure(length);
+        System.arraycopy(buf, position, buf, position + length, pos - position);
+        System.arraycopy(other.buf, 0, buf, position, length);
+        pos += length;
+    }
+
+    /** Releases capacity beyond {@code capacity} that a held-back sample made the buffer grow to. */
+    public void shrink(int capacity) {
+        int target = Math.max(capacity, pos);
+        if (buf.length > target) {
+            buf = Arrays.copyOf(buf, target);
+        }
+    }
+
     public XmlBuffer raw(byte[] literal) {
         ensure(literal.length);
         System.arraycopy(literal, 0, buf, pos, literal.length);

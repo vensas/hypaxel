@@ -9,8 +9,8 @@ use std::io::{self, BufWriter, Write};
 
 use chrono::{NaiveDate, NaiveTime, TimeDelta};
 use hypaxel::{
-    Alignment, Blank, Border, BorderLine, BorderStyle, Color, HAlign, Options, Sheet, SheetOptions, StringStorage, Style as RsStyle,
-    StyleId, VAlign, XlsxWriter,
+    Alignment, AutoFit, Blank, Border, BorderLine, BorderStyle, Color, HAlign, Options, RowOptions, Sheet, SheetOptions, StringStorage,
+    Style as RsStyle, StyleId, Table, TableStyle, VAlign, XlsxWriter,
 };
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
@@ -264,6 +264,27 @@ fn parse_color(s: &str) -> PyResult<Color> {
     Color::hex(s).ok_or_else(|| PyValueError::new_err(format!("invalid color {s:?}; expected '#RRGGBB' or '#AARRGGBB'")))
 }
 
+/// Parses ``"TableStyleMedium2"``-style names (``None`` or ``"none"`` for no table style).
+fn parse_table_style(s: Option<&str>) -> PyResult<TableStyle> {
+    let Some(name) = s.filter(|n| !n.eq_ignore_ascii_case("none")) else { return Ok(TableStyle::None) };
+    let invalid = || PyValueError::new_err(format!("unknown table style {name:?}; expected e.g. 'TableStyleMedium2' or None"));
+    let rest = name.strip_prefix("TableStyle").ok_or_else(invalid)?;
+    let (kind, number): (fn(u8) -> TableStyle, &str) = if let Some(n) = rest.strip_prefix("Light") {
+        (TableStyle::Light, n)
+    } else if let Some(n) = rest.strip_prefix("Medium") {
+        (TableStyle::Medium, n)
+    } else if let Some(n) = rest.strip_prefix("Dark") {
+        (TableStyle::Dark, n)
+    } else {
+        return Err(invalid());
+    };
+    Ok(kind(number.parse().map_err(|_| invalid())?))
+}
+
+fn row_options(height: Option<f64>, style: StyleId, outline_level: u8, hidden: bool, collapsed: bool) -> RowOptions {
+    RowOptions { height, style, outline_level, hidden, collapsed }
+}
+
 fn parse_border(s: &str) -> PyResult<BorderStyle> {
     Ok(match s {
         "none" => BorderStyle::None,
@@ -396,7 +417,8 @@ impl Writer {
     }
 
     /// Adds a worksheet and makes it the current one; the previous worksheet is completed.
-    #[pyo3(signature = (name, *, freeze_rows=0, freeze_columns=0, column_widths=None, hidden=false, show_grid_lines=true, tab_color=None))]
+    #[pyo3(signature = (name, *, freeze_rows=0, freeze_columns=0, column_widths=None, hidden=false, show_grid_lines=true, tab_color=None,
+        autofit=false, autofit_sample_rows=1000, autofit_max_width=255.0, row_outline_levels=0, outline_summary_above=false))]
     #[allow(clippy::too_many_arguments)]
     fn add_worksheet(
         slf: Bound<'_, Self>,
@@ -407,8 +429,20 @@ impl Writer {
         hidden: bool,
         show_grid_lines: bool,
         tab_color: Option<&str>,
+        autofit: bool,
+        autofit_sample_rows: u32,
+        autofit_max_width: f64,
+        row_outline_levels: u8,
+        outline_summary_above: bool,
     ) -> PyResult<Worksheet> {
-        let mut options = SheetOptions::new().freeze_rows(freeze_rows).freeze_columns(freeze_columns);
+        let mut options =
+            SheetOptions::new().freeze_rows(freeze_rows).freeze_columns(freeze_columns).row_outline_levels(row_outline_levels);
+        if autofit {
+            options = options.autofit(AutoFit::new().sample_rows(autofit_sample_rows).max_width(autofit_max_width));
+        }
+        if outline_summary_above {
+            options = options.outline_summary_above();
+        }
         if let Some(widths) = column_widths {
             options = options.column_widths(&widths);
         }
@@ -523,12 +557,26 @@ impl Worksheet {
     }
 
     /// Writes one row. ``values`` is any iterable; ``style`` applies to every cell without its own.
-    #[pyo3(signature = (values, style=None))]
-    fn write_row(&self, py: Python<'_>, values: &Bound<'_, PyAny>, style: Option<&Bound<'_, Style>>) -> PyResult<()> {
+    /// ``height``, ``outline_level``, ``hidden`` and ``collapsed`` set row properties.
+    #[pyo3(signature = (values, style=None, *, height=None, outline_level=0, hidden=false, collapsed=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn write_row(
+        &self,
+        py: Python<'_>,
+        values: &Bound<'_, PyAny>,
+        style: Option<&Bound<'_, Style>>,
+        height: Option<f64>,
+        outline_level: u8,
+        hidden: bool,
+        collapsed: bool,
+    ) -> PyResult<()> {
         let style = style_of(style);
         let conv = Conv { nan_as_empty: false };
+        let row = row_options(height, StyleId::DEFAULT, outline_level, hidden, collapsed);
         self.with_sheet(py, |s| {
-            s.begin_row(None, StyleId::DEFAULT).map_err(to_py)?;
+            if row != RowOptions::default() {
+                s.begin_row_with(&row).map_err(to_py)?;
+            }
             write_iterable(s, values, style, conv)?;
             s.end_row().map_err(to_py)
         })
@@ -542,7 +590,6 @@ impl Worksheet {
         self.with_sheet(py, |s| {
             let mut count = 0;
             for row in rows.try_iter()? {
-                s.begin_row(None, StyleId::DEFAULT).map_err(to_py)?;
                 write_iterable(s, &row?, style, conv)?;
                 s.end_row().map_err(to_py)?;
                 count += 1;
@@ -578,7 +625,6 @@ impl Worksheet {
         let conv = Conv { nan_as_empty };
         self.with_sheet(py, |s| {
             for r in 0..rows {
-                s.begin_row(None, StyleId::DEFAULT).map_err(to_py)?;
                 for (column, &style) in columns.iter().zip(&styles) {
                     let value = column.get_item(r)?;
                     write_value(s, &value, style, conv)?;
@@ -608,7 +654,6 @@ impl Worksheet {
             for record in records.try_iter()? {
                 let record = record?;
                 let dict = record.cast::<PyDict>().map_err(|_| PyTypeError::new_err("write_dicts expects dict records"))?;
-                s.begin_row(None, StyleId::DEFAULT).map_err(to_py)?;
                 for (key, &style) in keys.iter().zip(styles.iter().chain(std::iter::repeat(&StyleId::DEFAULT))) {
                     match dict.get_item(key)? {
                         Some(value) => write_value(s, &value, style, conv)?,
@@ -636,11 +681,20 @@ impl Worksheet {
         self.with_sheet(py, |s| s.end_row().map_err(to_py))
     }
 
-    /// Starts the next row explicitly, e.g. to set its height (points) or a row style.
-    #[pyo3(signature = (height=None, style=None))]
-    fn begin_row(&self, py: Python<'_>, height: Option<f64>, style: Option<&Bound<'_, Style>>) -> PyResult<()> {
-        let style = style_of(style);
-        self.with_sheet(py, |s| s.begin_row(height, style).map(drop).map_err(to_py))
+    /// Starts the next row explicitly, e.g. to set its height (points), row style, outline level or
+    /// hidden state. A following :meth:`write_row` fills this row rather than starting another.
+    #[pyo3(signature = (height=None, style=None, *, outline_level=0, hidden=false, collapsed=false))]
+    fn begin_row(
+        &self,
+        py: Python<'_>,
+        height: Option<f64>,
+        style: Option<&Bound<'_, Style>>,
+        outline_level: u8,
+        hidden: bool,
+        collapsed: bool,
+    ) -> PyResult<()> {
+        let row = row_options(height, style_of(style), outline_level, hidden, collapsed);
+        self.with_sheet(py, |s| s.begin_row_with(&row).map(drop).map_err(to_py))
     }
 
     /// Leaves ``count`` cells of the current row empty.
@@ -669,6 +723,43 @@ impl Worksheet {
     /// Adds filter drop-downs to a range whose first row is the header (1-based, inclusive).
     fn autofilter(&self, py: Python<'_>, first_row: u32, first_col: u32, last_row: u32, last_col: u32) -> PyResult<()> {
         self.with_sheet(py, |s| s.autofilter(first_row, first_col, last_row, last_col).map(drop).map_err(to_py))
+    }
+
+    /// Turns a range (1-based, inclusive) into an Excel table. With a header row, ``columns`` must
+    /// list the header texts exactly as written in the range's first row.
+    #[pyo3(signature = (first_row, first_col, last_row, last_col, *, columns=None, name=None, style=Some("TableStyleMedium2"),
+        header_row=true, autofilter=true, row_stripes=true, column_stripes=false, first_column=false, last_column=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn add_table(
+        &self,
+        py: Python<'_>,
+        first_row: u32,
+        first_col: u32,
+        last_row: u32,
+        last_col: u32,
+        columns: Option<Vec<String>>,
+        name: Option<String>,
+        style: Option<&str>,
+        header_row: bool,
+        autofilter: bool,
+        row_stripes: bool,
+        column_stripes: bool,
+        first_column: bool,
+        last_column: bool,
+    ) -> PyResult<()> {
+        let mut table = Table::new(first_row, first_col, last_row, last_col)
+            .columns(columns.unwrap_or_default())
+            .style(parse_table_style(style)?)
+            .header_row(header_row)
+            .autofilter(autofilter)
+            .row_stripes(row_stripes)
+            .column_stripes(column_stripes)
+            .highlight_first_column(first_column)
+            .highlight_last_column(last_column);
+        if let Some(name) = name {
+            table = table.name(name);
+        }
+        self.with_sheet(py, |s| s.add_table(&table).map(drop).map_err(to_py))
     }
 
     fn __repr__(&self) -> String {

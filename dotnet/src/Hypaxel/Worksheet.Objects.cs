@@ -88,11 +88,11 @@ public sealed partial class Worksheet
             }
         }
 
-        var firstRow = _row + 1;
+        var firstRow = NextRowNumber;
         if (options?.WriteHeader ?? true)
         {
             var headerStyle = options?.HeaderStyle ?? _writer.Styles.Add(DefaultHeaderStyle);
-            BeginRow();
+            BeginNextRow();
             foreach (var header in map.Headers)
             {
                 WriteString(header, headerStyle.Index);
@@ -106,7 +106,7 @@ public sealed partial class Worksheet
 
     private void WriteObjectRow<T>(ObjectContext<T> ctx, T item)
     {
-        BeginRow();
+        BeginNextRow();
         if (item is not null)
         {
             var writers = ctx.Map.Writers;

@@ -22,10 +22,13 @@ internal sealed class Utf8XmlBuffer : IDisposable
     private byte[] _buffer;
     private int _pos;
     private Stream? _target;
+    private readonly int _initialSize;
+    private bool _holding;
 
     public Utf8XmlBuffer(int size)
     {
         _buffer = ArrayPool<byte>.Shared.Rent(size);
+        _initialSize = _buffer.Length;
     }
 
     public Stream? Target
@@ -34,13 +37,55 @@ internal sealed class Utf8XmlBuffer : IDisposable
         set => _target = value;
     }
 
+    /// <summary>Bytes written since the last flush.</summary>
+    public int Length => _pos;
+
+    public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _pos);
+
+    /// <summary>
+    /// Stops forwarding to the target: the buffer grows instead, so earlier content can still be
+    /// changed with <see cref="Insert"/>. <see cref="Release"/> resumes streaming.
+    /// </summary>
+    public void Hold() => _holding = true;
+
+    /// <summary>Ends <see cref="Hold"/>, flushing a full buffer and returning a grown one to the pool.</summary>
+    public void Release()
+    {
+        _holding = false;
+        if (_pos >= _initialSize)
+        {
+            Flush();
+        }
+
+        if (_buffer.Length > _initialSize)
+        {
+            var smaller = ArrayPool<byte>.Shared.Rent(_initialSize);
+            _buffer.AsSpan(0, _pos).CopyTo(smaller);
+            ArrayPool<byte>.Shared.Return(_buffer);
+            _buffer = smaller;
+        }
+    }
+
+    /// <summary>Inserts bytes at an earlier position; only valid for content that has not been flushed.</summary>
+    public void Insert(int position, ReadOnlySpan<byte> utf8)
+    {
+        if (_buffer.Length - _pos < utf8.Length)
+        {
+            Grow(utf8.Length);
+        }
+
+        _buffer.AsSpan(position, _pos - position).CopyTo(_buffer.AsSpan(position + utf8.Length));
+        utf8.CopyTo(_buffer.AsSpan(position));
+        _pos += utf8.Length;
+    }
+
     /// <summary>Returns writable space of at least <paramref name="sizeHint"/> bytes; commit with <see cref="Advance"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Span<byte> GetSpan(int sizeHint)
     {
         if (_buffer.Length - _pos < sizeHint)
         {
-            Flush();
+            MakeRoom(sizeHint);
         }
 
         return _buffer.AsSpan(_pos);
@@ -72,8 +117,36 @@ internal sealed class Utf8XmlBuffer : IDisposable
         }
     }
 
+    private void MakeRoom(int sizeHint)
+    {
+        if (_holding)
+        {
+            Grow(sizeHint);
+        }
+        else
+        {
+            Flush();
+        }
+    }
+
+    private void Grow(int sizeHint)
+    {
+        var grown = ArrayPool<byte>.Shared.Rent(Math.Max(_buffer.Length * 2, _pos + sizeHint));
+        _buffer.AsSpan(0, _pos).CopyTo(grown);
+        ArrayPool<byte>.Shared.Return(_buffer);
+        _buffer = grown;
+    }
+
     private void WriteRawSlow(ReadOnlySpan<byte> utf8)
     {
+        if (_holding)
+        {
+            Grow(utf8.Length);
+            utf8.CopyTo(_buffer.AsSpan(_pos));
+            _pos += utf8.Length;
+            return;
+        }
+
         Flush();
         if (utf8.Length > _buffer.Length)
         {
@@ -90,7 +163,7 @@ internal sealed class Utf8XmlBuffer : IDisposable
     {
         if (_pos == _buffer.Length)
         {
-            Flush();
+            MakeRoom(1);
         }
 
         _buffer[_pos++] = value;
@@ -235,7 +308,7 @@ internal sealed class Utf8XmlBuffer : IDisposable
             }
 
             text = text[read..];
-            Flush();
+            MakeRoom(MinimumFree);
         }
     }
 

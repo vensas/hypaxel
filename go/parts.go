@@ -98,7 +98,7 @@ func appendWorkbookRels(x []byte, sheetCount int, sharedStrings bool) []byte {
 	return append(x, "</Relationships>"...)
 }
 
-func appendContentTypes(x []byte, sheetCount int, sharedStrings bool) []byte {
+func appendContentTypes(x []byte, sheetCount, tableCount int, sharedStrings bool) []byte {
 	const spreadsheet = `ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.`
 	x = append(x, xmlDeclaration...)
 	x = append(x, `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`...)
@@ -111,10 +111,28 @@ func appendContentTypes(x []byte, sheetCount int, sharedStrings bool) []byte {
 		x = append(x, `.xml" `+spreadsheet+`worksheet+xml"/>`...)
 	}
 	x = append(x, `<Override PartName="/xl/styles.xml" `+spreadsheet+`styles+xml"/>`...)
+	for i := 1; i <= tableCount; i++ {
+		x = append(x, `<Override PartName="/xl/tables/table`...)
+		x = appendUint(x, uint64(i))
+		x = append(x, `.xml" `+spreadsheet+`table+xml"/>`...)
+	}
 	if sharedStrings {
 		x = append(x, `<Override PartName="/xl/sharedStrings.xml" `+spreadsheet+`sharedStrings+xml"/>`...)
 	}
 	return append(x, "</Types>"...)
+}
+
+func appendSheetRels(x []byte, tables []tableMeta) []byte {
+	x = append(x, xmlDeclaration...)
+	x = append(x, `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`...)
+	for i := range tables {
+		x = append(x, `<Relationship Id="rId`...)
+		x = appendUint(x, uint64(i+1))
+		x = append(x, `" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table`...)
+		x = appendUint(x, uint64(tables[i].id))
+		x = append(x, `.xml"/>`...)
+	}
+	return append(x, "</Relationships>"...)
 }
 
 func appendRootRels(x []byte) []byte {

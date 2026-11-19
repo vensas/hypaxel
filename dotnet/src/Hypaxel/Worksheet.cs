@@ -26,9 +26,15 @@ public sealed partial class Worksheet
     private int _column;
     private int _lastCellColumn;
     private bool _rowOpen;
+    private bool _rowExplicit;
     private bool _completed;
-    private List<string>? _mergedRanges;
+    private List<CellRange>? _mergedRanges;
     private (int FirstRow, int FirstColumn, int LastRow, int LastColumn)? _autoFilter;
+    private List<TableDefinition>? _tables;
+    private readonly int _rowOutlineLevels;
+
+    // Present while the auto-fit sample is held back.
+    private ColumnFit? _fit;
 
     internal Worksheet(XlsxWriter writer, Utf8XmlBuffer buffer, string name, int index, WorksheetOptions? options)
     {
@@ -37,6 +43,7 @@ public sealed partial class Worksheet
         Name = name;
         Index = index;
         Hidden = options?.Hidden ?? false;
+        _rowOutlineLevels = options?.RowOutlineLevels ?? 0;
         WriteHeader(options);
     }
 
@@ -56,31 +63,72 @@ public sealed partial class Worksheet
 
     internal (int FirstRow, int FirstColumn, int LastRow, int LastColumn)? AutoFilter => _autoFilter;
 
+    internal List<TableDefinition>? Tables => _tables;
+
     // ------------------------------------------------------------------ rows
 
-    /// <summary>Starts the next row. Any open row is ended first.</summary>
+    /// <summary>Starts the next row. Any open row is ended first. A following <c>AddRow</c> fills this row rather than starting another.</summary>
     /// <param name="height">Row height in points, or null for the default height.</param>
     /// <param name="style">Default format for the row's empty cells.</param>
     public void BeginRow(double? height = null, StyleId style = default) => BeginRow(_row + 1, height, style);
 
     /// <summary>Starts the row with the given 1-based number, which must be greater than any row written so far.</summary>
-    public void BeginRow(int rowNumber, double? height = null, StyleId style = default)
+    public void BeginRow(int rowNumber, double? height = null, StyleId style = default) =>
+        BeginRowCore(rowNumber, height, style, 0, false, false);
+
+    /// <summary>Starts the next row with a height, style, outline (grouping) level or hidden state. Any open row is ended first; a following <c>AddRow</c> fills this row.</summary>
+    /// <example>
+    /// <code>
+    /// var sheet = writer.AddWorksheet("Tree", new WorksheetOptions { RowOutlineLevels = 1, OutlineSummaryAbove = true });
+    /// await sheet.AddRowAsync("Region North", 300);
+    /// sheet.BeginRow(new RowOptions { OutlineLevel = 1 });
+    /// await sheet.AddRowAsync("Store A", 120);
+    /// </code>
+    /// </example>
+    public void BeginRow(RowOptions options) => BeginRow(_row + 1, options);
+
+    /// <summary>Like <see cref="BeginRow(RowOptions)"/> for the row with the given 1-based number.</summary>
+    public void BeginRow(int rowNumber, RowOptions options)
     {
-        EnsureWritable();
-        if (_rowOpen)
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.OutlineLevel is < 0 or > 7)
         {
-            CloseRow();
+            throw new ArgumentOutOfRangeException(nameof(options), options.OutlineLevel, "Row outline level must be between 0 and 7.");
         }
 
+        if (options.OutlineLevel > _rowOutlineLevels)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options),
+                options.OutlineLevel,
+                $"Row outline level {options.OutlineLevel} exceeds the worksheet's declared depth of {_rowOutlineLevels}; set WorksheetOptions.RowOutlineLevels when adding the worksheet.");
+        }
+
+        BeginRowCore(rowNumber, options.Height, options.Style, options.OutlineLevel, options.Hidden, options.Collapsed);
+    }
+
+    private void BeginRowCore(int rowNumber, double? height, StyleId style, int outlineLevel, bool hidden, bool collapsed)
+    {
+        EnsureWritable();
         CellReference.ValidateRow(rowNumber);
         if (rowNumber <= _row)
         {
             throw new InvalidOperationException($"Rows must be written in ascending order. Row {rowNumber} follows row {_row}.");
         }
 
+        if (height is < 0 or > 409)
+        {
+            throw new ArgumentOutOfRangeException(nameof(height), "Row height must be between 0 and 409 points.");
+        }
+
         if (!style.IsDefault)
         {
             _writer.Styles.Validate(style);
+        }
+
+        if (_rowOpen)
+        {
+            CloseRow();
         }
 
         _row = rowNumber;
@@ -95,11 +143,6 @@ public sealed partial class Worksheet
         x.WriteByte((byte)'"');
         if (height is { } h)
         {
-            if (h is < 0 or > 409)
-            {
-                throw new ArgumentOutOfRangeException(nameof(height), "Row height must be between 0 and 409 points.");
-            }
-
             x.WriteRaw(" ht=\""u8);
             x.Write(h);
             x.WriteRaw("\" customHeight=\"1\""u8);
@@ -112,8 +155,38 @@ public sealed partial class Worksheet
             x.WriteRaw("\" customFormat=\"1\""u8);
         }
 
+        if (hidden)
+        {
+            x.WriteRaw(" hidden=\"1\""u8);
+        }
+
+        if (outlineLevel > 0)
+        {
+            x.WriteRaw(" outlineLevel=\""u8);
+            x.Write(outlineLevel);
+            x.WriteByte((byte)'"');
+        }
+
+        if (collapsed)
+        {
+            x.WriteRaw(" collapsed=\"1\""u8);
+        }
+
         x.WriteByte((byte)'>');
+        _rowExplicit = true;
     }
+
+    /// <summary>Starts the row for a whole-row write: an explicitly begun row that has no cells yet, otherwise the next one.</summary>
+    private void BeginNextRow()
+    {
+        if (!(_rowOpen && _rowExplicit && _column == 0))
+        {
+            BeginRowCore(_row + 1, null, default, 0, false, false);
+            _rowExplicit = false;
+        }
+    }
+
+    private int NextRowNumber => _rowOpen && _rowExplicit && _column == 0 ? _row : _row + 1;
 
     /// <summary>Leaves <paramref name="count"/> empty rows; the next row written will be after them.</summary>
     public void SkipRows(int count)
@@ -143,7 +216,7 @@ public sealed partial class Worksheet
         _writer.DrainIfNeeded();
     }
 
-    /// <summary>Writes a complete row.</summary>
+    /// <summary>Writes a complete row: the row begun with <c>BeginRow</c> if it has no cells yet, otherwise the next one.</summary>
     public ValueTask AddRowAsync(params ReadOnlySpan<CellValue> cells) => AddRowAsync(cells, CancellationToken.None);
 
     /// <summary>Writes a complete row.</summary>
@@ -162,7 +235,7 @@ public sealed partial class Worksheet
 
     private void WriteRowCore(ReadOnlySpan<CellValue> cells)
     {
-        BeginRow();
+        BeginNextRow();
         foreach (ref readonly var cell in cells)
         {
             Write(in cell);
@@ -190,6 +263,11 @@ public sealed partial class Worksheet
     {
         _x.WriteRaw("</row>"u8);
         _rowOpen = false;
+        _rowExplicit = false;
+        if (_fit is { } fit && fit.RowClosed(_x.Length))
+        {
+            EndFit();
+        }
     }
 
     // ------------------------------------------------------------------ cells
@@ -234,6 +312,7 @@ public sealed partial class Worksheet
     public void Write(long value, StyleId style = default)
     {
         var span = BeginCell(style.Index, out var p);
+        _fit?.Number(_column, style.Index, value);
         "><v>"u8.CopyTo(span[p..]);
         p += 4;
         value.TryFormat(span[p..], out var written, default, CultureInfo.InvariantCulture);
@@ -246,6 +325,7 @@ public sealed partial class Worksheet
     public void Write(double value, StyleId style = default)
     {
         var span = BeginCell(style.Index, out var p);
+        _fit?.Number(_column, style.Index, value);
         if (!double.IsFinite(value))
         {
             " t=\"e\"><v>#NUM!</v></c>"u8.CopyTo(span[p..]);
@@ -267,6 +347,7 @@ public sealed partial class Worksheet
     public void Write(decimal value, StyleId style = default)
     {
         var span = BeginCell(style.Index, out var p);
+        _fit?.Number(_column, style.Index, (double)value);
         "><v>"u8.CopyTo(span[p..]);
         p += 4;
         value.TryFormat(span[p..], out var written, default, CultureInfo.InvariantCulture);
@@ -279,6 +360,7 @@ public sealed partial class Worksheet
     public void Write(bool value, StyleId style = default)
     {
         var span = BeginCell(style.Index, out var p);
+        _fit?.Text(_column, style.Index, value ? "TRUE" : "FALSE");
         (value ? " t=\"b\"><v>1</v></c>"u8 : " t=\"b\"><v>0</v></c>"u8).CopyTo(span[p..]);
         _x.Advance(p + 19);
     }
@@ -426,6 +508,7 @@ public sealed partial class Worksheet
         if (_writer.SharedStrings is { } sst)
         {
             var span = BeginCell(style, out var p);
+            _fit?.Text(_column, style, value);
             " t=\"s\"><v>"u8.CopyTo(span[p..]);
             p += 10;
             sst.GetOrAdd(value).TryFormat(span[p..], out var written, default, CultureInfo.InvariantCulture);
@@ -437,6 +520,7 @@ public sealed partial class Worksheet
         {
             var x = _x;
             StartCell(style);
+            _fit?.Text(_column, style, value);
             x.WriteRaw(" t=\"inlineStr\"><is>"u8);
             CellText.Write(x, value);
             x.WriteRaw("</is></c>"u8);
@@ -457,6 +541,7 @@ public sealed partial class Worksheet
 
         var index = _writer.Styles.GetValueFormatVariant(style, kind);
         var span = BeginCell(index, out var p);
+        _fit?.Number(_column, index, day);
         "><v>"u8.CopyTo(span[p..]);
         p += 4;
         p += FormatSerial(day, ticks % TimeSpan.TicksPerDay, span[p..]);
@@ -574,38 +659,88 @@ public sealed partial class Worksheet
     {
         if (!_rowOpen)
         {
-            BeginRow();
+            BeginNextRow();
         }
     }
 
     // ------------------------------------------------------------------ sheet features
 
-    /// <summary>Merges a rectangular range of cells. Ranges must not overlap.</summary>
+    /// <summary>Merges a rectangular range of cells. Ranges must not overlap each other or a table.</summary>
     public void MergeCells(int firstRow, int firstColumn, int lastRow, int lastColumn)
     {
         EnsureNotCompleted();
-        var range = CellReference.ToRange(firstRow, firstColumn, lastRow, lastColumn);
+        var range = CellRange.Create(firstRow, firstColumn, lastRow, lastColumn);
         if (firstRow == lastRow && firstColumn == lastColumn)
         {
             throw new ArgumentException("A merged range must span more than one cell.");
         }
 
+        if (OverlapsTable(range))
+        {
+            throw new InvalidOperationException("Merged cells cannot overlap a table.");
+        }
+
         (_mergedRanges ??= []).Add(range);
     }
 
-    /// <summary>Adds an auto filter (drop-down filter buttons) to a range whose first row is the header.</summary>
+    /// <summary>
+    /// Adds an auto filter (drop-down filter buttons) to a range whose first row is the header. The range
+    /// cannot overlap a table, which has its own filter.
+    /// </summary>
     public void SetAutoFilter(int firstRow, int firstColumn, int lastRow, int lastColumn)
     {
         EnsureNotCompleted();
-        _ = CellReference.ToRange(firstRow, firstColumn, lastRow, lastColumn); // validates
+        var range = CellRange.Create(firstRow, firstColumn, lastRow, lastColumn);
+        if (OverlapsTable(range))
+        {
+            throw new InvalidOperationException("A worksheet auto filter cannot overlap a table (tables have their own filter).");
+        }
+
         _autoFilter = (firstRow, firstColumn, lastRow, lastColumn);
     }
+
+    /// <summary>
+    /// Turns a range of this worksheet into an Excel table (see <see cref="ExcelTable"/>). The range may
+    /// include rows that are written later; it is recorded now and written when the worksheet completes.
+    /// </summary>
+    /// <exception cref="ArgumentException">The table is invalid, or its name is already used in the workbook.</exception>
+    /// <exception cref="InvalidOperationException">The range overlaps another table, merged cells or the worksheet auto filter.</exception>
+    public void AddTable(ExcelTable table)
+    {
+        EnsureNotCompleted();
+        var definition = TableDefinition.Create(table, _writer.TableCount + 1, _writer.IsTableNameTaken);
+        var range = definition.Range;
+        if (OverlapsTable(range))
+        {
+            throw new InvalidOperationException("Tables cannot overlap each other.");
+        }
+
+        if (_mergedRanges is not null && _mergedRanges.Exists(m => m.Overlaps(range)))
+        {
+            throw new InvalidOperationException("A table cannot overlap merged cells.");
+        }
+
+        if (_autoFilter is { } f && new CellRange(f.FirstRow, f.FirstColumn, f.LastRow, f.LastColumn).Overlaps(range))
+        {
+            throw new InvalidOperationException("A table cannot overlap the worksheet auto filter (tables have their own filter).");
+        }
+
+        _writer.RegisterTable(definition.Name);
+        (_tables ??= []).Add(definition);
+    }
+
+    private bool OverlapsTable(CellRange range) => _tables is not null && _tables.Exists(t => t.Range.Overlaps(range));
 
     // ------------------------------------------------------------------ serialization
 
     private void WriteHeader(WorksheetOptions? options)
     {
         var x = _x;
+        if (options?.AutoFit is not null)
+        {
+            x.Hold();
+        }
+
         x.WriteRaw(Xml.Declaration);
         x.WriteRaw("<worksheet xmlns=\""u8);
         x.WriteRaw(Xml.SpreadsheetMlNamespace);
@@ -613,11 +748,22 @@ public sealed partial class Worksheet
         x.WriteRaw(Xml.RelationshipsNamespace);
         x.WriteRaw("\">"u8);
 
-        if (options?.TabColor is { } tab)
+        if (options is not null && (options.TabColor is not null || options.OutlineSummaryAbove))
         {
-            x.WriteRaw("<sheetPr><tabColor rgb=\""u8);
-            x.WriteEscaped(tab.ToArgbHex());
-            x.WriteRaw("\"/></sheetPr>"u8);
+            x.WriteRaw("<sheetPr>"u8);
+            if (options.TabColor is { } tab)
+            {
+                x.WriteRaw("<tabColor rgb=\""u8);
+                x.WriteEscaped(tab.ToArgbHex());
+                x.WriteRaw("\"/>"u8);
+            }
+
+            if (options.OutlineSummaryAbove)
+            {
+                x.WriteRaw("<outlinePr summaryBelow=\"0\"/>"u8);
+            }
+
+            x.WriteRaw("</sheetPr>"u8);
         }
 
         x.WriteRaw("<sheetViews><sheetView workbookViewId=\"0\""u8);
@@ -633,16 +779,6 @@ public sealed partial class Worksheet
 
         var frozenRows = options?.FrozenRows ?? 0;
         var frozenColumns = options?.FrozenColumns ?? 0;
-        if (frozenRows < 0 || frozenRows >= CellReference.MaxRows)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "FrozenRows is out of range.");
-        }
-
-        if (frozenColumns < 0 || frozenColumns >= CellReference.MaxColumns)
-        {
-            throw new ArgumentOutOfRangeException(nameof(options), "FrozenColumns is out of range.");
-        }
-
         if (frozenRows > 0 || frozenColumns > 0)
         {
             var pane = (frozenRows > 0, frozenColumns > 0) switch
@@ -681,45 +817,75 @@ public sealed partial class Worksheet
             x.WriteRaw("/></sheetViews>"u8);
         }
 
-        x.WriteRaw("<sheetFormatPr defaultRowHeight=\"15\"/>"u8);
+        x.WriteRaw("<sheetFormatPr defaultRowHeight=\"15\""u8);
+        if (_rowOutlineLevels > 0)
+        {
+            x.WriteRaw(" outlineLevelRow=\""u8);
+            x.Write(_rowOutlineLevels);
+            x.WriteByte((byte)'"');
+        }
 
-        if (options is { Columns.Count: > 0 })
+        x.WriteRaw("/>"u8);
+
+        if (options?.AutoFit is { } autoFit)
+        {
+            // <cols> is inserted here once the sample has been measured.
+            var columns = options.Columns.Count > 0 ? new SortedDictionary<int, ColumnDefinition>(options.Columns) : null;
+            _fit = new ColumnFit(_writer.Styles, autoFit, columns, x.Length);
+        }
+        else if (options is { Columns.Count: > 0 })
         {
             x.WriteRaw("<cols>"u8);
             foreach (var (column, definition) in options.Columns)
             {
-                x.WriteRaw("<col min=\""u8);
-                x.Write(column);
-                x.WriteRaw("\" max=\""u8);
-                x.Write(column);
-                x.WriteRaw("\" width=\""u8);
-                x.Write(definition.Width is { } w ? Math.Clamp(w, 0, 255) : 9.140625);
-                x.WriteByte((byte)'"');
-                if (definition.Width is not null)
-                {
-                    x.WriteRaw(" customWidth=\"1\""u8);
-                }
-
-                if (!definition.Style.IsDefault)
-                {
-                    _writer.Styles.Validate(definition.Style);
-                    x.WriteRaw(" style=\""u8);
-                    x.Write(definition.Style.Index);
-                    x.WriteByte((byte)'"');
-                }
-
-                if (definition.Hidden)
-                {
-                    x.WriteRaw(" hidden=\"1\""u8);
-                }
-
-                x.WriteRaw("/>"u8);
+                WriteColumn(x, column, definition.Width, definition.Style, definition.Hidden);
             }
 
             x.WriteRaw("</cols>"u8);
         }
 
         x.WriteRaw("<sheetData>"u8);
+    }
+
+    internal static void WriteColumn(Utf8XmlBuffer x, int column, double? width, StyleId style, bool hidden)
+    {
+        x.WriteRaw("<col min=\""u8);
+        x.Write(column);
+        x.WriteRaw("\" max=\""u8);
+        x.Write(column);
+        x.WriteRaw("\" width=\""u8);
+        x.Write(width is { } w ? Math.Clamp(w, 0, 255) : 9.140625);
+        x.WriteByte((byte)'"');
+        if (width is not null)
+        {
+            x.WriteRaw(" customWidth=\"1\""u8);
+        }
+
+        if (!style.IsDefault)
+        {
+            x.WriteRaw(" style=\""u8);
+            x.Write(style.Index);
+            x.WriteByte((byte)'"');
+        }
+
+        if (hidden)
+        {
+            x.WriteRaw(" hidden=\"1\""u8);
+        }
+
+        x.WriteRaw("/>"u8);
+    }
+
+    /// <summary>Inserts the fitted <c>&lt;cols&gt;</c> into the held-back XML and resumes streaming.</summary>
+    private void EndFit()
+    {
+        var fit = _fit!;
+        _fit = null;
+        using var cols = new Utf8XmlBuffer(1024);
+        cols.Hold();
+        fit.WriteColumns(cols);
+        _x.Insert(fit.ColsAt, cols.WrittenSpan);
+        _x.Release();
     }
 
     internal void Complete()
@@ -732,6 +898,11 @@ public sealed partial class Worksheet
         if (_rowOpen)
         {
             CloseRow();
+        }
+
+        if (_fit is not null)
+        {
+            EndFit();
         }
 
         var x = _x;
@@ -751,14 +922,30 @@ public sealed partial class Worksheet
             foreach (var range in merges)
             {
                 x.WriteRaw("<mergeCell ref=\""u8);
-                x.WriteEscaped(range);
+                x.WriteEscaped(range.ToString());
                 x.WriteRaw("\"/>"u8);
             }
 
             x.WriteRaw("</mergeCells>"u8);
         }
 
-        x.WriteRaw("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/></worksheet>"u8);
+        x.WriteRaw("<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>"u8);
+        if (_tables is { Count: > 0 } tables)
+        {
+            x.WriteRaw("<tableParts count=\""u8);
+            x.Write(tables.Count);
+            x.WriteRaw("\">"u8);
+            for (var i = 1; i <= tables.Count; i++)
+            {
+                x.WriteRaw("<tablePart r:id=\"rId"u8);
+                x.Write(i);
+                x.WriteRaw("\"/>"u8);
+            }
+
+            x.WriteRaw("</tableParts>"u8);
+        }
+
+        x.WriteRaw("</worksheet>"u8);
         _completed = true;
     }
 

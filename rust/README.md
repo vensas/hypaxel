@@ -18,7 +18,7 @@ the HTTP client while your query is still running.
   into download responses, with backpressure and cancellation when the client disconnects.
 - **Ergonomic:** rows from tuples, arrays and slices, and any `T: Serialize` as records (serde
   field names become headers). Supports chrono dates, styles, merged cells, frozen panes, auto
-  filters and formulas.
+  filters, Excel tables, row grouping, auto-fit columns and formulas.
 - **Valid output:** every feature is checked against the Office Open XML schema validator, and
   the files are read back with calamine, openpyxl and LibreOffice.
 - **Safe Rust:** `#![deny(unsafe_code)]`.
@@ -136,6 +136,37 @@ async fn live() -> Xlsx {
 Run the example: `cargo run -p hypaxel-axum --example server`, then open
 `http://localhost:3000/orders.xlsx?count=1000000`.
 
+## Tables, row grouping and auto-fit
+
+```rust
+use hypaxel::{AutoFit, RowOptions, SheetOptions, Table, TableStyle};
+
+let options = SheetOptions::new()
+    .autofit_columns()            // or .autofit(AutoFit::new().sample_rows(5_000).max_width(60.0))
+    .row_outline_levels(1)        // deepest grouping level used on this sheet (1–7)
+    .outline_summary_above();     // group buttons on the row above each group
+let mut sheet = writer.add_worksheet_with("Regions", &options)?;
+
+sheet.add_row(("Region", "Revenue"))?;
+sheet.add_row(("North", 300))?;
+sheet.begin_row_with(&RowOptions::new().outline_level(1))?.add_row(("Store A", 120))?;
+sheet.begin_row_with(&RowOptions::new().outline_level(1).hidden())?.add_row(("Store B", 180))?;
+
+let last = sheet.row();
+sheet.add_table(&Table::new(1, 1, last, 2).name("Regions").columns(["Region", "Revenue"]).style(TableStyle::Medium(9)))?;
+```
+
+- **Auto-fit:** column widths come before the cell data in the file, so the writer holds back the
+  sheet's output until `sample_rows` rows (default 1,000, at most 8 MiB of XML) have been
+  measured, then inserts the widths and streams as usual. Widths are estimated from the text,
+  number format and font size; formulas and merged cells are not measured. Explicit widths win.
+  The first bytes of a sheet are sent after the sample instead of immediately.
+- **Row grouping:** declare the deepest level in `SheetOptions` (Excel reads it before the rows).
+  `begin_row_with` / `begin_row` start a row that the next `add_row` (or cell writes) fills.
+- **Tables:** with a header row, `columns` must equal the header texts as written. Table names are
+  unique in the workbook. Tables cannot overlap each other, merged cells or the worksheet auto
+  filter. The range may include rows written later.
+
 ## Async writing (`tokio` feature)
 
 Every flushing method has an `_async` twin for `tokio::io::AsyncWrite` destinations:
@@ -149,8 +180,8 @@ Every flushing method has an `_async` twin for `tokio::io::AsyncWrite` destinati
 | Values | `&str`/`String`/`Cow`, all integers, `f32`/`f64`, `bool`, `char`, `Option<T>`, `Formula`, `Blank`, `Styled<T>`. NaN/∞ → `#NUM!` |
 | Dates | chrono `NaiveDate`, `NaiveDateTime`, `DateTime<Tz>`, `NaiveTime`, `TimeDelta`. 1900/1904 systems. Unstyled dates get the viewer's locale format. Dates before 1900 are written as ISO text |
 | Styles | font (name, size, bold, italic, underline, strike, color), solid fill, 13 border styles, alignment, number formats; de-duplicated |
-| Worksheet | multiple sheets, column widths/styles/hidden, row height/style, frozen panes, gridlines, tab color, hidden sheets |
-| Ranges | merged cells, auto filter |
+| Worksheet | multiple sheets, column widths/styles/hidden, auto-fit columns, row height/style/hidden, row outline levels, frozen panes, gridlines, tab color, hidden sheets |
+| Ranges | merged cells, auto filter, Excel tables (built-in styles) |
 | Strings | inline (default) or shared string table. Full XML escaping, control characters as `_xHHHH_` |
 | Rows | tuples (up to 16 elements), arrays, `Vec`, slices, serde records, async streams |
 | I/O | any `io::Write` or tokio `AsyncWrite`. No `Seek` needed. ZIP64 |
@@ -207,9 +238,9 @@ Options::new()
 - Rows are written top to bottom, and cells left to right. Use `skip_cells`, `skip_rows` and
   `begin_row_at` to leave gaps.
 - One worksheet is open at a time. Adding the next worksheet completes the previous one.
-- Column definitions and frozen panes go in `SheetOptions` when you create the sheet, because they
-  come before the cell data in the file. Merges and filters can be added at any time before the
-  sheet completes.
+- Column definitions, frozen panes and the row outline depth go in `SheetOptions` when you create
+  the sheet, because they come before the cell data in the file. Merges, filters and tables can be
+  added at any time before the sheet completes.
 - Formulas are stored without cached results. Excel recalculates them when the file opens.
 
 ## Testing

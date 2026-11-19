@@ -12,7 +12,7 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/vensas/hypaxel</RepositoryUrl>
     <PackageTags>excel;xlsx;spreadsheet;openxml;aspnetcore;streaming;performance</PackageTags>
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>0.2.0</VersionPrefix>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">

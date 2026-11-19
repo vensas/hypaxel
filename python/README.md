@@ -17,7 +17,7 @@ It can stream a download to the browser while your query is still running.
   `timedelta`, `Decimal`, numpy scalars, `bool`, and huge ints. NaN, None, NaT and pd.NA become
   empty cells.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
-  panes, auto filters, formulas, hidden sheets, tab colors.
+  panes, auto filters, Excel tables, row grouping, auto-fit columns, formulas, hidden sheets, tab colors.
 - **Valid output:** checked with the Office Open XML schema validator and read back with openpyxl.
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md). The [.NET version](../dotnet/README.md) uses the same design.
@@ -141,12 +141,32 @@ def export():
 | --- | --- |
 | `Writer(dest=None, *, compression_level=1, shared_strings=False, flush_threshold=65536, date_1904=False)` | `dest`: path, binary file object, or `None` (in memory) |
 | `Writer.add_style(bold=, italic=, underline=, strikethrough=, font_name=, font_size=, font_color=, fill=, border=, border_color=, border_bottom=, align=, valign=, wrap=, indent=, rotation=, num_format=)` | returns a `Style`. Identical styles are shared |
-| `Writer.add_worksheet(name, *, freeze_rows=, freeze_columns=, column_widths=, hidden=, show_grid_lines=, tab_color=)` | returns a `Worksheet`. The previous sheet is completed |
+| `Writer.add_worksheet(name, *, freeze_rows=, freeze_columns=, column_widths=, hidden=, show_grid_lines=, tab_color=, autofit=, autofit_sample_rows=, autofit_max_width=, row_outline_levels=, outline_summary_above=)` | returns a `Worksheet`. The previous sheet is completed |
 | `Writer.drain()` / `Writer.finish()` | in-memory chunks / complete the workbook |
-| `Worksheet.write_row(values, style=None)`, `write_rows(rows)`, `write_columns(columns)`, `write_dicts(records, keys)` | bulk writers, with the loops running in Rust |
-| `Worksheet.write(value)`, `skip_cells(n)`, `end_row()`, `begin_row(height=, style=)`, `skip_rows(n)` | cell-by-cell control |
+| `Worksheet.write_row(values, style=None, *, height=, outline_level=, hidden=, collapsed=)`, `write_rows(rows)`, `write_columns(columns)`, `write_dicts(records, keys)` | bulk writers, with the loops running in Rust |
+| `Worksheet.write(value)`, `skip_cells(n)`, `end_row()`, `begin_row(height=, style=, *, outline_level=, hidden=, collapsed=)`, `skip_rows(n)` | cell-by-cell control. A begun row is filled by the next write |
 | `Worksheet.merge_cells(r1, c1, r2, c2)`, `autofilter(r1, c1, r2, c2)` | ranges (1-based, inclusive) |
+| `Worksheet.add_table(r1, c1, r2, c2, *, columns=, name=, style="TableStyleMedium2", header_row=, autofilter=, row_stripes=, column_stripes=, first_column=, last_column=)` | Excel table; `columns` must equal the header texts |
 | `Formula("SUM(A1:A9)")`, `Styled(value, style)` | special cell values |
+
+### Tables, row grouping and auto-fit
+
+```python
+ws = wb.add_worksheet("Regions", autofit=True, row_outline_levels=1, outline_summary_above=True)
+ws.write_row(["Region", "Revenue"])
+ws.write_row(["North", 300])
+ws.write_row(["Store A", 120], outline_level=1)
+ws.write_row(["Store B", 180], outline_level=1, hidden=True)
+ws.add_table(1, 1, ws.row, 2, columns=["Region", "Revenue"], name="Regions", style="TableStyleMedium9")
+```
+
+- `autofit=True` holds back the sheet's output until `autofit_sample_rows` rows (default 1,000,
+  at most 8 MiB of XML) have been measured, then writes the widths and streams as usual. Explicit
+  `column_widths` win; formulas and merged cells are not measured.
+- `row_outline_levels` declares the deepest grouping level up front, because Excel reads it before
+  the rows.
+- Table names are unique in the workbook; tables cannot overlap each other, merged cells or an
+  `autofilter` range.
 
 ## Performance
 

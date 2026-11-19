@@ -130,6 +130,15 @@ internal sealed class StyleRegistry
         return index;
     }
 
+    /// <summary>What column auto-fit needs to know about a format: font size, boldness and number format.</summary>
+    public (double FontSize, bool Bold, int NumFmtId, string? CustomFormat) GetMeasureInfo(int styleIndex)
+    {
+        var xf = _xfs[styleIndex];
+        var font = _fonts[xf.FontId];
+        var custom = xf.NumFmtId >= 164 ? _customNumFmts[xf.NumFmtId - 164] : null;
+        return (font.Size, font.Bold, xf.NumFmtId, custom);
+    }
+
     public void Validate(StyleId style)
     {
         if ((uint)style.Index >= (uint)_xfs.Count)

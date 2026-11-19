@@ -460,6 +460,18 @@ impl StyleRegistry {
         id
     }
 
+    /// Font size, boldness and number format of a style, for column auto-fit.
+    pub fn measure_info(&self, style: u32) -> (u32, bool, crate::fit::NumFormat<'_>) {
+        use crate::fit::NumFormat;
+        let Some(xf) = self.xfs.get(style as usize) else { return (1100, false, NumFormat::Builtin(0)) };
+        let font = &self.fonts[xf.font as usize];
+        let format = match xf.num_fmt.checked_sub(164) {
+            Some(i) => NumFormat::Custom(&self.num_fmts[i as usize]),
+            None => NumFormat::Builtin(xf.num_fmt),
+        };
+        (font.size_centipoints, font.bold, format)
+    }
+
     fn xf_id(&mut self, xf: Xf) -> u32 {
         if let Some(&id) = self.xf_ids.get(&xf) {
             return id;

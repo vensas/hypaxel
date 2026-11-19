@@ -127,7 +127,7 @@ Shared by all three implementations (milestone 1: creating Excel files).
 
 - **Values:** strings, numbers, booleans, dates/times/durations (1900 and 1904 systems), formulas, styled blanks
 - **Styles:** fonts, fills, borders, alignment and number formats. Styles are de-duplicated
-- **Worksheets:** multiple sheets, column widths, row heights, frozen panes, merged cells, auto filter, hidden sheets, tab colors
+- **Worksheets:** multiple sheets, column widths, auto-fit columns, row heights, row grouping (outline levels), frozen panes, merged cells, auto filter, Excel tables, hidden sheets, tab colors
 - **Strings:** inline (default, constant memory) or a shared string table
 - **Compact output:** cell references are only written after gaps
 - **Valid output:** checked against the Office Open XML schema validator and read back by independent readers
@@ -149,7 +149,7 @@ php/       Composer package: src/, tests/, benchmarks/, examples/
 ## Roadmap
 
 1. ✅ **Create Excel files** (this milestone)
-2. Hyperlinks, data validation, conditional formatting, images, tables, document properties
+2. Hyperlinks, data validation, conditional formatting, images, document properties
 3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
    Python: an Arrow-native DataFrame path
 4. Streaming readers

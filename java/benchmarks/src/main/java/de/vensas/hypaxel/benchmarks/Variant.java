@@ -1,5 +1,6 @@
 package de.vensas.hypaxel.benchmarks;
 
+import de.vensas.hypaxel.SheetOptions;
 import de.vensas.hypaxel.StringStorage;
 import de.vensas.hypaxel.Worksheet;
 import de.vensas.hypaxel.XlsxOptions;
@@ -66,6 +67,14 @@ public enum Variant {
         void write(List<Row> rows, OutputStream out) throws IOException {
             try (XlsxWriter writer = XlsxWriter.create(out, XlsxOptions.builder().compressionLevel(6).build())) {
                 writeTyped(writer.addWorksheet("Data"), rows);
+            }
+        }
+    },
+    HYPAXEL_AUTOFIT {
+        @Override
+        void write(List<Row> rows, OutputStream out) throws IOException {
+            try (XlsxWriter writer = XlsxWriter.create(out)) {
+                writeTyped(writer.addWorksheet("Data", SheetOptions.builder().autoFitColumns().build()), rows);
             }
         }
     },

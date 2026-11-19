@@ -22,6 +22,13 @@ pub enum Error {
     TooManyColumns { row: u32 },
     /// A cell's text exceeds Excel's limit of 32,767 characters.
     TextTooLong { row: u32, column: u32, len: usize },
+    /// Table names start with a letter, `_` or `\`, contain only letters, digits, `_` and `.`, and do
+    /// not look like a cell reference.
+    InvalidTableName(String),
+    /// Table names are unique in the workbook (case-insensitive).
+    DuplicateTableName(String),
+    /// A range overlaps a table, merged range or auto filter it may not share cells with.
+    OverlappingRange(&'static str),
     /// The style id belongs to a different writer.
     InvalidStyle(u32),
     /// An argument is outside its allowed range.
@@ -46,6 +53,9 @@ impl fmt::Display for Error {
             Error::TextTooLong { row, column, len } => {
                 write!(f, "cell at row {row}, column {column} has {len} characters; the limit is 32767")
             }
+            Error::InvalidTableName(n) => write!(f, "invalid table name {n:?}"),
+            Error::DuplicateTableName(n) => write!(f, "a table named {n:?} already exists"),
+            Error::OverlappingRange(m) => f.write_str(m),
             Error::InvalidStyle(i) => write!(f, "style id {i} does not belong to this writer"),
             Error::InvalidArgument(m) => f.write_str(m),
             Error::NoVisibleWorksheet => f.write_str("a workbook needs at least one visible worksheet"),

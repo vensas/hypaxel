@@ -3,8 +3,9 @@ use std::io::Write;
 use crate::cell::{IntoCell, IntoRow};
 use crate::engine::CellWriter;
 use crate::error::Result;
-use crate::options::{Options, SheetOptions};
+use crate::options::{Options, RowOptions, SheetOptions};
 use crate::style::{Style, StyleId};
+use crate::table::Table;
 
 /// Forward-only XLSX writer.
 ///
@@ -141,14 +142,38 @@ impl<W> Sheet<'_, W> {
     }
 
     /// Starts the next row explicitly (cells start one implicitly), e.g. to set a height or style.
+    /// A following [`add_row`](Self::add_row) fills this row rather than starting another.
     pub fn begin_row(&mut self, height: Option<f64>, style: StyleId) -> Result<&mut Self> {
-        let next = self.row() + 1;
-        self.begin_row_at(next, height, style)
+        self.begin_row_with(&RowOptions { height, style, ..RowOptions::default() })
     }
 
     /// Starts the row with the given 1-based number, which must be greater than any row written so far.
     pub fn begin_row_at(&mut self, row: u32, height: Option<f64>, style: StyleId) -> Result<&mut Self> {
-        self.cells().begin_row_at(row, height, style)?;
+        self.begin_row_at_with(row, &RowOptions { height, style, ..RowOptions::default() })
+    }
+
+    /// Starts the next row with a height, style, outline (grouping) level or hidden state. Fill it
+    /// with cell writes or a single [`add_row`](Self::add_row).
+    ///
+    /// ```
+    /// use hypaxel::{RowOptions, SheetOptions, XlsxWriter};
+    ///
+    /// let mut writer = XlsxWriter::new(Vec::new());
+    /// let mut sheet = writer.add_worksheet_with("Tree", &SheetOptions::new().row_outline_levels(1).outline_summary_above())?;
+    /// sheet.add_row(("Region North", 300))?;
+    /// sheet.begin_row_with(&RowOptions::new().outline_level(1))?.add_row(("Store A", 120))?;
+    /// sheet.begin_row_with(&RowOptions::new().outline_level(1))?.write("Store B").write(180).end_row()?;
+    /// writer.finish()?;
+    /// # Ok::<(), hypaxel::Error>(())
+    /// ```
+    pub fn begin_row_with(&mut self, options: &RowOptions) -> Result<&mut Self> {
+        let next = self.row() + 1;
+        self.begin_row_at_with(next, options)
+    }
+
+    /// Like [`begin_row_with`](Self::begin_row_with) for the row with the given 1-based number.
+    pub fn begin_row_at_with(&mut self, row: u32, options: &RowOptions) -> Result<&mut Self> {
+        self.cells().begin_row_at(row, options)?;
         Ok(self)
     }
 
@@ -192,6 +217,13 @@ impl<W> Sheet<'_, W> {
         Ok(self)
     }
 
+    /// Turns a range of this worksheet into an Excel table (see [`Table`]). The range may include
+    /// rows that are written later; it is recorded now and written when the worksheet completes.
+    pub fn add_table(&mut self, table: &Table) -> Result<&mut Self> {
+        self.cells().add_table(table)?;
+        Ok(self)
+    }
+
     #[inline]
     fn put_row(&mut self, row: impl IntoRow) {
         let cells = self.cells();
@@ -210,7 +242,7 @@ impl<W: Write> Sheet<'_, W> {
         self.writer.drain_if_ready()
     }
 
-    /// Writes a complete row.
+    /// Writes a complete row: the row begun with `begin_row*` if it has no cells yet, otherwise the next one.
     #[inline]
     pub fn add_row(&mut self, row: impl IntoRow) -> Result<()> {
         self.put_row(row);
