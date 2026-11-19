@@ -400,6 +400,54 @@ func (x *xmlReader) consume(lit string) bool {
 	return true
 }
 
+// scanSharedString matches a whole plain item, <si><t>text</t></si> or with attributes on <t>,
+// in the buffered input and returns its raw text. It consumes nothing and returns false for
+// any other shape or an item that is not completely buffered.
+func (x *xmlReader) scanSharedString() ([]byte, bool) {
+	b := x.buf[x.pos:x.end]
+	if len(b) < 7 || string(b[:6]) != "<si><t" {
+		return nil, false
+	}
+	j := 6
+	switch b[j] {
+	case '>':
+	case ' ':
+		var quote byte
+		for ; ; j++ {
+			if j >= len(b) {
+				return nil, false
+			}
+			c := b[j]
+			if quote != 0 {
+				if c == quote {
+					quote = 0
+				}
+			} else if c == '>' {
+				break
+			} else if c == '"' || c == '\'' {
+				quote = c
+			}
+		}
+		if b[j-1] == '/' {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	start := j + 1
+	end := indexByte(b[start:], '<')
+	if end < 0 {
+		return nil, false
+	}
+	end += start
+	const closing = "</t></si>"
+	if len(b)-end < len(closing) || string(b[end:end+len(closing)]) != closing {
+		return nil, false
+	}
+	x.pos += end + len(closing)
+	return b[start:end], true
+}
+
 // skipElement skips the rest of the element whose start tag was just read.
 func (x *xmlReader) skipElement() error {
 	target := x.depth - 1

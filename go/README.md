@@ -19,7 +19,7 @@ running.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, column widths, row
   heights, merged cells, frozen panes, auto filters, hidden sheets, tab colors.
 - **Streaming reader:** reads rows one at a time with memory bounded by the shared string table
-  plus one row, **7-9x faster than excelize's `Rows` iterator** (see [Reading performance](#reading-performance)).
+  plus one row, **about 10x faster than excelize's `Rows` iterator** (see [Reading performance](#reading-performance)).
 - **Pure Go:** standard library only, no cgo. Errors are returned; bad input never panics.
 
 This is a native Go port of the [`hypaxel` Rust crate](../rust/README.md). The
@@ -341,6 +341,7 @@ closes the rows when it ends. `Row` also has `Len`, `LastColumn` and `Cell(i)` f
 | `Rows(name)`, `RowsAt(index)` | Stream a sheet, by name (exact, then case-insensitive) or 0-based index |
 | `Date1904()` | Whether the workbook uses the 1904 date system |
 | `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |
+| `WithConcurrentInflate(on)` | Option: decompress on a separate goroutine while parsing (default on, off when `GOMAXPROCS` is 1) |
 
 **`Value`** is a small immutable struct; the zero value is empty.
 
@@ -365,6 +366,12 @@ closes the rows when it ends. `Row` also has `Len`, `LastColumn` and `Cell(i)` f
   string table (text that Excel stores once per workbook, loaded when the first sheet is opened)
   plus the current row. Values never point into reused buffers: strings stay valid after the
   row is replaced, and taking a row's inline strings allocates once per row.
+- **Concurrent inflate:** by default each sheet (and the shared string table) is decompressed on
+  a goroutine of its own, up to 256 KiB ahead of the parser, which roughly halves the time to read
+  a sheet when a CPU core is free. It costs about 4% more CPU time in total, is off when
+  `GOMAXPROCS` is 1, and `WithConcurrentInflate(false)` turns it off for batch jobs that already
+  keep every core busy. Call `rows.Close()` when you stop reading early; a range loop over
+  `rows.All()` does that for you.
 - **Concurrency:** a `Reader` is safe for concurrent use: open several sheets, or the same sheet
   twice, from different goroutines. Each `Rows` belongs to one goroutine.
 - **Compatibility:** files from Excel, LibreOffice, excelize, openpyxl and other producers:
@@ -480,12 +487,17 @@ three. Other processes were using the machine.
 
 | Reader | Inline strings (70.7 MB) | Peak RSS | Shared strings (71.5 MB) | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| **Hypaxel**, `Rows.Next` | **2.20 s** | **20 MB** | **2.08 s** | **86 MB** |
-| **Hypaxel**, `Rows.All` | 2.18 s | 20 MB | 2.08 s | 72 MB |
+| **Hypaxel**, `Rows.Next` | **1.48 s**\* | **21 MB**\* | **1.22 s**\* | **88 MB**\* |
+| **Hypaxel**, `Rows.Next`, `GOMAXPROCS=1` | 2.24 s\* | 19 MB\* | 2.07 s\* | 86 MB\* |
+| **Hypaxel**, `Rows.All` | to be re-measured | | | |
 | excelize, `Rows` with `RawCellValue` | 16.63 s | 22 MB | 18.18 s | 141 MB |
 | excelize, `Rows` (formatted values) | 69.87 s | 23 MB | 71.06 s | 142 MB |
 | xlsxreader, `ReadRows` | 14.86 s | 22 MB | 13.13 s | 163 MB |
 | tealeg/xlsx, `OpenFile` | not run | | not run | |
+
+\* Provisional: medians of five interleaved runs on a busy machine, after concurrent inflate was
+added; the other rows are from the earlier best-of-three run and also need a re-measurement on a
+quiet machine.
 
 At 100k rows tealeg/xlsx, which loads the whole sheet, takes 2.33 s and peaks at 715 MB, against
 0.22 s and 18 MB for Hypaxel. Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string
@@ -499,10 +511,13 @@ stored 00:01:00); the harness allows for that. xlsxreader and tealeg/xlsx 3.3.13
 cells without references, and tealeg's `ValueOnly` option crashes on inline strings, so it runs
 with default options.
 
-About half of Hypaxel's read time is inflate and CRC-32 in Go's `compress/flate` and
-`archive/zip`; the rest is a purpose-built pull parser that tokenizes the worksheet XML at
+Inflate and CRC-32 in Go's `compress/flate` and `archive/zip` take as long as all the parsing,
+so Hypaxel decompresses each sheet and the shared string table on a separate goroutine while
+the caller's goroutine parses (see `WithConcurrentInflate`); a single reader's time is then
+bounded by inflate alone. The parser is purpose-built: it tokenizes the worksheet XML at
 460 MB/s, 7x faster than `encoding/xml`'s `RawToken` (64 MB/s) on the same input
-(`go test -bench Tokenize` in `go/`), with single-pass fast paths for common cell shapes.
+(`go test -bench Tokenize` in `go/`), with single-pass fast paths for common cells and plain
+shared strings.
 
 Run them yourself:
 

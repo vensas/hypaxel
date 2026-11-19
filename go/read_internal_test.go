@@ -330,3 +330,32 @@ func TestValueAccessorsAndKinds(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+func TestSharedStringFastPathMatchesTheGeneralParser(t *testing.T) {
+	xml := `<sst><si><t>plain</t></si><si><t xml:space="preserve"> padded </t></si><si><t a='x>y'>quoted</t></si>` +
+		`<si><t/></si><si><t></t></si><si><t>a &amp; b_x000A_c&#x1F600;</t></si><si><t>line1` + "\r\n" + `line2</t></si>` +
+		`<si><t>run</t><t>s</t></si><si><r><t>rich</t></r></si><si><t>東京</t><rPh><t>トウキョウ</t></rPh></si>` +
+		`<si><tx>not t</tx><t>after</t></si><si><t><![CDATA[<cdata>]]></t></si><si/></sst>`
+	want := []string{"plain", " padded ", "quoted", "", "", "a & b\nc\U0001F600", "line1\nline2", "runs", "rich", "東京", "after", "<cdata>", ""}
+	for _, size := range []int{8, 13, 32, 64 << 10} {
+		x := newXMLReader(iotest.OneByteReader(strings.NewReader(xml)), "sst.xml")
+		x.buf = make([]byte, size)
+		sst, err := parseSharedStrings(x, math.MaxInt64)
+		noErr(t, err)
+		var got []string
+		for i := range sst.len() {
+			got = append(got, sst.get(uint32(i)))
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("buffer %d:\n got %q\nwant %q", size, got, want)
+		}
+	}
+	x := newXMLReader(strings.NewReader("<sst><si><t>\xff</t></si></sst>"), "sst.xml")
+	if _, err := parseSharedStrings(x, math.MaxInt64); !errors.Is(err, ErrMalformed) {
+		t.Errorf("invalid UTF-8: %v", err)
+	}
+	x = newXMLReader(strings.NewReader(strings.Repeat("<si><t>0123456789</t></si>", 3)), "sst.xml")
+	if _, err := parseSharedStrings(x, 15); !errors.Is(err, ErrLimitExceeded) {
+		t.Errorf("limit: %v", err)
+	}
+}

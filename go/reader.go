@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 type readConfig struct {
 	maxSharedStringsBytes int64
+	pipeline              bool
 }
 
 // ReadOption configures a [Reader].
@@ -28,6 +30,15 @@ type ReadOption func(*readConfig)
 // reading untrusted uploads.
 func WithMaxSharedStringsBytes(n int64) ReadOption {
 	return func(c *readConfig) { c.maxSharedStringsBytes = max(n, 0) }
+}
+
+// WithConcurrentInflate sets whether a worksheet and the shared string table are decompressed
+// on a separate goroutine while their XML is parsed. It is on by default, which roughly halves
+// the time to read a sheet when a spare CPU core is available, for about 4% more CPU time. It is
+// always off when GOMAXPROCS is 1. Turn it off for CPU-bound batch work that already keeps
+// every core busy.
+func WithConcurrentInflate(enabled bool) ReadOption {
+	return func(c *readConfig) { c.pipeline = enabled }
 }
 
 // Visibility is whether a sheet is shown in Excel's tab bar.
@@ -78,6 +89,7 @@ type Reader struct {
 	styles   []DateKind
 	date1904 bool
 	sst      func() (*stringTable, error)
+	cfg      readConfig
 }
 
 // OpenReader opens the workbook file at path. Close the Reader to close the file.
@@ -103,7 +115,7 @@ func OpenReader(path string, opts ...ReadOption) (*Reader, error) {
 // NewReader reads the workbook structure from src, which holds size bytes, such as an
 // [os.File], a [bytes.Reader] or an [io.SectionReader].
 func NewReader(src io.ReaderAt, size int64, opts ...ReadOption) (*Reader, error) {
-	cfg := readConfig{maxSharedStringsBytes: defaultMaxSharedStringsBytes}
+	cfg := readConfig{maxSharedStringsBytes: defaultMaxSharedStringsBytes, pipeline: true}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -127,7 +139,7 @@ func NewReader(src io.ReaderAt, size int64, opts ...ReadOption) (*Reader, error)
 		return nil, fmt.Errorf("%w: the ZIP archive has no entries", ErrInvalidFile)
 	}
 
-	r := &Reader{files: make(map[string]*zip.File, len(zr.File)), folded: make(map[string]*zip.File, len(zr.File))}
+	r := &Reader{cfg: cfg, files: make(map[string]*zip.File, len(zr.File)), folded: make(map[string]*zip.File, len(zr.File))}
 	for _, f := range zr.File {
 		name := strings.TrimLeft(strings.ReplaceAll(f.Name, `\`, "/"), "/")
 		if _, dup := r.files[name]; !dup {
@@ -185,6 +197,7 @@ func NewReader(src io.ReaderAt, size int64, opts ...ReadOption) (*Reader, error)
 		if err != nil {
 			return nil, err
 		}
+		rc = r.overlap(x, rc)
 		defer rc.Close()
 		return parseSharedStrings(x, cfg.maxSharedStringsBytes)
 	})
@@ -261,7 +274,23 @@ func (r *Reader) RowsAt(index int) (*Rows, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Rows{x: x, rc: rc, styles: r.styles, row: Row{sst: sst, date1904: r.date1904}}, nil
+	rc = r.overlap(x, rc)
+	rows := &Rows{x: x, rc: rc, styles: r.styles, row: Row{sst: sst, date1904: r.date1904}}
+	if p, ok := rc.(*pipeReader); ok {
+		// Rows dropped without Close would otherwise leave the goroutine blocked forever.
+		runtime.AddCleanup(rows, (*pipeReader).stop, p)
+	}
+	return rows, nil
+}
+
+// overlap moves decompression of an opened part to its own goroutine when that can help.
+func (r *Reader) overlap(x *xmlReader, rc io.ReadCloser) io.ReadCloser {
+	if !r.cfg.pipeline || runtime.GOMAXPROCS(0) == 1 {
+		return rc
+	}
+	p := newPipeReader(rc)
+	x.src = p
+	return p
 }
 
 // find returns the ZIP entry of a part, ignoring a leading "/" and, as a fallback, case.

@@ -75,7 +75,10 @@ const (
 //	}
 //	return rows.Err()
 //
-// A Rows is not safe for concurrent use; open one per goroutine.
+// A Rows is not safe for concurrent use; open one per goroutine. With [WithConcurrentInflate]
+// (the default), a goroutine decompresses the sheet ahead of the parser; it stops when Next
+// returns false or Close is called, and is stopped by the garbage collector for a Rows that
+// is dropped without either. Call Close when stopping early.
 type Rows struct {
 	x        *xmlReader
 	rc       io.ReadCloser

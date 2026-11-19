@@ -176,6 +176,18 @@ func parseSharedStrings(x *xmlReader, maxBytes int64) (*stringTable, error) {
 	var data []byte
 	var ends []uint32
 	for {
+		if raw, ok := x.scanSharedString(); ok {
+			var msg string
+			if data, msg = decodeText(data, raw, true, true); msg != "" {
+				return nil, x.malformed("%s", msg)
+			}
+			if len(data) > limit {
+				return nil, partError(x.part, ErrLimitExceeded,
+					"the shared string table exceeds %d bytes (see WithMaxSharedStringsBytes)", limit)
+			}
+			ends = append(ends, uint32(len(data)))
+			continue
+		}
 		ev, err := x.next()
 		if err != nil {
 			return nil, err

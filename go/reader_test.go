@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -95,9 +96,9 @@ func singleSheet(t testing.TB, sheetXML, extraRels string, extraParts ...string)
 	return pkg(t, append(parts, extraParts...)...)
 }
 
-func rowsError(t *testing.T, data []byte) error {
+func rowsError(t *testing.T, data []byte, opts ...ReadOption) error {
 	t.Helper()
-	rows, err := openBytes(t, data).Rows("S")
+	rows, err := openBytes(t, data, opts...).Rows("S")
 	if err != nil {
 		return err
 	}
@@ -589,8 +590,8 @@ func storedBook(t testing.TB) []byte {
 }
 
 // readEverything reads every sheet of data and formats every value; it must not panic or hang.
-func readEverything(data []byte) error {
-	r, err := NewReader(bytes.NewReader(data), int64(len(data)), WithMaxSharedStringsBytes(1<<20))
+func readEverything(data []byte, opts ...ReadOption) error {
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)), append([]ReadOption{WithMaxSharedStringsBytes(1 << 20)}, opts...)...)
 	if err != nil {
 		return err
 	}
@@ -623,7 +624,7 @@ func TestReadDamagedFilesFailWithoutPanicking(t *testing.T) {
 		state ^= state << 17
 		return state
 	}
-	for range 2000 {
+	for i := range 2000 {
 		damaged := bytes.Clone(original)
 		for range 1 + next()%4 {
 			damaged[next()%uint64(len(damaged))] = byte(next())
@@ -631,7 +632,7 @@ func TestReadDamagedFilesFailWithoutPanicking(t *testing.T) {
 		if next()%4 == 0 {
 			damaged = damaged[:next()%uint64(len(damaged))]
 		}
-		_ = readEverything(damaged)
+		_ = readEverything(damaged, WithConcurrentInflate(i%2 == 0))
 	}
 }
 
@@ -647,21 +648,51 @@ func TestReadDetectsZipDamage(t *testing.T) {
 	offset, err := f.DataOffset()
 	noErr(t, err)
 
+	sheetEntry := centralEntry(t, data, "xl/worksheets/sheet1.xml")
 	corrupt := bytes.Clone(data)
 	corrupt[offset+int64(f.CompressedSize64)/2] ^= 0xFF
-	err = rowsError(t, corrupt)
-	wantErr(t, err, ErrMalformed)
-	contains(t, err.Error(), "xl/worksheets/sheet1.xml")
-
 	// A central directory entry that understates the uncompressed size, as a zip bomb would.
 	understated := bytes.Clone(data)
-	binary.LittleEndian.PutUint32(understated[centralEntry(t, data, "xl/worksheets/sheet1.xml")+24:], 100)
-	err = rowsError(t, understated)
-	wantErr(t, err, ErrMalformed)
+	binary.LittleEndian.PutUint32(understated[sheetEntry+24:], 100)
+	overstated := bytes.Clone(data)
+	binary.LittleEndian.PutUint32(overstated[sheetEntry+24:], uint32(f.UncompressedSize64)+1)
+	badCRC := bytes.Clone(data)
+	badCRC[sheetEntry+16] ^= 0xFF
+	truncated := bytes.Clone(data)
+	binary.LittleEndian.PutUint32(truncated[sheetEntry+20:], uint32(f.CompressedSize64)/2)
+
+	for _, tc := range []struct {
+		name  string
+		data  []byte
+		cause error
+	}{
+		{"corrupt deflate data", corrupt, nil},
+		{"understated size", understated, zip.ErrFormat},
+		{"overstated size", overstated, io.ErrUnexpectedEOF},
+		{"CRC mismatch", badCRC, zip.ErrChecksum},
+		{"truncated compressed data", truncated, nil},
+	} {
+		var messages []string
+		for _, concurrent := range []bool{false, true} {
+			err := rowsError(t, tc.data, WithConcurrentInflate(concurrent))
+			wantErr(t, err, ErrMalformed)
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Errorf("%s: %v does not wrap %v", tc.name, err, tc.cause)
+			}
+			var re *ReadError
+			if !errors.As(err, &re) || re.Part != "xl/worksheets/sheet1.xml" {
+				t.Errorf("%s: %v names no part", tc.name, err)
+			}
+			messages = append(messages, err.Error())
+		}
+		if messages[0] != messages[1] {
+			t.Errorf("%s: the error depends on concurrent inflate:\n%s\n%s", tc.name, messages[0], messages[1])
+		}
+	}
 
 	for n := range len(data) {
 		if n%97 == 0 || n > len(data)-200 {
-			_ = readEverything(data[:n])
+			_ = readEverything(data[:n], WithConcurrentInflate(n%2 == 0))
 		}
 	}
 }
@@ -717,5 +748,20 @@ func FuzzSheetXML(f *testing.F) {
 		sst := `<sst><si><t>shared</t></si></sst>`
 		rels := `<Relationship Id="rId2" Type="x/sharedStrings" Target="sharedStrings.xml"/>`
 		_ = readEverything(singleSheet(t, sheet, rels, "xl/sharedStrings.xml", sst))
+	})
+}
+
+func FuzzSharedStrings(f *testing.F) {
+	f.Add(`<sst><si><t>a</t></si><si><t xml:space="preserve"> b </t></si><si><r><t>c</t></r><rPh><t>d</t></rPh></si></sst>`, uint8(9))
+	f.Add(`<sst><si><t a='>'>x&amp;_x0041_</t></si><si><t/></si><si/></sst>`, uint8(0))
+	f.Fuzz(func(t *testing.T, xml string, size uint8) {
+		x := newXMLReader(strings.NewReader(xml), "sst.xml")
+		x.buf = make([]byte, 8+int(size))
+		sst, err := parseSharedStrings(x, 1<<20)
+		if err == nil {
+			for i := range sst.len() {
+				_ = sst.get(uint32(i))
+			}
+		}
 	})
 }
