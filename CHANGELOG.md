@@ -7,8 +7,9 @@ Python, Node.js, .NET, Java, Go and PHP).
 
 ### Added
 
-- **Streaming XLSX reader (Rust, Python).** Rows are read one at a time, with memory bounded by
-  the shared string table plus one row.
+- **Streaming XLSX reader (.NET, Rust, Python, Go, Java).** Rows are read one at a time, with
+  memory bounded by the shared string table plus one row. Every implementation has its own
+  dependency-free parser and the same semantics.
   - Rust: `XlsxReader::open` / `new` / `with_options`, `sheets()` (name, visibility, kind),
     `worksheet(name)` / `worksheet_at(index)` → `Rows::next_row()` → `Row` (`number`, `cells`,
     `get`, `values`). `Value` covers strings, numbers, booleans, errors and `ExcelDateTime` for
@@ -18,11 +19,20 @@ Python, Node.js, .NET, Java, Go and PHP).
   - Python: `open_workbook` / `Reader` (paths, bytes, binary file objects), `iter_rows` /
     `read_rows`, `iter_records` / `read_records` and `read_dataframe` (pandas or polars). Values
     are `str`, `int`, `float`, `bool`, `datetime`, `time`, `timedelta`, error strings and `None`.
+  - .NET: `XlsxReader.Open` / `new XlsxReader(stream)`, `OpenWorksheet(name or index)` →
+    `WorksheetReader.Read()` / `Row` with allocation-free `TryGet…` accessors and `ExcelValue`
+    structs; `XlsxReadException` with `Kind` and `Part`.
+  - Go: `OpenReader` / `NewReader(io.ReaderAt, size)`, `Rows(name)` / `RowsAt(index)` with
+    `Next`/`Row`/`Err` or `Rows.All()` (`iter.Seq2`); `ReadError` with sentinel errors.
+  - Java: `XlsxReader.open(Path | SeekableByteChannel | byte[] | InputStream)`,
+    `worksheet(name or index)` → `SheetReader.nextRow()`, iterator or `stream()`; `XlsxException`
+    gains kinds and the failing part.
   - Accepts Strict Open XML, prefixed namespaces, cells without references, rich and inline text
     and ISO 8601 dates. Rejects DTDs, oversized tokens and ZIP entries that do not match their
     declared size or CRC. Names legacy `.xls`, encrypted and non-spreadsheet files in the error.
-- Read benchmarks: `rust/hypaxel/examples/read_bench.rs` (against calamine) and
-  `python/benchmarks/read_bench.py` (against openpyxl, python-calamine, pandas and fastexcel).
+- Read benchmarks against each ecosystem's readers: calamine (Rust); openpyxl, python-calamine,
+  pandas and fastexcel (Python); Sylvan.Data.Excel, ExcelDataReader and MiniExcel (.NET);
+  excelize, xlsxreader and tealeg/xlsx (Go); FastExcel and Apache POI (Java).
 
 ### Fixed
 

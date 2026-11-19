@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, Go, Java and PHP, built for web services. Streaming readers for Rust and Python.</b>
+  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, Go, Java and PHP, built for web services. Streaming readers for .NET, Rust, Python, Go and Java.</b>
 </p>
 
 <p align="center">
@@ -63,13 +63,19 @@ different machines, so compare each row with its "compared with" library, not th
 other. Each README has the full tables, versions and how to reproduce them. None of the packages
 is published to a registry yet.
 
-**Reading** (Rust and Python so far) streams rows the same way, with memory bounded by the
-workbook's shared strings plus one row:
+**Reading** (.NET, Rust, Python, Go and Java) streams rows the same way, with memory bounded by
+the workbook's shared strings plus one row. Node.js and PHP do not read yet.
 
 | | Read 1M rows × 10 columns | Compared with |
 | --- | ---: | --- |
+| [.NET](dotnet/README.md#reading) `XlsxReader` | ~1.0–1.15 s | ~1.9x faster than Sylvan.Data.Excel, ~4x faster than ExcelDataReader, 7–12x faster than MiniExcel |
 | [Rust](rust/README.md#reading) `XlsxReader` | ~1.2–1.4 s, 7–57 MB peak | ~1.6–1.7x faster than calamine's cell reader, 15–115x less memory than calamine's `Range` |
 | [Python](python/README.md#reading) `iter_rows`, `read_dataframe` | ~1.8 s, 69 MB peak | ~20x faster than openpyxl (100k rows), ~2.6x faster than python-calamine with ~12x less memory |
+| [Go](go/README.md#reading) `OpenReader` | ~2.1 s* | ~6–8x faster than excelize's `Rows` and xlsxreader |
+| [Java](java/README.md#reading) `XlsxReader` | ~0.7 s | ~4x faster than the FastExcel reader, ~5–7x faster than POI's streaming XSSFReader |
+
+\* The Go files carry a cell reference on every cell, as Excel writes them, so they are about 40%
+larger than the other benchmarks' files. As above, compare each row with its own competitors.
 
 ```python
 for row in hypaxel.iter_rows("orders.xlsx", "Orders"):
@@ -147,7 +153,7 @@ Shared by all seven implementations (milestone 1: creating Excel files).
 - **Valid output:** checked against the Office Open XML schema validator and read back by independent readers
   (Open XML SDK, calamine, openpyxl, LibreOffice)
 
-Reading (Rust and Python): streamed rows of strings, numbers, booleans, errors and dates, times and
+Reading (.NET, Rust, Python, Go, Java): streamed rows of strings, numbers, booleans, errors and dates, times and
 durations recognised from number formats, in both date systems; sheet list with visibility; files
 from Excel, LibreOffice and other producers, including Strict Open XML; clear errors for legacy
 `.xls`, encrypted and damaged files; limits for untrusted input.
@@ -171,7 +177,7 @@ php/       Composer package: src/, tests/, benchmarks/, examples/
 2. Hyperlinks, data validation, conditional formatting, images, document properties
 3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
    Python: an Arrow-native DataFrame path
-4. ✅ Streaming readers for Rust and Python; other languages when there is demand
+4. ✅ Streaming readers for .NET, Rust, Python, Go and Java; Node.js and PHP when there is demand
 5. Read-modify-write for templates
 
 ## License
