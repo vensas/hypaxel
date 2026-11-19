@@ -5,7 +5,7 @@
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsTrimmable>false</IsTrimmable>
-    <Description>High-performance, forward-only, low-allocation XLSX (Excel) writer for .NET. Streams directly to any Stream, including ASP.NET Core response bodies.</Description>
+    <Description>High-performance, low-allocation XLSX (Excel) writer and streaming reader for .NET. Writes directly to any Stream, including ASP.NET Core response bodies, and reads rows with bounded memory.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 

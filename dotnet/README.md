@@ -17,7 +17,8 @@ you write it and compressed straight into the output, so memory stays flat wheth
 - **Styling:** fonts, fills, borders, alignment and number formats. Styles are de-duplicated.
 - **Valid output:** every test validates the output against the Office Open XML schema with the Open XML SDK.
 
-> Status: **Milestone 1 — creating Excel files.** Reading/editing is planned for later milestones (see roadmap).
+> Status: **Milestone 1 — creating Excel files**, plus a **streaming reader** (`XlsxReader`, see [Reading](#reading)).
+> Editing existing workbooks is planned for a later milestone (see roadmap).
 
 > **Rust:** a native Rust implementation with the same design lives in [`rust/`](../rust/README.md):
 > the `hypaxel` crate (sync `io::Write` + tokio `AsyncWrite`, serde records, chrono dates) and
@@ -27,7 +28,7 @@ you write it and compressed straight into the output, so memory stays flat wheth
 
 | Package | Purpose |
 | --- | --- |
-| `Hypaxel` | Core writer (`net8.0`, `net9.0`, `net10.0`, `net11.0`), no dependencies |
+| `Hypaxel` | Core writer and streaming reader (`net8.0`, `net9.0`, `net10.0`, `net11.0`), no dependencies |
 | `Hypaxel.AspNetCore` | `IResult` / `IActionResult` helpers for streaming workbooks as HTTP responses |
 
 ## Quick start
@@ -189,6 +190,79 @@ await sheet.AddRowAsync("Store B", 180);
 
 `RowOptions` also sets `Height`, `Style` and `Collapsed` (on the summary row of a collapsed group).
 
+## Reading
+
+```csharp
+using Hypaxel;
+
+using var reader = XlsxReader.Open("orders.xlsx");     // or new XlsxReader(stream, options)
+Console.WriteLine(string.Join(", ", reader.SheetNames));
+
+using var rows = reader.OpenWorksheet("Orders");        // or OpenWorksheet(0)
+while (rows.Read())
+{
+    var row = rows.Row;                                 // reused for every row; Number is the 1-based Excel row
+    if (row.TryGetString(1, out var customer)           // by 1-based column
+        && row.TryGetDouble(3, out var amount)
+        && row.TryGetDateTime(4, out var placed))
+    {
+        Console.WriteLine($"{row.Number}: {customer} {amount} {placed:yyyy-MM-dd}");
+    }
+
+    foreach (var cell in row.Cells)                     // only cells with a value, in column order
+    {
+        switch (cell.Value.Kind)
+        {
+            case ExcelValueKind.String: /* cell.Value.TryGetString(...) */ break;
+            case ExcelValueKind.DateTime: /* cell.Value.TryGetExcelDateTime(...) */ break;
+        }
+    }
+
+    ExcelValue[] dense = row.GetValues();               // columns 1..LastColumn, ExcelValue.Empty for gaps
+}
+
+// WorksheetReader is also an IEnumerable<XlsxRow>:
+foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
+```
+
+- **Values:** `ExcelValue` is a small `readonly struct` with a `Kind` (`Empty`, `String`, `Number`,
+  `Boolean`, `DateTime`, `Error`) and `TryGetString` / `TryGetDouble` / `TryGetBoolean` /
+  `TryGetDateTime` / `TryGetExcelDateTime` / `TryGetError`. Numbers whose built-in or custom number
+  format shows a date, time or duration become `ExcelDateTime`: the raw `Serial`, its `Kind` (`Date`,
+  `DateTime`, `Time`, `Duration`), `Is1904`, and `TryGetDateTime`, `TryGetDateOnly`, `TryGetTimeOnly`,
+  `TryGetTimeSpan`. Both date systems are supported, including Excel's fictitious 1900-02-29 (serial 60
+  has no `DateTime`); times are rounded to the millisecond. `ToString()` gives roughly Excel's
+  General format, with dates in ISO 8601. Formulas yield their cached result; a formula that was never
+  calculated has no value.
+- **Allocations:** numbers, booleans, dates and shared strings are read without allocating. Inline
+  strings allocate when you ask for a `string` (`TryGetString`, `GetValue`, `Cells`);
+  `row.TryGetText(column, out ReadOnlySpan<char>)` reads any text without allocating.
+  `row.GetValues(Span<ExcelValue>)` fills a reused array.
+- **Memory:** rows are decompressed and parsed as a stream. What stays in memory is the shared
+  string table (text that Excel stores once per workbook, held as `string`s) plus the current row.
+  See [Reading performance](#reading-1) for measured peaks.
+- **Compatibility:** tested with workbooks from the Hypaxel writer and the Open XML SDK, and with
+  handcrafted packages that cover what other producers do: package relationships instead of fixed paths, Strict Open XML, prefixed namespaces, cells and rows
+  without references, out-of-order and duplicate cells (the last one wins), rich text, inline strings,
+  phonetic runs (skipped), ISO 8601 dates (`t="d"`), CDATA, CRLF line endings and Excel's `_xHHHH_`
+  escapes.
+- **Safety:** DTDs are rejected (no entity expansion), every XML token (16 MiB) and row (16,384
+  cells, 128 Mi characters of text) is bounded, ZIP entries must match their declared size and CRC-32,
+  and `XlsxReaderOptions.MaxSharedStringsBytes` (default 1 GiB) caps the shared string table; lower it
+  for untrusted uploads. Damaged or malicious input throws `XlsxReadException` (or an `IOException`
+  from your stream), never another exception type. Its `Kind` is `InvalidFile` (not an `.xlsx`:
+  CSV, legacy `.xls`, a password-protected workbook, a Word file), `Malformed` (with the `Part`, and the
+  row in the message), `LimitExceeded` or `Unsupported`.
+- **Sheets:** `reader.Sheets` lists every sheet with its `Visibility` (`Visible`, `Hidden`,
+  `VeryHidden`) and `Kind` (`Worksheet`, `Chartsheet`, `Other`). `OpenWorksheet(name)` matches exactly,
+  then ignoring case. Several worksheets of one reader can be open at once on one thread; use one reader
+  per thread to read in parallel.
+- **Streams:** the input must be seekable, because the ZIP directory is at the end of the file. Copy a
+  non-seekable stream such as a raw request body into a `MemoryStream` or temporary file first. Reading is synchronous.
+
+Not read (yet): formula text, styles beyond date detection, merged ranges, comments, hyperlinks
+and data validation.
+
 ## Features (milestone 1)
 
 | Area | Supported |
@@ -279,6 +353,80 @@ dotnet run -c Release -f net10.0 -- --filter '*' --job short --inProcess    # Be
   buffer. When the buffer passes `FlushThreshold` (64 KiB by default), it is drained to the
   destination with real async I/O.
 
+### Reading
+
+The same dataset (1M rows × 10 columns, written by the Hypaxel writer with inline or shared strings),
+read cell by cell. Every reader must produce the same checksum (10,000,000 cells, the sum of all
+numbers including date serials, 42,833,558 string characters, 500,000 `TRUE`s), and all of them do.
+
+Measured on an Apple M1 Max (10 cores, 64 GB, macOS 26.6) with .NET 8.0.19, 9.0.0, 10.0.13 and
+11.0.0, against Sylvan.Data.Excel 0.5.8, ExcelDataReader 3.9.0 and MiniExcel 1.47.1. Each reader runs
+in its own process with the `--read-quick` stopwatch runner: one warm-up, then the best of three runs.
+Allocations are for one run; peak RSS is the whole process (`/usr/bin/time -l`), including the
+runtime. The machine was shared with other workloads, so expect a few percent of noise.
+
+**1M rows, time**
+
+| Reader | File | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 1.07 s | 1.13 s | 1.02 s | 1.01 s |
+| Hypaxel, `GetValue` (`ExcelValue`) | inline | 1.15 s | 1.16 s | 1.07 s | 1.06 s |
+| Sylvan.Data.Excel | inline | 2.19 s | 2.03 s | 1.93 s | 1.94 s |
+| ExcelDataReader | inline | 5.06 s | 4.63 s | 4.21 s | 4.34 s |
+| MiniExcel | inline | | | 6.98 s | |
+| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 1.19 s | 1.24 s | 1.13 s | 1.14 s |
+| Hypaxel, `GetValue` (`ExcelValue`) | shared | 1.23 s | 1.28 s | 1.14 s | 1.16 s |
+| Sylvan.Data.Excel | shared | 2.15 s | 2.02 s | 1.94 s | 2.00 s |
+| ExcelDataReader | shared | 5.24 s | 4.91 s | 4.34 s | 4.39 s |
+| MiniExcel | shared | | | 12.23 s | |
+
+MiniExcel was only run on .NET 10.
+
+**1M rows, memory (.NET 10)**
+
+| Reader | Inline: allocated | Inline: peak RSS | Shared: allocated | Shared: peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Hypaxel, `TryGetText`/`TryGetDouble` | 0.1 MB | 49 MB | 92 MB | 135 MB |
+| Hypaxel, `GetValue` (`ExcelValue`) | 153 MB | 55 MB | 92 MB | 135 MB |
+| Sylvan.Data.Excel | 154 MB | 76 MB | 85 MB | 156 MB |
+| ExcelDataReader | 1,937 MB | 77 MB | 1,717 MB | 158 MB |
+| MiniExcel | 10,649 MB | 81 MB | 10,157 MB | 84 MB |
+
+The other runtimes are within a few MB of these figures. With inline strings, the only allocations are
+the strings you ask for: the 153 MB are the 3M cell strings, and reading text as a span
+allocates nothing. With shared strings, the 92 MB are the shared string table (1M distinct
+strings), which is loaded once and then read without allocating. By design, nothing else grows with
+the number of rows: the row buffers are sized by the widest row.
+
+```bash
+cd dotnet/benchmarks/Hypaxel.Benchmarks
+dotnet run -c Release -f net10.0 -- --read-quick 1000000                    # all readers, both files
+dotnet run -c Release -f net10.0 -- --read-quick 1000000 Sylvan shared      # one reader, one file
+dotnet run -c Release -f net10.0 -- --filter '*ReadBenchmarks*' --job short --inProcess   # BenchmarkDotNet, 100k rows (not used for the tables)
+```
+
+The test files are generated in the temp directory on first use.
+
+### Why reading is fast
+
+- **A purpose-built UTF-8 pull parser** instead of `System.Xml.XmlReader`. Element and attribute names
+  are compared as bytes and never become strings, and number cells are parsed straight from the
+  input buffer. A prototype that did the same work with `XmlReader` (`DtdProcessing.Prohibit`, an
+  atomized `NameTable`) took 1.90 s and allocated 623 MB on the inline file, against 1.57 s and
+  161 MB for the first version of this parser. The fast paths below brought that to about 1.06 s.
+- **Fast paths for common cells.** `<c ...><v>42</v></c>` and `<c t="inlineStr"><is><t>…</t></is></c>`
+  are consumed in one step; anything else (namespaces, formulas, rich text, comments) goes through
+  the general event loop.
+- **Exact fast number parsing.** Decimals with up to 15 digits and no exponent are computed as
+  `digits / 10^k`, which is correctly rounded because both operands are exact doubles. Everything
+  else falls back to `double.TryParse`.
+- **Reused row buffers.** Cells are stored as compact structs in a reused array, with text in one
+  reused `char` buffer. Values are materialized only when you ask for them.
+- **Cheap integrity checks.** Inflate runs on the runtime's native zlib through `DeflateStream`. The
+  reader verifies CRC-32 itself (only .NET 11's `ZipArchive` does), using the ARM64 CRC instructions
+  where available and a slicing-by-8 table elsewhere. Inflating the worksheet alone takes 0.14–0.23 s on
+  this dataset. The slicing-by-8 path (x64) has not been benchmarked.
+
 ## Options
 
 ```csharp
@@ -307,7 +455,7 @@ new XlsxWriterOptions
 1. **Create Excel files** (this milestone)
 2. Hyperlinks, data validation, conditional formatting, images, document properties
 3. Source generator for object mapping (AOT/trimming-friendly)
-4. Streaming reader (`XlsxReader`) with low-allocation row enumeration
+4. ~~Streaming reader (`XlsxReader`) with low-allocation row enumeration~~ (available)
 5. Read-modify-write for templates
 
 ## Building
