@@ -19,9 +19,10 @@ It can stream a download to the browser while your query is still running.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
   panes, auto filters, Excel tables, row grouping, auto-fit columns, formulas, hidden sheets, tab colors.
 - **Valid output:** checked with the Office Open XML schema validator and read back with openpyxl.
-- **Fast reading:** `iter_rows` reads 100k rows × 10 columns in 0.18 s, about **20x faster than
-  openpyxl** and 2.6x faster than python-calamine, in bounded memory. `read_dataframe` builds a
-  pandas DataFrame about 3x faster than `pandas.read_excel(engine="calamine")`. See [Reading](#reading).
+- **Fast reading:** `iter_rows` reads 100k rows × 10 columns in 0.13 s, about **27x faster than
+  openpyxl** and 3.5x faster than python-calamine, in bounded memory. `read_dataframe` builds a
+  pandas DataFrame 3.5–4x faster than `pandas.read_excel(engine="calamine")`, and a polars one
+  faster than fastexcel. See [Reading](#reading).
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md). The [.NET version](../dotnet/README.md) uses the same design.
 
@@ -243,18 +244,18 @@ Run it yourself with `python benchmarks/read_bench.py 100000`.
 
 | 100,000 rows | seconds | peak RSS |
 | --- | ---: | ---: |
-| **hypaxel** `iter_rows` | **0.18** | **27 MB** |
+| **hypaxel** `iter_rows` | **0.13** | **27 MB** |
 | python-calamine `iter_rows` | 0.47 | 105 MB |
 | openpyxl (read_only) | 3.58 | 63 MB |
-| **hypaxel** `read_dataframe` (pandas) | **0.25** | 181 MB |
+| **hypaxel** `read_dataframe` (pandas) | **0.20** | 182 MB |
 | pandas.read_excel (calamine) | 0.74 | 315 MB |
 | pandas.read_excel (openpyxl) | 4.36 | 201 MB |
-| **hypaxel** `read_dataframe` (polars) | **0.26** | 143 MB |
-| fastexcel `to_polars` | 0.26 | 187 MB |
+| **hypaxel** `read_dataframe` (polars) | **0.18** | 143 MB |
+| fastexcel `to_polars` | 0.24 | 188 MB |
 
-At 1M rows (55 MB file) `iter_rows` takes 1.8 s with a 69 MB peak, against 4.7 s and 862 MB for
-python-calamine. `read_dataframe` takes 2.5 s (pandas) and 2.6 s (polars), against 8.5 s for
-`pandas.read_excel(engine="calamine")` and 2.6 s for fastexcel.
+At 1M rows (55 MB file) `iter_rows` takes 1.35 s with a 68 MB peak, against 4.7 s and 862 MB for
+python-calamine. `read_dataframe` takes 1.9 s (pandas) and 2.0 s (polars), against 8.3 s for
+`pandas.read_excel(engine="calamine")` and 2.5 s for fastexcel.
 
 ## Notes and limits
 

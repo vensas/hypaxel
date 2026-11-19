@@ -22,7 +22,7 @@ the HTTP client while your query is still running.
 - **Valid output:** every feature is checked against the Office Open XML schema validator, and
   the files are read back with calamine, openpyxl and LibreOffice.
 - **Streaming reader:** `XlsxReader` reads any `Read + Seek` source one row at a time, about
-  1.6–1.7x faster than calamine's cell reader. Dates are recognised from number formats, and damaged
+  about 2.8x faster than calamine's cell reader. Dates are recognised from number formats, and damaged
   or hostile files fail with a clear error. See [Reading](#reading).
 - **Safe Rust:** `#![deny(unsafe_code)]`.
 
@@ -272,12 +272,14 @@ over all values that every reader must match. macOS, Apple M1 Max, Rust 1.100, c
 
 | Reader | Inline strings (49 MB) | Peak RSS | Shared strings (52 MB) | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| **hypaxel** `XlsxReader` | **1.34 s** | **7 MB** | **1.20 s** | **57 MB** |
-| calamine `worksheet_cells_reader` | 2.21 s | 7 MB | 2.04 s | 64 MB |
-| calamine `worksheet_range` | 2.45 s | 793 MB | 2.32 s | 849 MB |
+| **hypaxel** `XlsxReader` | **0.78 s** | **7 MB** | **0.73 s** | **57 MB** |
+| calamine `worksheet_cells_reader` | 2.18 s | 7 MB | 2.05 s | 64 MB |
+| calamine `worksheet_range` | 2.43 s | 793 MB | 2.33 s | 849 MB |
 
-About 16% of the time is inflate; the rest is a purpose-built pull parser with fast paths for
-the common cell shapes (`<c r="B2" s="1"><v>42</v></c>`) and allocation-free row buffers.
+About a quarter of the time is inflate. Cells of the shapes nearly every producer writes
+(`<c r="B2" s="1"><v>42</v></c>`, `<c t="inlineStr"><is><t>…</t></is></c>`) and plain shared string
+items are matched in a single pass over the buffer; anything else goes through the general pull
+parser. Row buffers are reused, so reading allocates nothing per cell.
 
 ```bash
 cargo run --release -p hypaxel --example read_bench -- generate data.xlsx 1000000 inline

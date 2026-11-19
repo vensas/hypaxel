@@ -15,6 +15,32 @@ const INITIAL_BUFFER: usize = 64 * 1024;
 /// Largest single token (a tag or a run of text). Excel limits cell text to 32,767 characters.
 pub(crate) const MAX_TOKEN: usize = 16 * 1024 * 1024;
 
+/// Bytes kept buffered ahead of a fast-path match, so that a whole cell fits.
+const CELL_LOOKAHEAD: usize = 4096;
+
+/// A byte range in the reader's buffer, valid until the next call that reads input.
+pub(crate) type Span = (usize, usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CellShape {
+    /// `<c …><v>text</v></c>`
+    Value,
+    /// `<c …><is><t>text</t></is></c>`
+    Inline,
+    /// `<c …/>` or `<c …></c>`
+    Empty,
+}
+
+/// A cell matched by [`XmlReader::scan_cell`]: attribute value spans and the raw text span.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScannedCell {
+    pub shape: CellShape,
+    pub reference: Option<Span>,
+    pub cell_type: Option<Span>,
+    pub style: Option<Span>,
+    pub text: Span,
+}
+
 #[derive(Debug)]
 pub(crate) enum Event<'a> {
     Start(Tag<'a>),
@@ -273,6 +299,113 @@ impl<S: Read> XmlReader<S> {
         }
     }
 
+    pub fn bytes(&self, span: Span) -> &[u8] {
+        &self.buf[span.0..span.1]
+    }
+
+    fn fill_lookahead(&mut self) -> Result<()> {
+        while self.end - self.pos < CELL_LOOKAHEAD && self.fill()? {}
+        Ok(())
+    }
+
+    /// Fast path for the cell shapes nearly all producers write. If a complete, unprefixed cell of
+    /// one of these shapes starts at the current position, consumes it and returns its spans;
+    /// otherwise consumes nothing, and the caller falls back to [`next`](Self::next).
+    pub fn scan_cell(&mut self) -> Result<Option<ScannedCell>> {
+        if !self.started {
+            return Ok(None);
+        }
+        self.fill_lookahead()?;
+        let b = &self.buf[..self.end];
+        let e = b.len();
+        let mut i = self.pos + 2;
+        if i >= e || b[self.pos] != b'<' || b[self.pos + 1] != b'c' || !matches!(b[i], b' ' | b'>' | b'/') {
+            return Ok(None);
+        }
+        let mut cell = ScannedCell { shape: CellShape::Empty, reference: None, cell_type: None, style: None, text: (0, 0) };
+        loop {
+            match b.get(i) {
+                None => return Ok(None),
+                Some(b' ') => i += 1,
+                Some(b'>') => {
+                    i += 1;
+                    break;
+                }
+                Some(b'/') => {
+                    if b.get(i + 1) != Some(&b'>') {
+                        return Ok(None);
+                    }
+                    self.pos = i + 2;
+                    return Ok(Some(cell));
+                }
+                Some(_) => {
+                    let name_start = i;
+                    while i < e && b[i] != b'=' {
+                        if matches!(b[i], b':' | b'>' | b'/') || b[i].is_ascii_whitespace() {
+                            return Ok(None);
+                        }
+                        i += 1;
+                    }
+                    let name = &b[name_start..i];
+                    i += 1;
+                    let Some(&quote) = b.get(i).filter(|q| matches!(q, b'"' | b'\'')) else { return Ok(None) };
+                    let value_start = i + 1;
+                    let Some(len) = memchr(quote, &b[value_start..]) else { return Ok(None) };
+                    i = value_start + len;
+                    let span = Some((value_start, i));
+                    match name {
+                        b"r" => cell.reference = span,
+                        b"t" => cell.cell_type = span,
+                        b"s" => cell.style = span,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+        }
+        if i + 4 > e || b[i] != b'<' {
+            return Ok(None);
+        }
+        match (b[i + 1], b[i + 2]) {
+            (b'v', b'>') => {
+                let start = i + 3;
+                let Some(len) = memchr(b'<', &b[start..]) else { return Ok(None) };
+                let close = start + len;
+                if !b[close..].starts_with(b"</v></c>") {
+                    return Ok(None);
+                }
+                cell.shape = CellShape::Value;
+                cell.text = (start, close);
+                self.pos = close + 8;
+            }
+            (b'/', b'c') if b[i + 3] == b'>' => self.pos = i + 4,
+            (b'i', b's') if b[i + 3] == b'>' => {
+                let Some((text, after)) = scan_text(b, i + 4, b"</t></is></c>") else { return Ok(None) };
+                cell.shape = CellShape::Inline;
+                cell.text = text;
+                self.pos = after;
+            }
+            _ => return Ok(None),
+        }
+        Ok(Some(cell))
+    }
+
+    /// Fast path for `<si><t>text</t></si>` shared string items: consumes the item and returns the
+    /// raw text span, or consumes nothing.
+    pub fn scan_shared_string(&mut self) -> Result<Option<Span>> {
+        if !self.started {
+            return Ok(None);
+        }
+        self.fill_lookahead()?;
+        let b = &self.buf[..self.end];
+        if !b[self.pos..].starts_with(b"<si>") {
+            return Ok(None);
+        }
+        let Some((text, after)) = scan_text(b, self.pos + 4, b"</t></si>") else { return Ok(None) };
+        self.pos = after;
+        Ok(Some(text))
+    }
+
     /// For an element whose start tag was just read: if its content is plain text followed by its
     /// end tag, consumes both and returns the raw (undecoded) text. Otherwise consumes nothing.
     pub fn try_raw_text(&mut self) -> Result<Option<&[u8]>> {
@@ -315,6 +448,40 @@ impl<S: Read> XmlReader<S> {
             }
         }
     }
+}
+
+/// Matches `<t>text` or `<t attributes>text` at `at`, followed by `close`. Returns the text span
+/// and the position after `close`.
+fn scan_text(b: &[u8], at: usize, close: &[u8]) -> Option<(Span, usize)> {
+    if !b[at..].starts_with(b"<t") {
+        return None;
+    }
+    let mut j = at + 2;
+    match b.get(j)? {
+        b'>' => {}
+        b' ' => {
+            let mut quote = None;
+            loop {
+                let x = *b.get(j)?;
+                if quote.is_none() && x == b'>' {
+                    break;
+                }
+                match quote {
+                    Some(q) if x == q => quote = None,
+                    None if x == b'"' || x == b'\'' => quote = Some(x),
+                    _ => {}
+                }
+                j += 1;
+            }
+            if b[j - 1] == b'/' {
+                return None;
+            }
+        }
+        _ => return None,
+    }
+    let start = j + 1;
+    let end = start + memchr(b'<', &b[start..])?;
+    b[end..].starts_with(close).then_some(((start, end), end + close.len()))
 }
 
 fn trim_end(s: &[u8]) -> &[u8] {
@@ -517,6 +684,44 @@ mod tests {
     fn tokenizes_across_small_buffers() {
         let xml = "<?xml version=\"1.0\"?>\n<x:root xmlns:x=\"urn:a\" x:id=\"7\"><!-- a > comment --><c r='A1' t = \"a>b\">1 &amp; 2</c><e/><![CDATA[<raw>]]></x:root>";
         assert_eq!(events(xml), ["T:\n", "<root id=7>", "<c r=A1 t=a>b>", "T:1 &amp; 2", "</c>", "<e/>", "C:<raw>", "</root>"]);
+    }
+
+    fn scan(xml: &str) -> (Option<ScannedCell>, XmlReader<&[u8]>) {
+        let mut r = XmlReader::new(xml.as_bytes(), "t");
+        r.started = true;
+        (r.scan_cell().unwrap(), r)
+    }
+
+    #[test]
+    fn scans_common_cell_shapes() {
+        let (cell, r) = scan(r#"<c r="B2" s='3' t="n"><v>4.5</v></c><c/>"#);
+        let cell = cell.unwrap();
+        assert_eq!(cell.shape, CellShape::Value);
+        assert_eq!(r.bytes(cell.reference.unwrap()), b"B2");
+        assert_eq!(r.bytes(cell.style.unwrap()), b"3");
+        assert_eq!(r.bytes(cell.cell_type.unwrap()), b"n");
+        assert_eq!(r.bytes(cell.text), b"4.5");
+        assert_eq!(&r.buf[r.pos..r.end], b"<c/>");
+
+        let (cell, r) = scan(r#"<c t="inlineStr"><is><t xml:space="preserve"> a &amp; b </t></is></c>"#);
+        assert_eq!(cell.map(|c| (c.shape, r.bytes(c.text).to_vec())), Some((CellShape::Inline, b" a &amp; b ".to_vec())));
+        assert_eq!(scan("<c r=\"A1\"/>").0.unwrap().shape, CellShape::Empty);
+        assert_eq!(scan("<c r=\"A1\"></c>").0.unwrap().shape, CellShape::Empty);
+
+        // Anything else is left to the general parser.
+        for other in [
+            "<c r=\"A1\"><f>1+1</f><v>2</v></c>",
+            "<x:c r=\"A1\"><x:v>1</x:v></x:c>",
+            "<c x:r=\"A1\"><v>1</v></c>",
+            "<c r=\"A1\"><v><![CDATA[1]]></v></c>",
+            "<c t=\"inlineStr\"><is><r><t>a</t></r></is></c>",
+            "<col min=\"1\"/>",
+            "<c r=\"A1\"><v>1</v>",
+        ] {
+            let (cell, r) = scan(other);
+            assert!(cell.is_none(), "{other}");
+            assert_eq!(r.pos, 0);
+        }
     }
 
     #[test]

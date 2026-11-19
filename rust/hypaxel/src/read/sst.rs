@@ -2,7 +2,7 @@
 
 use std::io::Read;
 
-use super::xml::{Event, MAX_TOKEN, XmlReader};
+use super::xml::{Event, MAX_TOKEN, XmlReader, decode_into};
 use crate::error::{Error, Result};
 
 #[derive(Debug, Default)]
@@ -32,6 +32,12 @@ impl SharedStrings {
         let limit = max_bytes.min(u32::MAX as u64 - MAX_TOKEN as u64) as usize;
         let mut sst = SharedStrings::default();
         loop {
+            if let Some(text) = xml.scan_shared_string()? {
+                decode_into(&mut sst.data, xml.bytes(text), true, true).map_err(|m| xml.malformed(m))?;
+                sst.check_limit(limit)?;
+                sst.ends.push(sst.data.len() as u32);
+                continue;
+            }
             match xml.next()? {
                 Event::Start(t) if t.name == b"si" => sst.read_item(xml, limit)?,
                 Event::Empty(t) if t.name == b"si" => {}
@@ -59,12 +65,17 @@ impl SharedStrings {
                 2 => xml.skip_element()?,
                 _ => {}
             }
-            if self.data.len() > limit {
-                return Err(Error::LimitExceeded(format!(
-                    "the shared string table exceeds {limit} bytes (ReadOptions::max_shared_strings_bytes)"
-                )));
-            }
+            self.check_limit(limit)?;
         }
+    }
+
+    fn check_limit(&self, limit: usize) -> Result<()> {
+        if self.data.len() > limit {
+            return Err(Error::LimitExceeded(format!(
+                "the shared string table exceeds {limit} bytes (ReadOptions::max_shared_strings_bytes)"
+            )));
+        }
+        Ok(())
     }
 }
 

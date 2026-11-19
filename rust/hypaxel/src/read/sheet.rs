@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::sst::SharedStrings;
 use super::styles::{DateKind, Styles, parse_u32};
 use super::value::{ExcelDateTime, Value, iso_to_serial};
-use super::xml::{self, Event, XmlReader};
+use super::xml::{self, CellShape, Event, XmlReader};
 use super::zip::EntryReader;
 use crate::engine::{MAX_COLUMNS, MAX_ROWS};
 use crate::error::{Error, Result};
@@ -169,6 +169,32 @@ impl<R: Read> Rows<R> {
         let mut column = 0u32;
         let mut sorted = true;
         loop {
+            if let Some(cell) = self.xml.scan_cell()? {
+                let next_column = match cell.reference {
+                    Some(r) => parse_column(self.xml.bytes(r)),
+                    None => Some(column + 1),
+                };
+                let cell_type = parse_cell_type(cell.cell_type.map(|t| self.xml.bytes(t)));
+                let style = cell.style.and_then(|s| parse_digits(self.xml.bytes(s))).unwrap_or(0);
+                let (next_column, cell_type) = self.check_cell(next_column, cell_type)?;
+                if next_column <= column {
+                    sorted = false;
+                }
+                column = next_column;
+                let value = match cell.shape {
+                    CellShape::Value => self.scanned_value(cell_type, style, cell.text)?,
+                    CellShape::Inline if cell_type == CellType::InlineString => {
+                        let start = self.text.len();
+                        xml::decode_into(&mut self.text, self.xml.bytes(cell.text), true, true).map_err(|m| self.xml.malformed(m))?;
+                        Some(Raw::Text(start as u32, self.text.len() as u32))
+                    }
+                    _ => None,
+                };
+                if let Some(value) = value {
+                    self.push_cell(column, value)?;
+                }
+                continue;
+            }
             let (start, tag) = match self.xml.next()? {
                 Event::Start(t) if t.name == b"c" => (true, t),
                 Event::Empty(t) if t.name == b"c" => (false, t),
@@ -192,24 +218,9 @@ impl<R: Read> Rows<R> {
                 Some(r) => parse_column(r),
                 None => Some(column + 1),
             };
-            let cell_type = match cell_type {
-                None | Some(b"n") => Some(CellType::Number),
-                Some(b"s") => Some(CellType::Shared),
-                Some(b"str") => Some(CellType::FormulaString),
-                Some(b"inlineStr") => Some(CellType::InlineString),
-                Some(b"b") => Some(CellType::Bool),
-                Some(b"e") => Some(CellType::Error),
-                Some(b"d") => Some(CellType::IsoDate),
-                Some(_) => None,
-            };
+            let cell_type = parse_cell_type(cell_type);
             let style = style.and_then(parse_digits).unwrap_or(0);
-
-            let Some(next_column) = next_column.filter(|c| (1..=MAX_COLUMNS).contains(c)) else {
-                return Err(self.xml.malformed(format!("row {} has a cell with an invalid reference", self.number)));
-            };
-            let Some(cell_type) = cell_type else {
-                return Err(self.xml.malformed(format!("row {} has a cell with an unknown type", self.number)));
-            };
+            let (next_column, cell_type) = self.check_cell(next_column, cell_type)?;
             if next_column <= column {
                 sorted = false;
             }
@@ -218,13 +229,9 @@ impl<R: Read> Rows<R> {
                 continue;
             }
             if let Some(value) = self.read_cell(cell_type, style)? {
-                if self.cells.len() >= MAX_COLUMNS as usize {
-                    return Err(self.xml.malformed(format!("row {} has more than 16384 cells", self.number)));
-                }
-                self.cells.push(RawCell { column, value });
-            }
-            if self.text.len() > MAX_ROW_TEXT {
-                return Err(Error::LimitExceeded(format!("row {} holds more than {MAX_ROW_TEXT} bytes of text", self.number)));
+                self.push_cell(column, value)?;
+            } else {
+                self.check_row_text()?;
             }
         }
         if !sorted {
@@ -283,38 +290,112 @@ impl<R: Read> Rows<R> {
             return Ok(None);
         }
 
-        let end = self.text.len() as u32;
-        let start = text_start as u32;
-        let raw = self.scratch.trim_ascii();
+        let (start, end) = (text_start as u32, self.text.len() as u32);
+        match cell_type {
+            CellType::FormulaString | CellType::InlineString => Ok(Some(Raw::Text(start, end))),
+            CellType::Error => Ok(Some(Raw::Error(start, end))),
+            _ => {
+                let raw = std::mem::take(&mut self.scratch);
+                let value = self.value_of(cell_type, style, raw.as_bytes());
+                self.scratch = raw;
+                value
+            }
+        }
+    }
+
+    /// The value of a cell matched by the fast path, from its raw `<v>` text.
+    fn scanned_value(&mut self, cell_type: CellType, style: u32, text: xml::Span) -> Result<Option<Raw>> {
+        let raw = self.xml.bytes(text);
+        match cell_type {
+            CellType::FormulaString | CellType::InlineString | CellType::Error => {
+                let start = self.text.len() as u32;
+                xml::decode_into(&mut self.text, raw, true, true).map_err(|m| self.xml.malformed(m))?;
+                let end = self.text.len() as u32;
+                Ok(Some(if cell_type == CellType::Error { Raw::Error(start, end) } else { Raw::Text(start, end) }))
+            }
+            _ if raw.contains(&b'&') => {
+                self.scratch.clear();
+                xml::decode_into(&mut self.scratch, raw, true, false).map_err(|m| self.xml.malformed(m))?;
+                let decoded = std::mem::take(&mut self.scratch);
+                let value = self.value_of(cell_type, style, decoded.as_bytes());
+                self.scratch = decoded;
+                value
+            }
+            _ => {
+                // value_of needs &mut self, so the bytes leave the parser's buffer first; values are short.
+                let mut copy = [0u8; 64];
+                if raw.len() <= copy.len() {
+                    copy[..raw.len()].copy_from_slice(raw);
+                    let len = raw.len();
+                    self.value_of(cell_type, style, &copy[..len])
+                } else {
+                    let owned = raw.to_vec();
+                    self.value_of(cell_type, style, &owned)
+                }
+            }
+        }
+    }
+
+    /// Converts the decoded text of a cell that is not a string type.
+    fn value_of(&mut self, cell_type: CellType, style: u32, raw: &[u8]) -> Result<Option<Raw>> {
+        let raw = raw.trim_ascii();
         let value = match cell_type {
-            CellType::FormulaString | CellType::InlineString => Raw::Text(start, end),
-            CellType::Error => Raw::Error(start, end),
             CellType::Number if raw.is_empty() => return Ok(None),
             CellType::Number => {
-                let n = parse_number(raw).ok_or_else(|| self.bad_value("number", raw))?;
+                let n = std::str::from_utf8(raw).ok().and_then(parse_number).ok_or_else(|| self.bad_value("number", raw))?;
                 match self.styles.date_kind(style) {
                     Some(kind) => Raw::Date(n, kind),
                     None => Raw::Number(n),
                 }
             }
             CellType::Shared => {
-                let index = parse_digits(raw.as_bytes()).filter(|&i| (i as usize) < self.sst.len());
+                let index = parse_digits(raw).filter(|&i| (i as usize) < self.sst.len());
                 Raw::Shared(index.ok_or_else(|| self.bad_value("shared string index", raw))?)
             }
             CellType::Bool => match raw {
-                "1" | "true" => Raw::Bool(true),
-                "0" | "false" => Raw::Bool(false),
+                b"1" | b"true" => Raw::Bool(true),
+                b"0" | b"false" => Raw::Bool(false),
                 _ => return Err(self.bad_value("boolean", raw)),
             },
-            CellType::IsoDate => match iso_to_serial(raw, self.is_1904) {
-                Some((serial, kind)) => Raw::Date(serial, kind),
-                None => {
-                    self.text.push_str(raw);
-                    Raw::Text(start, self.text.len() as u32)
+            CellType::IsoDate => {
+                let text = String::from_utf8_lossy(raw);
+                match iso_to_serial(&text, self.is_1904) {
+                    Some((serial, kind)) => Raw::Date(serial, kind),
+                    None => {
+                        let start = self.text.len() as u32;
+                        self.text.push_str(&text);
+                        Raw::Text(start, self.text.len() as u32)
+                    }
                 }
-            },
+            }
+            CellType::FormulaString | CellType::InlineString | CellType::Error => unreachable!("string cells are not converted"),
         };
         Ok(Some(value))
+    }
+
+    fn check_cell(&self, column: Option<u32>, cell_type: Option<CellType>) -> Result<(u32, CellType)> {
+        let Some(column) = column.filter(|c| (1..=MAX_COLUMNS).contains(c)) else {
+            return Err(self.xml.malformed(format!("row {} has a cell with an invalid reference", self.number)));
+        };
+        let Some(cell_type) = cell_type else {
+            return Err(self.xml.malformed(format!("row {} has a cell with an unknown type", self.number)));
+        };
+        Ok((column, cell_type))
+    }
+
+    fn push_cell(&mut self, column: u32, value: Raw) -> Result<()> {
+        if self.cells.len() >= MAX_COLUMNS as usize {
+            return Err(self.xml.malformed(format!("row {} has more than 16384 cells", self.number)));
+        }
+        self.cells.push(RawCell { column, value });
+        self.check_row_text()
+    }
+
+    fn check_row_text(&self) -> Result<()> {
+        if self.text.len() > MAX_ROW_TEXT {
+            return Err(Error::LimitExceeded(format!("row {} holds more than {MAX_ROW_TEXT} bytes of text", self.number)));
+        }
+        Ok(())
     }
 
     /// Reads `<is>` content: plain `<t>` or rich-text runs, without phonetic runs.
@@ -335,9 +416,22 @@ impl<R: Read> Rows<R> {
         }
     }
 
-    fn bad_value(&self, what: &str, raw: &str) -> Error {
-        let shown: String = raw.chars().take(40).collect();
+    fn bad_value(&self, what: &str, raw: &[u8]) -> Error {
+        let shown: String = String::from_utf8_lossy(raw).chars().take(40).collect();
         self.xml.malformed(format!("row {} has an invalid {what} {shown:?}", self.number))
+    }
+}
+
+fn parse_cell_type(raw: Option<&[u8]>) -> Option<CellType> {
+    match raw {
+        None | Some(b"n") => Some(CellType::Number),
+        Some(b"s") => Some(CellType::Shared),
+        Some(b"str") => Some(CellType::FormulaString),
+        Some(b"inlineStr") => Some(CellType::InlineString),
+        Some(b"b") => Some(CellType::Bool),
+        Some(b"e") => Some(CellType::Error),
+        Some(b"d") => Some(CellType::IsoDate),
+        Some(_) => None,
     }
 }
 
