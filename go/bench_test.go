@@ -1,6 +1,9 @@
 package hypaxel
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/xml"
 	"io"
 	"strconv"
 	"testing"
@@ -108,4 +111,113 @@ func BenchmarkEscape(b *testing.B) {
 			}
 		})
 	}
+}
+
+func benchWorkbook(b *testing.B, rows int, opts ...Option) []byte {
+	b.Helper()
+	return writeBook(b, func(w *Writer) {
+		s, _ := w.AddSheet("Data")
+		r := benchValue
+		for i := range rows {
+			s.WriteInt(int64(i))
+			s.WriteString(r.Name)
+			s.WriteString(r.Category)
+			s.WriteFloat(r.Price)
+			s.WriteFloat(r.Amount)
+			s.WriteTime(r.Created)
+			s.WriteBool(r.Active)
+			s.WriteInt(r.Quantity)
+			s.WriteString(r.Comment + strconv.Itoa(i))
+			s.WriteFloat(r.Ratio)
+			s.EndRow()
+		}
+	}, opts...)
+}
+
+// BenchmarkReadRows reads 100,000 rows of the 10-column workload and touches every value. The
+// inline-refs case has a reference such as r="B7" on every cell, as Excel writes them.
+func BenchmarkReadRows(b *testing.B) {
+	for _, mode := range []struct {
+		name string
+		opts []Option
+	}{
+		{"inline", nil},
+		{"inline-refs", []Option{WithCellReferences(true)}},
+		{"shared", []Option{WithSharedStrings(true)}},
+	} {
+		data := benchWorkbook(b, 100_000, mode.opts...)
+		b.Run(mode.name, func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			b.ReportAllocs()
+			for b.Loop() {
+				r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+				if err != nil {
+					b.Fatal(err)
+				}
+				rows, err := r.Rows("Data")
+				if err != nil {
+					b.Fatal(err)
+				}
+				n := 0
+				for rows.Next() {
+					for _, v := range rows.Row().Cells() {
+						if v.Kind() == ValueString {
+							n += len(v.Text())
+						}
+					}
+				}
+				if rows.Err() != nil || n == 0 {
+					b.Fatal(rows.Err())
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkTokenize compares the reader's pull parser with encoding/xml on the decompressed
+// worksheet XML of 100,000 rows, without decompression or value conversion.
+func BenchmarkTokenize(b *testing.B) {
+	data := benchWorkbook(b, 100_000)
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		b.Fatal(err)
+	}
+	f, err := zr.Open("xl/worksheets/sheet1.xml")
+	if err != nil {
+		b.Fatal(err)
+	}
+	sheet, err := io.ReadAll(f)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Run("hypaxel", func(b *testing.B) {
+		b.SetBytes(int64(len(sheet)))
+		b.ReportAllocs()
+		for b.Loop() {
+			x := newXMLReader(bytes.NewReader(sheet), "sheet.xml")
+			for {
+				ev, err := x.next()
+				if err != nil {
+					b.Fatal(err)
+				}
+				if ev == xmlEOF {
+					break
+				}
+			}
+		}
+	})
+	b.Run("encoding-xml", func(b *testing.B) {
+		b.SetBytes(int64(len(sheet)))
+		b.ReportAllocs()
+		for b.Loop() {
+			d := xml.NewDecoder(bytes.NewReader(sheet))
+			for {
+				if _, err := d.RawToken(); err == io.EOF {
+					break
+				} else if err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+	})
 }

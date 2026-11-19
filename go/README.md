@@ -1,6 +1,6 @@
 # Hypaxel for Go
 
-**High-performance, constant-memory XLSX (Excel) writer for Go, with no dependencies.**
+**High-performance, constant-memory XLSX (Excel) writer and reader for Go, with no dependencies.**
 
 Hypaxel writes `.xlsx` files as a forward-only stream. Each cell is serialized to XML the moment
 you write it and deflated into a small buffer that is flushed to your `io.Writer`, so memory stays
@@ -18,6 +18,8 @@ running.
 - **Real Excel types:** strings, integers, floats, booleans, `time.Time`, `time.Duration`, formulas.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, column widths, row
   heights, merged cells, frozen panes, auto filters, hidden sheets, tab colors.
+- **Streaming reader:** reads rows one at a time with memory bounded by the shared string table
+  plus one row, **7-9x faster than excelize's `Rows` iterator** (see [Reading performance](#reading-performance)).
 - **Pure Go:** standard library only, no cgo. Errors are returned; bad input never panics.
 
 This is a native Go port of the [`hypaxel` Rust crate](../rust/README.md). The
@@ -285,7 +287,111 @@ the widths are fixed and streaming continues as usual; memory is bounded by the 
 estimated from the text, number format, font size and boldness of each cell. Formulas, blank
 cells and rows after the sample are not measured. `MaxWidth` caps a fitted width.
 
+## Reading
+
+```go
+r, err := hypaxel.OpenReader("orders.xlsx")   // or hypaxel.NewReader(readerAt, size)
+if err != nil {
+	return err
+}
+defer r.Close()
+fmt.Println(r.SheetNames())
+
+rows, err := r.Rows("Orders")                  // or r.RowsAt(0)
+if err != nil {
+	return err
+}
+defer rows.Close()
+for rows.Next() {
+	row := rows.Row()                          // reused by the next call to Next
+	// row.Index() is the 1-based Excel row; rows without values are skipped.
+	for column, v := range row.Cells() {
+		switch v.Kind() {
+		case hypaxel.ValueString:
+			fmt.Println(hypaxel.CellRef(row.Index(), column), v.Text())
+		case hypaxel.ValueNumber:
+			n, _ := v.Float()
+			fmt.Println(n)
+		case hypaxel.ValueDateTime:
+			t, _ := v.Time()                   // or v.Duration() for [h]:mm:ss formats
+			fmt.Println(t)
+		case hypaxel.ValueBool:
+			b, _ := v.Bool()
+			fmt.Println(b)
+		case hypaxel.ValueError:
+			fmt.Println("error", v.Text())    // #N/A, #DIV/0!, ...
+		}
+	}
+	amount := row.Get(3)                       // by 1-based column; empty Value if missing
+	dense := row.AppendValues(nil)             // columns 1..LastColumn, empty Values for gaps
+	_, _ = amount, dense
+}
+return rows.Err()
+```
+
+`rows.All()` returns an `iter.Seq2[*Row, error]` for `for row, err := range rows.All()`; the loop
+closes the rows when it ends. `Row` also has `Len`, `LastColumn` and `Cell(i)` for index loops.
+
+**`Reader`**
+
+| Function | Purpose |
+| --- | --- |
+| `OpenReader(path, opts...)`, `NewReader(src io.ReaderAt, size, opts...)` | Open a workbook; `Close` closes a file opened by path |
+| `Sheets()`, `SheetNames()` | Sheets in workbook order with `Name`, `Visibility` (`SheetVisible`, `SheetHidden`, `SheetVeryHidden`) and `Kind` (`SheetKindWorksheet`, `SheetKindChartsheet`, `SheetKindOther`) |
+| `Rows(name)`, `RowsAt(index)` | Stream a sheet, by name (exact, then case-insensitive) or 0-based index |
+| `Date1904()` | Whether the workbook uses the 1904 date system |
+| `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |
+
+**`Value`** is a small immutable struct; the zero value is empty.
+
+| Method | Returns |
+| --- | --- |
+| `Kind()` | `ValueEmpty`, `ValueString`, `ValueNumber`, `ValueBool`, `ValueDateTime` or `ValueError` |
+| `Text()` | The text of a string or error value |
+| `Float()` | A number, or the serial number of a date |
+| `Bool()` | A boolean |
+| `Time()` | A date value as a UTC `time.Time` (the wall clock Excel shows), rounded to the millisecond |
+| `Duration()` | A date value as elapsed time, as `[h]:mm:ss` formats show it |
+| `DateKind()` | What the number format shows: `DateKindDate`, `DateKindDateTime`, `DateKindTime`, `DateKindDuration` |
+| `String()` | The value as text, like Excel's General format, with dates in ISO 8601 |
+
+- **Dates:** Excel stores dates as numbers. A number whose built-in or custom number format shows
+  a date, time or duration becomes a `ValueDateTime`; `Float()` still gives the serial. Both date
+  systems are supported, including Excel's fictitious 1900-02-29 (serial 60, for which `Time()`
+  returns false). A time of day without a date falls on 1899-12-31 (1904-01-01 in the 1904
+  system); use its `Clock()`. `t="d"` cells with ISO 8601 text are read as dates too.
+- **Formulas:** the cached result is returned; a formula that was never calculated has no value.
+- **Memory:** rows are decompressed and parsed as a stream. What stays in memory is the shared
+  string table (text that Excel stores once per workbook, loaded when the first sheet is opened)
+  plus the current row. Values never point into reused buffers: strings stay valid after the
+  row is replaced, and taking a row's inline strings allocates once per row.
+- **Concurrency:** a `Reader` is safe for concurrent use: open several sheets, or the same sheet
+  twice, from different goroutines. Each `Rows` belongs to one goroutine.
+- **Compatibility:** files from Excel, LibreOffice, excelize, openpyxl and other producers:
+  package relationships instead of fixed paths, Strict Open XML, prefixed namespaces, cells and
+  rows without references, out-of-order cells, rich text, inline strings, phonetic runs, CDATA,
+  and Excel's `_xHHHH_` escapes.
+- **Safety:** document type declarations are rejected (no entity expansion), every XML token is
+  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, ZIP entries must match
+  their declared size and CRC-32, and `WithMaxSharedStringsBytes` caps the shared string table.
+  Damaged input returns an error, never a panic or a hang; the reader is fuzz-tested.
+
+Errors name the part they come from, as `*ReadError` with a `Part` field:
+
+| Error | Cause |
+| --- | --- |
+| `ErrInvalidFile` | Not a ZIP archive; a legacy `.xls` or password-protected workbook (OLE file); a Word or PowerPoint file |
+| `ErrSheetNotFound` | No sheet with that name or index |
+| `ErrMalformed` | Invalid XML, a bad cell value or reference, a missing part, or a ZIP entry that fails its size or CRC check |
+| `ErrLimitExceeded` | A safety limit above was reached |
+| `ErrUnsupported` | A chart sheet, a UTF-16 part, an encrypted ZIP entry or an unknown compression method |
+
+Not read (yet): formulas' text, styles beyond date detection, merged ranges, comments and
+hyperlinks.
+
 ## Options
+
+Writer options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -316,8 +422,9 @@ unchanged.
 - **Excel limits apply:** 1,048,576 rows, 16,384 columns and 32,767 characters per cell, 31
   characters per worksheet name.
 - **Readers that need cell references:** by default Hypaxel omits cell references that follow
-  from a cell's position. That is valid and is read by Excel, LibreOffice, excelize, openpyxl and
-  calamine, but ExcelJS fails on such files. Use `WithCellReferences(true)` for those.
+  from a cell's position. That is valid and is read by Excel, LibreOffice, excelize, openpyxl,
+  calamine and Hypaxel's own reader, but ExcelJS, `thedatashed/xlsxreader` and `tealeg/xlsx` read
+  such files wrongly or fail. Use `WithCellReferences(true)` for those.
 - **Colors in excelize:** Hypaxel writes no theme part. excelize 2.11 returns empty fill and
   border colors for such workbooks when reading styles back; the colors are in the file and other
   readers show them.
@@ -362,6 +469,41 @@ rows. With shared strings, memory grows with the number of distinct strings, her
 The 1M-row file is 40.5 MB from Hypaxel and 62.9 MB from excelize's `StreamWriter`. At compression
 level 6 it is 29.0 MB and takes 1.32 s; at level 0 it is 331 MB and takes 0.37 s.
 
+### Reading performance
+
+The same workload, 1M rows written by Hypaxel with a cell reference on every cell (as Excel writes
+them; two of the other readers need them), read cell by cell. Every reader must return the same
+checksum (rows, cells, sum of numbers, dates as Unix seconds, string bytes, `TRUE` count), which the
+harness verifies. Measured on an Apple M1 Max (10 cores, macOS 26.6) with Go 1.27.4, excelize
+2.11.1, thedatashed/xlsxreader 1.2.8 and tealeg/xlsx 3.3.13, each run in its own process, best of
+three. Other processes were using the machine.
+
+| Reader | Inline strings (70.7 MB) | Peak RSS | Shared strings (71.5 MB) | Peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| **Hypaxel**, `Rows.Next` | **2.20 s** | **20 MB** | **2.08 s** | **86 MB** |
+| **Hypaxel**, `Rows.All` | 2.18 s | 20 MB | 2.08 s | 72 MB |
+| excelize, `Rows` with `RawCellValue` | 16.63 s | 22 MB | 18.18 s | 141 MB |
+| excelize, `Rows` (formatted values) | 69.87 s | 23 MB | 71.06 s | 142 MB |
+| xlsxreader, `ReadRows` | 14.86 s | 22 MB | 13.13 s | 163 MB |
+| tealeg/xlsx, `OpenFile` | not run | | not run | |
+
+At 100k rows tealeg/xlsx, which loads the whole sheet, takes 2.33 s and peaks at 715 MB, against
+0.22 s and 18 MB for Hypaxel. Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string
+per row holding its inline text) with inline strings, and 15 MB in 1.6k allocations with shared
+strings (mostly the table itself); excelize allocates 0.97 GB in 20M allocations.
+
+Notes on comparability: formatted excelize values only match on cell counts and text, because
+numbers and dates come back as display text. xlsxreader truncates date-times instead of rounding
+them, so about half of the dates in this workload come back one second early (00:00:59 for a
+stored 00:01:00); the harness allows for that. xlsxreader and tealeg/xlsx 3.3.13 cannot read
+cells without references, and tealeg's `ValueOnly` option crashes on inline strings, so it runs
+with default options.
+
+About half of Hypaxel's read time is inflate and CRC-32 in Go's `compress/flate` and
+`archive/zip`; the rest is a purpose-built pull parser that tokenizes the worksheet XML at
+460 MB/s, 7x faster than `encoding/xml`'s `RawToken` (64 MB/s) on the same input
+(`go test -bench Tokenize` in `go/`), with single-pass fast paths for common cell shapes.
+
 Run them yourself:
 
 ```bash
@@ -370,18 +512,22 @@ go test -run '^$' -bench Write -benchmem                                 # 100,0
 go test -run '^$' -bench Write -benchmem -rows 1000000 -benchtime 3x     # 1,000,000 rows
 go run ./cmd/bench                                                       # peak RSS, 100,000 rows
 go run ./cmd/bench 1000000
+go test -run '^$' -bench Read -benchmem                                  # every reader, 100,000 rows
+go run ./cmd/bench read 1000000                                          # time and peak RSS
 ```
 
 ## Development
 
 Requires Go 1.26 or later. The library has no dependencies; the read-back tests and comparison
-benchmarks, which need excelize, live in a module of their own under `tests/`.
+benchmarks, which need excelize and the other readers compared above, live in a module of their
+own under `tests/`.
 
 ```bash
 cd go
 go test ./...                 # unit tests, standard library only
 go vet ./... && gofmt -l .
-cd tests && go test ./...     # reads every feature back with excelize
+go test -fuzz FuzzReader -fuzztime 1m    # or FuzzSheetXML
+cd tests && go test ./...     # reads every feature back with excelize, compares the readers
 ```
 
 Until the module is published, use it from another module with a replace directive:

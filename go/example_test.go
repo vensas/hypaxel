@@ -66,3 +66,78 @@ func ExampleWriteSheetSeq() {
 	fmt.Println(w.Close())
 	// Output: <nil>
 }
+
+func ExampleReader() {
+	var file bytes.Buffer
+	w := hypaxel.NewWriter(&file)
+	if err := hypaxel.WriteSheet(w, "Orders", [][]any{
+		{"Product", "Units", "Shipped"},
+		{"Widget", 3, time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)},
+		{"Gadget", 5, nil, "fragile"},
+	}); err != nil {
+		panic(err)
+	}
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
+
+	// For a file on disk: r, err := hypaxel.OpenReader("orders.xlsx"); defer r.Close()
+	r, err := hypaxel.NewReader(bytes.NewReader(file.Bytes()), int64(file.Len()))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(r.SheetNames())
+	rows, err := r.Rows("Orders")
+	if err != nil {
+		panic(err)
+	}
+	for rows.Next() {
+		row := rows.Row()
+		sep := ""
+		for column, v := range row.Cells() {
+			fmt.Printf("%s%s=%s (%s)", sep, hypaxel.CellRef(row.Index(), column), v, v.Kind())
+			sep = " "
+		}
+		fmt.Println()
+	}
+	if err := rows.Err(); err != nil {
+		panic(err)
+	}
+	// Output:
+	// [Orders]
+	// A1=Product (string) B1=Units (string) C1=Shipped (string)
+	// A2=Widget (string) B2=3 (number) C2=2024-05-01T00:00:00 (datetime)
+	// A3=Gadget (string) B3=5 (number) D3=fragile (string)
+}
+
+func ExampleRows_All() {
+	var file bytes.Buffer
+	w := hypaxel.NewWriter(&file)
+	sheet, _ := w.AddSheet("Data")
+	sheet.WriteRow("Amount")
+	sheet.WriteRow(12.5)
+	sheet.WriteRow(30)
+	if err := w.Close(); err != nil {
+		panic(err)
+	}
+
+	r, err := hypaxel.NewReader(bytes.NewReader(file.Bytes()), int64(file.Len()))
+	if err != nil {
+		panic(err)
+	}
+	rows, err := r.RowsAt(0)
+	if err != nil {
+		panic(err)
+	}
+	total := 0.0
+	for row, err := range rows.All() {
+		if err != nil {
+			panic(err)
+		}
+		if n, ok := row.Get(1).Float(); ok {
+			total += n
+		}
+	}
+	fmt.Println(total)
+	// Output: 42.5
+}
