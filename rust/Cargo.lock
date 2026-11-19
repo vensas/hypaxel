@@ -710,6 +710,7 @@ dependencies = [
  "futures-util",
  "hashbrown",
  "itoa",
+ "memchr",
  "rust_xlsxwriter",
  "serde",
  "serde_json",

@@ -46,6 +46,7 @@ mod error;
 mod fit;
 mod options;
 mod parts;
+mod read;
 #[cfg(feature = "serde")]
 mod record_io;
 #[cfg(feature = "serde")]
@@ -60,6 +61,7 @@ pub use cell::{Blank, Formula, IntoCell, IntoRow, Styled};
 pub use engine::{CellWriter, MAX_COLUMNS, MAX_ROWS, cell_ref, column_name};
 pub use error::{Error, Result};
 pub use options::{AutoFit, Column, Options, RowOptions, SheetOptions, StringStorage};
+pub use read::{Cell, DateKind, ExcelDateTime, ReadOptions, Row, Rows, SheetInfo, SheetKind, Value, Visibility, XlsxReader};
 pub use style::{Alignment, Border, BorderLine, BorderStyle, Color, Font, HAlign, Style, StyleId, VAlign, formats};
 pub use table::{Table, TableStyle};
 pub use writer::{Sheet, XlsxWriter};

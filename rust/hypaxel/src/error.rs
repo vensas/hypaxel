@@ -1,8 +1,8 @@
 use std::fmt;
 
-/// Errors produced while writing a workbook.
+/// Errors produced while reading or writing a workbook.
 ///
-/// Cell-level problems (text too long, too many columns, …) do not interrupt the fast cell-writing
+/// When writing, cell-level problems (text too long, too many columns, …) do not interrupt the fast cell-writing
 /// methods. They are recorded and returned by the next fallible call (`end_row`, `add_row`,
 /// `finish`, …), so chained cell writes stay cheap and branch-free for the caller.
 #[derive(Debug)]
@@ -39,6 +39,19 @@ pub enum Error {
     Unsupported(String),
     /// Custom error raised by a `Serialize` implementation.
     Custom(String),
+    /// The input is not an XLSX workbook (e.g. a legacy `.xls` file, an encrypted workbook or not a ZIP archive).
+    InvalidFile(String),
+    /// A part of the workbook is damaged or does not follow the Office Open XML format.
+    Malformed {
+        /// The package part, e.g. `xl/worksheets/sheet1.xml`.
+        part: String,
+        /// What is wrong with it.
+        message: String,
+    },
+    /// No worksheet with this name or index exists.
+    SheetNotFound(String),
+    /// The input exceeds a configured or built-in safety limit (see `ReadOptions`).
+    LimitExceeded(String),
 }
 
 impl fmt::Display for Error {
@@ -61,6 +74,10 @@ impl fmt::Display for Error {
             Error::NoVisibleWorksheet => f.write_str("a workbook needs at least one visible worksheet"),
             Error::Unsupported(m) => write!(f, "unsupported value: {m}"),
             Error::Custom(m) => f.write_str(m),
+            Error::InvalidFile(m) => write!(f, "not an XLSX workbook: {m}"),
+            Error::Malformed { part, message } => write!(f, "malformed workbook part {part}: {message}"),
+            Error::SheetNotFound(n) => write!(f, "no worksheet {n}"),
+            Error::LimitExceeded(m) => write!(f, "limit exceeded: {m}"),
         }
     }
 }
