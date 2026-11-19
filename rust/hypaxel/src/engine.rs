@@ -779,7 +779,7 @@ impl CellWriter {
     ) {
         let day = if self.opts.date_1904 {
             let day = days_from_ce - EPOCH_1904;
-            (0..MAX_SERIAL - 1462).contains(&day).then_some(day)
+            (0..=MAX_SERIAL - 1462).contains(&day).then_some(day)
         } else {
             let mut day = days_from_ce - EPOCH_1900;
             if day < 61 {

@@ -261,9 +261,11 @@ fn out_of_range_dates_become_text() {
 
 #[test]
 fn date_1904_system() {
-    let book =
-        write_with(Options::new().date_1904(true), |w| w.add_worksheet("S")?.add_row((NaiveDate::from_ymd_opt(1904, 1, 2).unwrap(),)));
+    let book = write_with(Options::new().date_1904(true), |w| {
+        w.add_worksheet("S")?.add_row((NaiveDate::from_ymd_opt(1904, 1, 2).unwrap(), NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()))
+    });
     assert!(book.part("xl/worksheets/sheet1.xml").contains("<v>1</v>"));
+    assert!(book.part("xl/worksheets/sheet1.xml").contains("<v>2957003</v>"), "9999-12-31 is the last 1904 serial");
     assert!(book.part("xl/workbook.xml").contains("<workbookPr date1904=\"1\"/>"));
 }
 
