@@ -68,10 +68,10 @@ the workbook's shared strings plus one row. Node.js and PHP do not read yet.
 
 | | Read 1M rows × 10 columns | Compared with |
 | --- | ---: | --- |
-| [.NET](dotnet/README.md#reading) `XlsxReader` | ~1.0–1.15 s | ~1.9x faster than Sylvan.Data.Excel, ~4x faster than ExcelDataReader, 7–12x faster than MiniExcel |
+| [.NET](dotnet/README.md#reading) `XlsxReader` | ~0.75–0.85 s (~0.55 s with background decompression) | ~2.4x faster than Sylvan.Data.Excel, ~5.5x faster than ExcelDataReader, 9–15x faster than MiniExcel |
 | [Rust](rust/README.md#reading) `XlsxReader` | ~0.75 s, 7–57 MB peak | ~2.8x faster than calamine's cell reader, 15–115x less memory than calamine's `Range` |
 | [Python](python/README.md#reading) `iter_rows`, `read_dataframe` | ~1.35 s, 68 MB peak | ~27x faster than openpyxl (100k rows), ~3.5x faster than python-calamine with ~12x less memory |
-| [Go](go/README.md#reading) `OpenReader` | ~2.1 s* | ~6–8x faster than excelize's `Rows` and xlsxreader |
+| [Go](go/README.md#reading) `OpenReader` | ~1.2 s* | ~11–14x faster than excelize's `Rows` and xlsxreader |
 | [Java](java/README.md#reading) `XlsxReader` | ~0.7 s | ~4x faster than the FastExcel reader, ~5–7x faster than POI's streaming XSSFReader |
 
 \* The Go files carry a cell reference on every cell, as Excel writes them, so they are about 40%

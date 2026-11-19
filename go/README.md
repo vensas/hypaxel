@@ -19,7 +19,7 @@ running.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, column widths, row
   heights, merged cells, frozen panes, auto filters, hidden sheets, tab colors.
 - **Streaming reader:** reads rows one at a time with memory bounded by the shared string table
-  plus one row, **about 10x faster than excelize's `Rows` iterator** (see [Reading performance](#reading-performance)).
+  plus one row, **about 13x faster than excelize's `Rows` iterator** (see [Reading performance](#reading-performance)).
 - **Pure Go:** standard library only, no cgo. Errors are returned; bad input never panics.
 
 This is a native Go port of the [`hypaxel` Rust crate](../rust/README.md). The
@@ -483,21 +483,19 @@ them; two of the other readers need them), read cell by cell. Every reader must 
 checksum (rows, cells, sum of numbers, dates as Unix seconds, string bytes, `TRUE` count), which the
 harness verifies. Measured on an Apple M1 Max (10 cores, macOS 26.6) with Go 1.27.4, excelize
 2.11.1, thedatashed/xlsxreader 1.2.8 and tealeg/xlsx 3.3.13, each run in its own process, best of
-three. Other processes were using the machine.
+three, on an otherwise idle machine.
 
 | Reader | Inline strings (70.7 MB) | Peak RSS | Shared strings (71.5 MB) | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| **Hypaxel**, `Rows.Next` | **1.48 s**\* | **21 MB**\* | **1.22 s**\* | **88 MB**\* |
-| **Hypaxel**, `Rows.Next`, `GOMAXPROCS=1` | 2.24 s\* | 19 MB\* | 2.07 s\* | 86 MB\* |
-| **Hypaxel**, `Rows.All` | to be re-measured | | | |
-| excelize, `Rows` with `RawCellValue` | 16.63 s | 22 MB | 18.18 s | 141 MB |
-| excelize, `Rows` (formatted values) | 69.87 s | 23 MB | 71.06 s | 142 MB |
-| xlsxreader, `ReadRows` | 14.86 s | 22 MB | 13.13 s | 163 MB |
+| **Hypaxel**, `Rows.Next` | **1.16 s** | **21 MB** | **1.20 s** | **73 MB** |
+| **Hypaxel**, `Rows.All` | **1.16 s** | **21 MB** | **1.21 s** | **86 MB** |
+| excelize, `Rows` with `RawCellValue` | 15.55 s | 22 MB | 17.00 s | 142 MB |
+| excelize, `Rows` (formatted values) | 68.33 s | 23 MB | 69.41 s | 142 MB |
+| xlsxreader, `ReadRows` | 14.51 s | 22 MB | 12.86 s | 163 MB |
 | tealeg/xlsx, `OpenFile` | not run | | not run | |
 
-\* Provisional: medians of five interleaved runs on a busy machine, after concurrent inflate was
-added; the other rows are from the earlier best-of-three run and also need a re-measurement on a
-quiet machine.
+With `GOMAXPROCS=1` there is no core to overlap decompression with, so the reader inflates on the
+caller's goroutine and takes about 2.1–2.2 s (interleaved A/B runs on a busy machine).
 
 At 100k rows tealeg/xlsx, which loads the whole sheet, takes 2.33 s and peaks at 715 MB, against
 0.22 s and 18 MB for Hypaxel. Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string

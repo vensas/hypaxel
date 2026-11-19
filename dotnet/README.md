@@ -366,30 +366,24 @@ Measured on an Apple M1 Max (10 cores, 64 GB, macOS 26.6) with .NET 8.0.19, 9.0.
 11.0.0, against Sylvan.Data.Excel 0.5.8, ExcelDataReader 3.9.0 and MiniExcel 1.47.1. Each reader runs
 in its own process with the `--read-quick` stopwatch runner: one warm-up, then the best of three runs.
 Allocations are for one run; peak RSS is the whole process (`/usr/bin/time -l`), including the
-runtime. The machine was shared with other workloads, so expect a few percent of noise.
-
-> **To be re-measured.** The Hypaxel rows on .NET 10 were measured after the single-pass cell scan
-> was added. The Hypaxel cells marked † on other runtimes are from the previous version (about 25%
-> slower) and need a new run. The other libraries' rows are unchanged.
+runtime. The machine was otherwise idle.
 
 **1M rows, time**
 
 | Reader | File | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 1.07 s † | 1.13 s † | 0.76 s | 1.01 s † |
-| Hypaxel, `GetValue` (`ExcelValue`) | inline | 1.15 s † | 1.16 s † | 0.79 s | 1.06 s † |
-| Hypaxel, `BackgroundDecompression` | inline | | | 0.53 s | |
-| Sylvan.Data.Excel | inline | 2.19 s | 2.03 s | 1.93 s | 1.94 s |
-| ExcelDataReader | inline | 5.06 s | 4.63 s | 4.21 s | 4.34 s |
-| MiniExcel | inline | | | 6.98 s | |
-| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 1.19 s † | 1.24 s † | 0.82 s | 1.14 s † |
-| Hypaxel, `GetValue` (`ExcelValue`) | shared | 1.23 s † | 1.28 s † | 0.83 s | 1.16 s † |
-| Hypaxel, `BackgroundDecompression` | shared | | | 0.58 s | |
-| Sylvan.Data.Excel | shared | 2.15 s | 2.02 s | 1.94 s | 2.00 s |
-| ExcelDataReader | shared | 5.24 s | 4.91 s | 4.34 s | 4.39 s |
-| MiniExcel | shared | | | 12.23 s | |
-
-MiniExcel and `BackgroundDecompression` were only run on .NET 10.
+| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 0.74 s | 0.80 s | 0.76 s | 0.73 s |
+| Hypaxel, `GetValue` (`ExcelValue`) | inline | 0.82 s | 0.86 s | 0.80 s | 0.79 s |
+| Hypaxel, `BackgroundDecompression` | inline | 0.59 s | 0.56 s | 0.52 s | 0.51 s |
+| Sylvan.Data.Excel | inline | 2.19 s | 2.04 s | 1.87 s | 1.94 s |
+| ExcelDataReader | inline | 5.24 s | 4.82 s | 4.26 s | 4.60 s |
+| MiniExcel | inline | 9.24 s | 8.10 s | 6.94 s | 7.28 s |
+| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 0.80 s | 0.86 s | 0.81 s | 0.82 s |
+| Hypaxel, `GetValue` (`ExcelValue`) | shared | 0.87 s | 0.89 s | 0.83 s | 0.85 s |
+| Hypaxel, `BackgroundDecompression` | shared | 0.64 s | 0.60 s | 0.56 s | 0.58 s |
+| Sylvan.Data.Excel | shared | 2.18 s | 2.07 s | 1.92 s | 1.99 s |
+| ExcelDataReader | shared | 5.29 s | 4.88 s | 4.40 s | 4.64 s |
+| MiniExcel | shared | 14.77 s | 13.71 s | 12.49 s | 12.84 s |
 
 **1M rows, memory (.NET 10)**
 
