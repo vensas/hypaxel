@@ -38,7 +38,7 @@ Python, Node.js, .NET, Java, Go and PHP).
 
 - Rust, .NET: with the 1904 date system, 9999-12-31 is written as a date instead of text.
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-11-19)
 
 ### Added
 
@@ -67,7 +67,7 @@ Python, Node.js, .NET, Java, Go and PHP).
   validated before the worksheet's part is opened. `sheet.BeginRow(null)` with a literal `null` no
   longer compiles because it is ambiguous with the new `BeginRow(RowOptions)` overload.
 
-## 0.1.0
+## 0.1.0 (2026-11-18)
 
 - First version: forward-only, constant-memory XLSX writer in Rust and .NET, with Python and
   Node.js packages built on the Rust core, and native Java, Go and PHP implementations.
