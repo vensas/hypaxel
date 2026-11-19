@@ -12,6 +12,8 @@ use hypaxel::{
     Alignment, AutoFit, Blank, Border, BorderLine, BorderStyle, Color, HAlign, Options, RowOptions, Sheet, SheetOptions, StringStorage,
     Style as RsStyle, StyleId, Table, TableStyle, VAlign, XlsxWriter,
 };
+mod reader;
+
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -804,6 +806,8 @@ fn _hypaxel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Style>()?;
     m.add_class::<Formula>()?;
     m.add_class::<Styled>()?;
+    m.add_class::<reader::Reader>()?;
+    m.add_class::<reader::RowIterator>()?;
     m.add_function(wrap_pyfunction!(column_name, m)?)?;
     m.add("XlsxError", m.py().get_type::<XlsxError>())?;
     m.add("CONTENT_TYPE", hypaxel::CONTENT_TYPE)?;

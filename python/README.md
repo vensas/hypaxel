@@ -1,6 +1,6 @@
 # Hypaxel for Python
 
-**High-performance, constant-memory XLSX (Excel) writer for Python, powered by Rust.**
+**High-performance, constant-memory XLSX (Excel) writer and streaming reader for Python, powered by Rust.**
 
 Hypaxel writes `.xlsx` files as a forward-only stream. Rows are converted, serialized and compressed
 in native code as you write them, so memory stays flat whether you export 10 rows or 10 million.
@@ -19,6 +19,10 @@ It can stream a download to the browser while your query is still running.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
   panes, auto filters, Excel tables, row grouping, auto-fit columns, formulas, hidden sheets, tab colors.
 - **Valid output:** checked with the Office Open XML schema validator and read back with openpyxl.
+- **Fast reading:** `iter_rows` reads 100k rows × 10 columns in 0.13 s, about **27x faster than
+  openpyxl** and 3.5x faster than python-calamine, in bounded memory. `read_dataframe` builds a
+  pandas DataFrame 3.5–4x faster than `pandas.read_excel(engine="calamine")`, and a polars one
+  faster than fastexcel. See [Reading](#reading).
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md). The [.NET version](../dotnet/README.md) uses the same design.
 
@@ -56,6 +60,43 @@ hypaxel.to_xlsx(df, "orders.xlsx")                       # pandas or polars Data
 data: bytes = hypaxel.to_xlsx(orders)                    # list of dicts / dataclasses / models
 hypaxel.to_xlsx(df, "out.xlsx", column_formats={"amount": "#,##0.00"})
 ```
+
+## Reading
+
+```python
+import hypaxel
+
+for row in hypaxel.iter_rows("orders.xlsx", "Orders"):      # sheet name or 0-based index
+    print(row)                                               # ['Widget', 3, 9.99, datetime(...)]
+
+records = hypaxel.read_records("orders.xlsx")                # [{"Product": "Widget", ...}, ...]
+df = hypaxel.read_dataframe("orders.xlsx")                   # pandas; library="polars" for polars
+
+with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or binary file object
+    print(wb.sheet_names, wb.sheets, wb.date_1904)
+    for row in wb.rows("Orders", skip_empty=True):
+        ...
+```
+
+- **Rows** are lists: `row[i]` is column `i + 1`, and a row ends at its last non-empty cell.
+  Missing rows come back as `[]`, so `enumerate(rows, 1)` gives Excel row numbers (pass
+  `skip_empty=True` to drop them).
+- **Values** are `str`, `int` (integral numbers, as openpyxl returns them), `float`, `bool`,
+  `datetime.datetime` for dates, `datetime.time` for times of day, `datetime.timedelta` for
+  `[h]:mm` durations, error strings such as `"#N/A"`, and `None`. Formulas yield their cached
+  result. Dates are recognised from the cell's number format, in both date systems; times are
+  rounded to the millisecond.
+- **Records:** `iter_records` / `read_records` use a header row (`header_row=1`). Empty header
+  cells become `column_<n>`, repeated names get `_2`, `_3`, ... and rows without values are
+  skipped.
+- **DataFrames:** `read_dataframe(source, sheet=0, *, header=True, library="pandas")`. polars needs
+  one type per column, so a column mixing text and dates arrives as text.
+- **Memory:** rows are streamed. A path is read straight from disk; bytes and file objects are held
+  in memory once. Beyond that, memory is bounded by the workbook's shared string table and one
+  row. `max_shared_strings_bytes=` (default 1 GiB) caps the table for untrusted uploads.
+- **Errors:** `FileNotFoundError` for missing files and `XlsxError` for everything else. Messages
+  name the problem, e.g. a legacy `.xls` or encrypted workbook, a sheet that does not exist (with
+  the sheets that do), or a damaged part.
 
 ## Records and DataFrames
 
@@ -148,6 +189,9 @@ def export():
 | `Worksheet.merge_cells(r1, c1, r2, c2)`, `autofilter(r1, c1, r2, c2)` | ranges (1-based, inclusive) |
 | `Worksheet.add_table(r1, c1, r2, c2, *, columns=, name=, style="TableStyleMedium2", header_row=, autofilter=, row_stripes=, column_stripes=, first_column=, last_column=)` | Excel table; `columns` must equal the header texts |
 | `Formula("SUM(A1:A9)")`, `Styled(value, style)` | special cell values |
+| `open_workbook(source, *, max_shared_strings_bytes=1 GiB)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
+| `Reader.sheet_names`, `Reader.sheets`, `Reader.date_1904`, `Reader.rows(sheet=0, *, skip_empty=False)`, `Reader.close()` | `rows` iterates lists; several iterators can be open at once |
+| `iter_rows` / `read_rows`, `iter_records` / `read_records`, `read_dataframe` | one-call readers; see [Reading](#reading) |
 
 ### Tables, row grouping and auto-fit
 
@@ -190,6 +234,29 @@ bool, int, unique str, float). Python 3.13, Linux, Xeon 2.1 GHz. Run it yourself
 Hypaxel writes 1M rows in about 0.9 s (`write_rows`) and 2.5–3.4 s from a DataFrame, scaling
 linearly.
 
+### Reading
+
+The same 10 columns plus a header row, saved with a shared string table as Excel does. Every reader
+runs in its own process; peak RSS covers the whole process (Python, modules and native memory);
+imports are not timed. All readers return the same 1,000,010 non-empty cells. Python 3.13, macOS,
+Apple M1 Max, openpyxl 3.1.5, python-calamine 0.9.1, fastexcel 0.21.0, pandas 3.1.1, polars 2.1.0.
+Run it yourself with `python benchmarks/read_bench.py 100000`.
+
+| 100,000 rows | seconds | peak RSS |
+| --- | ---: | ---: |
+| **hypaxel** `iter_rows` | **0.13** | **27 MB** |
+| python-calamine `iter_rows` | 0.47 | 105 MB |
+| openpyxl (read_only) | 3.58 | 63 MB |
+| **hypaxel** `read_dataframe` (pandas) | **0.20** | 182 MB |
+| pandas.read_excel (calamine) | 0.74 | 315 MB |
+| pandas.read_excel (openpyxl) | 4.36 | 201 MB |
+| **hypaxel** `read_dataframe` (polars) | **0.18** | 143 MB |
+| fastexcel `to_polars` | 0.24 | 188 MB |
+
+At 1M rows (55 MB file) `iter_rows` takes 1.35 s with a 68 MB peak, against 4.7 s and 862 MB for
+python-calamine. `read_dataframe` takes 1.9 s (pandas) and 2.0 s (polars), against 8.3 s for
+`pandas.read_excel(engine="calamine")` and 2.5 s for fastexcel.
+
 ## Notes and limits
 
 - **Write order:** rows are written top to bottom, and one worksheet at a time. Column widths
@@ -200,12 +267,15 @@ linearly.
   empty and the file stays valid.
 - **GIL:** the GIL is held while writing (values are read from Python objects), so use threads
   for parallel exports of separate files.
+- **Reading:** cached formula results are read, not formula text. Styles (other than date
+  detection), merged ranges, comments and hyperlinks are not read.
 
 ## Development
 
 ```bash
 cd python
 uv venv && uv pip install maturin pytest pytest-asyncio pandas polars numpy openpyxl xlsxwriter fastapi httpx pydantic
+# read benchmark extras: uv pip install python-calamine fastexcel pyarrow
 .venv/bin/maturin develop --release
 .venv/bin/python -m pytest
 ```

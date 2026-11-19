@@ -1,6 +1,14 @@
-"""Hypaxel: high-performance, constant-memory streaming XLSX writer.
+"""Hypaxel: high-performance, constant-memory streaming XLSX writer and reader.
 
-Low-level API (native, see ``_hypaxel.pyi``)::
+Reading::
+
+    for row in hypaxel.iter_rows("report.xlsx", "Data"):
+        ...                                  # lists: str, int, float, bool, datetime, None
+
+    records = hypaxel.read_records("report.xlsx")        # first row is the header
+    df = hypaxel.read_dataframe("report.xlsx")           # pandas (or library="polars")
+
+Writing, low-level API (native, see ``_hypaxel.pyi``)::
 
     with hypaxel.Writer("report.xlsx") as wb:
         bold = wb.add_style(bold=True)
@@ -8,7 +16,7 @@ Low-level API (native, see ``_hypaxel.pyi``)::
         ws.write_row(["Name", "Total"], style=bold)
         ws.write_rows([("Alice", 10), ("Bob", 20)])
 
-High-level helpers (this module): :func:`to_xlsx`, :func:`write_records`, :func:`write_dataframe`
+High-level writing helpers (this module): :func:`to_xlsx`, :func:`write_records`, :func:`write_dataframe`
 and the streaming generators :func:`stream_rows`, :func:`stream_records`, :func:`stream_dataframe`,
 :func:`astream_rows`, :func:`astream_records` for web responses.
 """
@@ -27,6 +35,8 @@ from ._hypaxel import (
     MAX_COLUMNS,
     MAX_ROWS,
     Formula,
+    Reader,
+    RowIterator,
     Style,
     Styled,
     Worksheet,
@@ -40,6 +50,8 @@ __all__ = [
     "MAX_COLUMNS",
     "MAX_ROWS",
     "Formula",
+    "Reader",
+    "RowIterator",
     "Style",
     "Styled",
     "Worksheet",
@@ -48,6 +60,12 @@ __all__ = [
     "astream_records",
     "astream_rows",
     "column_name",
+    "iter_records",
+    "iter_rows",
+    "open_workbook",
+    "read_dataframe",
+    "read_records",
+    "read_rows",
     "stream_dataframe",
     "stream_records",
     "stream_rows",
@@ -57,6 +75,8 @@ __all__ = [
 ]
 
 Destination = Union[str, "os.PathLike[str]", IO[bytes], None]
+Source = Union[str, "os.PathLike[str]", bytes, IO[bytes]]
+SheetRef = Union[str, int]
 
 _BATCH_ROWS = 2_000
 
@@ -450,3 +470,132 @@ def _rebind(recs: _Records, batch: list[Any]) -> _Records:
         else:
             raise XlsxError("all records must have the same fields")
     return fresh
+
+
+# --------------------------------------------------------------------------------------------------
+# Reading
+
+
+def open_workbook(source: Source, *, max_shared_strings_bytes: int = 1 << 30) -> Reader:
+    """Opens an XLSX workbook for reading.
+
+    ``source`` is a path, ``bytes`` or a binary file object (which is read into memory). Rows are
+    streamed: memory stays bounded by the shared string table plus one row, however long the
+    sheet. Use it as a context manager::
+
+        with hypaxel.open_workbook("report.xlsx") as wb:
+            print(wb.sheet_names)
+            for row in wb.rows("Data"):
+                ...
+    """
+    return Reader(source, max_shared_strings_bytes=max_shared_strings_bytes)
+
+
+def iter_rows(source: Source, sheet: SheetRef = 0, *, skip_empty: bool = False, **options: Any) -> Iterator[list[Any]]:
+    """Yields the rows of a sheet (name or 0-based index) as lists.
+
+    ``row[i]`` is the value in column ``i + 1``; rows end at their last non-empty cell. Values are
+    ``str``, ``int`` (integral numbers), ``float``, ``bool``, ``datetime.datetime`` (dates),
+    ``datetime.time``, ``datetime.timedelta`` (``[h]:mm`` durations), error strings such as
+    ``"#N/A"`` and ``None``. Formulas yield their cached result. Missing rows are yielded as ``[]``
+    so that ``enumerate(rows, 1)`` gives Excel row numbers, unless ``skip_empty`` is set.
+    """
+    with Reader(source, **options) as reader:
+        yield from reader.rows(sheet, skip_empty=skip_empty)
+
+
+def read_rows(source: Source, sheet: SheetRef = 0, *, skip_empty: bool = False, **options: Any) -> list[list[Any]]:
+    """Reads all rows of a sheet into a list. See :func:`iter_rows`."""
+    return list(iter_rows(source, sheet, skip_empty=skip_empty, **options))
+
+
+def _header_names(row: Sequence[Any]) -> list[str]:
+    names: list[str] = []
+    seen: dict[str, int] = {}
+    for i, value in enumerate(row, 1):
+        name = f"column_{i}" if value is None or value == "" else str(value)
+        if name in seen:
+            seen[name] += 1
+            name = f"{name}_{seen[name]}"
+        seen.setdefault(name, 1)
+        names.append(name)
+    return names
+
+
+def _extend_names(names: list[str], width: int) -> None:
+    taken = set(names)
+    for i in range(len(names) + 1, width + 1):
+        name = f"column_{i}"
+        while name in taken:
+            name += "_"
+        taken.add(name)
+        names.append(name)
+
+
+def iter_records(source: Source, sheet: SheetRef = 0, *, header_row: int = 1, **options: Any) -> Iterator[dict[str, Any]]:
+    """Yields one dict per row, keyed by the header row (default: row 1).
+
+    Empty header cells are named ``column_<n>``, repeated names get a ``_2``, ``_3``, ... suffix
+    and cells beyond the header get ``column_<n>`` keys. Rows without values are skipped; missing
+    cells are ``None``.
+    """
+    if header_row < 1:
+        raise ValueError("header_row is 1-based")
+    names: Optional[list[str]] = None
+    for number, row in enumerate(iter_rows(source, sheet, **options), 1):
+        if number < header_row:
+            continue
+        if names is None:
+            names = _header_names(row)
+            continue
+        if not row:
+            continue
+        if len(row) > len(names):
+            _extend_names(names, len(row))
+        record = dict(zip(names, row))
+        for name in names[len(row):]:
+            record[name] = None
+        yield record
+
+
+def read_records(source: Source, sheet: SheetRef = 0, *, header_row: int = 1, **options: Any) -> list[dict[str, Any]]:
+    """Reads all rows below the header row as dicts. See :func:`iter_records`."""
+    return list(iter_records(source, sheet, header_row=header_row, **options))
+
+
+def read_dataframe(source: Source, sheet: SheetRef = 0, *, header: bool = True, library: str = "pandas", **options: Any) -> Any:
+    """Reads a sheet into a pandas (default) or polars DataFrame.
+
+    With ``header`` the first row supplies the column names (see :func:`iter_records` for how
+    empty and repeated names are handled); otherwise columns are named ``column_1``, ... Rows
+    without values are skipped. polars needs one type per column: a column mixing types (e.g.
+    text and dates) becomes a text column.
+    """
+    if library not in ("pandas", "polars"):
+        raise ValueError("library must be 'pandas' or 'polars'")
+    rows = iter_rows(source, sheet, skip_empty=True, **options)
+    names: list[str] = []
+    if header:
+        first = next(rows, None)
+        names = _header_names(first) if first is not None else []
+    data = list(rows)
+    width = max([len(names), *map(len, data)])
+    _extend_names(names, width)
+    for row in data:
+        if len(row) < width:
+            row.extend([None] * (width - len(row)))
+    if library == "pandas":
+        import pandas as pd
+
+        return pd.DataFrame(data, columns=names)
+    import polars as pl
+
+    columns = []
+    for i, name in enumerate(names):
+        values = [row[i] for row in data]
+        try:
+            columns.append(pl.Series(name, values, strict=False))
+        except (TypeError, ValueError, pl.exceptions.PolarsError):
+            # Mixed types (e.g. text and dates) cannot share a polars dtype.
+            columns.append(pl.Series(name, [None if v is None else str(v) for v in values], dtype=pl.String))
+    return pl.DataFrame(columns)

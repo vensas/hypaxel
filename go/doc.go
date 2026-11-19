@@ -1,4 +1,6 @@
-// Package hypaxel writes XLSX (Excel) workbooks as a forward-only stream.
+// Package hypaxel writes and reads XLSX (Excel) workbooks as streams.
+//
+// # Writing
 //
 // Every cell is serialized to XML the moment it is written and deflated into a small buffer
 // that is flushed to the destination, so memory stays flat regardless of the number of rows
@@ -24,4 +26,31 @@
 // Rows go top to bottom, cells left to right, one worksheet at a time. The typed cell methods
 // (WriteString, WriteInt, WriteFloat, ...) do not allocate and report problems through the next
 // call that returns an error. A Writer is not safe for concurrent use.
+//
+// # Reading
+//
+// A [Reader] parses the package structure, sheet list and cell formats when it is opened and
+// then streams a worksheet one row at a time, so memory is bounded by the shared string table
+// plus the current row:
+//
+//	r, err := hypaxel.OpenReader("orders.xlsx")
+//	if err != nil {
+//		return err
+//	}
+//	defer r.Close()
+//	rows, err := r.Rows("Orders")
+//	if err != nil {
+//		return err
+//	}
+//	for rows.Next() {
+//		row := rows.Row()
+//		for column, v := range row.Cells() {
+//			fmt.Println(hypaxel.CellRef(row.Index(), column), v)
+//		}
+//	}
+//	return rows.Err()
+//
+// Values are strings, numbers, booleans, error codes and, for numbers whose format shows a
+// date, time or duration, date values convertible to [time.Time] and [time.Duration]. A Reader
+// is safe for concurrent use; each [Rows] belongs to one goroutine.
 package hypaxel

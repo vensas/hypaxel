@@ -184,19 +184,20 @@ dependencies = [
 
 [[package]]
 name = "hypaxel"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "crc32fast",
  "flate2",
  "hashbrown",
  "itoa",
+ "memchr",
  "zmij",
 ]
 
 [[package]]
 name = "hypaxel-node"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "hypaxel",

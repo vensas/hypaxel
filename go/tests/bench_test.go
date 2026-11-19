@@ -63,3 +63,42 @@ func BenchmarkWrite(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkRead reads the workload, written by Hypaxel with cell references, with every reader
+// and checks that each returns the same values.
+//
+//	go test -bench Read -benchmem                      # 100,000 rows
+//	go test -bench Read -benchmem -rows 1000000 -benchtime 3x
+func BenchmarkRead(b *testing.B) {
+	dir := b.TempDir()
+	for _, mode := range []struct {
+		name string
+		opts []hypaxel.Option
+	}{{"inline", nil}, {"shared", []hypaxel.Option{hypaxel.WithSharedStrings(true)}}} {
+		path, err := WriteReadInput(dir, *rowCount, mode.opts...)
+		if err != nil {
+			b.Fatal(err)
+		}
+		want, err := HypaxelRead(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		for _, c := range ReadCases {
+			if c.MaxRows > 0 && *rowCount > c.MaxRows {
+				continue
+			}
+			b.Run(c.Name+"/"+mode.name+"/rows="+strconv.Itoa(*rowCount), func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					got, err := c.Run(path)
+					if err != nil {
+						b.Fatal(err)
+					}
+					if !c.Matches(got, want) {
+						b.Fatalf("got %v, want %v", got, want)
+					}
+				}
+			})
+		}
+	}
+}

@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "hypaxel"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "calamine",
  "chrono",
@@ -710,6 +710,7 @@ dependencies = [
  "futures-util",
  "hashbrown",
  "itoa",
+ "memchr",
  "rust_xlsxwriter",
  "serde",
  "serde_json",
@@ -720,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "hypaxel-axum"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "bytes",

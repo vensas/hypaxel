@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "hypaxel"
-description = "High-performance, constant-memory streaming XLSX (Excel) writer for Python, powered by Rust."
+description = "High-performance, constant-memory streaming XLSX (Excel) writer and reader for Python, powered by Rust."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"

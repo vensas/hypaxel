@@ -1,9 +1,10 @@
 package de.vensas.hypaxel;
 
 /**
- * Thrown when a workbook cannot be written as requested: a limit of the file format is exceeded,
- * an argument is invalid or the writer is used out of order. I/O failures of the destination are
- * reported as {@link java.io.IOException} instead.
+ * Thrown when a workbook cannot be written or read as requested: a limit of the file format is
+ * exceeded, an argument is invalid, the writer is used out of order, or the file being read is not
+ * a workbook or is damaged. I/O failures of the destination or source are reported as
+ * {@link java.io.IOException} instead.
  */
 public final class XlsxException extends RuntimeException {
     private static final long serialVersionUID = 1L;
@@ -40,25 +41,53 @@ public final class XlsxException extends RuntimeException {
         /** A type cannot be mapped to columns. */
         UNSUPPORTED_TYPE,
         /** The writer or worksheet is already completed. */
-        INVALID_STATE
+        INVALID_STATE,
+        /**
+         * The input is not an XLSX workbook: not a ZIP archive, a legacy {@code .xls} file, an
+         * encrypted workbook or another Office document.
+         */
+        INVALID_FILE,
+        /** A part of the workbook is damaged or not valid XML; {@link #part()} names it. */
+        MALFORMED,
+        /** The workbook uses a feature the reader does not support, such as UTF-16 parts. */
+        UNSUPPORTED,
+        /** A size limit was exceeded, such as {@link ReadOptions#maxSharedStringsBytes()}. */
+        LIMIT_EXCEEDED,
+        /** No sheet has the requested name or index. */
+        SHEET_NOT_FOUND
     }
 
     private final Kind kind;
+    private final String part;
 
     /** Creates an exception of the given kind. */
     public XlsxException(Kind kind, String message) {
         super(message);
         this.kind = kind;
+        this.part = null;
     }
 
     /** Creates an exception of the given kind with a cause. */
     public XlsxException(Kind kind, String message, Throwable cause) {
         super(message, cause);
         this.kind = kind;
+        this.part = null;
+    }
+
+    /** Creates an exception about a part of the package, such as {@code xl/worksheets/sheet1.xml}. */
+    public XlsxException(Kind kind, String part, String message) {
+        super(part + ": " + message);
+        this.kind = kind;
+        this.part = part;
     }
 
     /** Returns the category of the failure. */
     public Kind kind() {
         return kind;
+    }
+
+    /** Returns the package part the failure was found in, or null if it concerns no single part. */
+    public String part() {
+        return part;
     }
 }

@@ -172,7 +172,7 @@ public sealed partial class XlsxWriter : IAsyncDisposable, IDisposable
         if (_options.Use1904DateSystem)
         {
             day = days - DaysTo1904;
-            return day >= 0 && day < 2_958_465 - 1462;
+            return day >= 0 && day <= 2_958_465 - 1462;
         }
 
         day = days - DaysTo1900;

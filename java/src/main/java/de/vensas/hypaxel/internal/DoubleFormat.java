@@ -8,7 +8,7 @@ import java.math.BigInteger;
  * to render doubles", 2020) so that the write loop does not create a {@code String} per number as
  * {@link Double#toString(double)} would.
  */
-final class DoubleFormat {
+public final class DoubleFormat {
     /** Longest output: sign, 17 digits, decimal point and up to 20 padding zeros. */
     static final int MAX_LENGTH = 40;
 
@@ -44,6 +44,16 @@ final class DoubleFormat {
     private static BigInteger ceilDivide(BigInteger dividend, BigInteger divisor) {
         BigInteger[] parts = dividend.divideAndRemainder(divisor);
         return parts[1].signum() == 0 ? parts[0] : parts[0].add(BigInteger.ONE);
+    }
+
+    /** Returns the shortest text that reads back as {@code value}, as Excel's General format shows it. */
+    public static String toString(double value) {
+        if (!Double.isFinite(value)) {
+            return Double.toString(value);
+        }
+        byte[] buf = new byte[MAX_LENGTH];
+        int length = write(value, buf, 0);
+        return new String(buf, 0, length, java.nio.charset.StandardCharsets.ISO_8859_1);
     }
 
     /**

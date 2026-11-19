@@ -1,13 +1,17 @@
 # Hypaxel for Java
 
-**High-performance, constant-memory XLSX (Excel) writer for the JVM, written in pure Java.**
+**High-performance, constant-memory XLSX (Excel) writer and streaming reader for the JVM, written in pure Java.**
 
 Hypaxel writes `.xlsx` files as a forward-only stream. Each cell is serialized to UTF-8 XML the
 moment you write it and compressed straight into a small buffer, so memory stays flat whether you
-export 10 rows or a million, and a download can start while your query is still running.
+export 10 rows or a million, and a download can start while your query is still running. It
+[reads](#reading) workbooks the same way: one row at a time, with memory bounded by the shared
+string table plus one row.
 
 - **Fast:** writes 100k rows × 10 columns in about 0.12 s, **3 to 4x faster than FastExcel**
-  and **9x faster than Apache POI's streaming writer (SXSSF)** (see [Performance](#performance)).
+  and **9x faster than Apache POI's streaming writer (SXSSF)**; reads 1M rows × 10 columns in
+  about 0.7 s, **about 4x faster than FastExcel's reader** and **5 to 7x faster than POI's event
+  API** (see [Performance](#performance)).
 - **No garbage per cell:** a workbook allocates its buffers once (about 0.17 MB in total), no
   matter how many rows follow.
 - **Streaming:** writes to any `OutputStream`, seekable or not: a servlet response, a Spring
@@ -26,7 +30,7 @@ Hypaxel for Java is a native port of the [`hypaxel` Rust crate](../rust/README.m
 versions use the same design. It is written in Java so that it reads naturally from Java, Kotlin
 and Scala.
 
-> Status: **Milestone 1 — creating Excel files.** Reading and editing are not implemented.
+> Status: **creating and reading Excel files.** Editing existing workbooks is not implemented.
 
 ## Install
 
@@ -78,6 +82,104 @@ try (XlsxWriter writer = XlsxWriter.create(out)) {
     }
 }
 ```
+
+## Reading
+
+```java
+try (XlsxReader reader = XlsxReader.open(Path.of("orders.xlsx"))) {
+    System.out.println(reader.sheetNames());
+
+    try (SheetReader rows = reader.worksheet("Orders")) {          // or worksheet(0)
+        for (Row row = rows.nextRow(); row != null; row = rows.nextRow()) {
+            // row.number() is the 1-based Excel row; rows without values are skipped.
+            String customer = row.getString(1);                     // 1-based columns
+            double amount = row.getNumber(3);                       // NaN if not a number
+            LocalDateTime created = row.getLocalDateTime(4);        // null if not a date
+            switch (row.type(5)) {
+                case STRING -> System.out.println(row.getString(5));
+                case NUMBER, DATE_TIME -> System.out.println(row.getNumber(5));
+                case BOOLEAN -> System.out.println(row.getBoolean(5));
+                case ERROR -> System.out.println(row.getError(5));  // "#N/A", ...
+                case EMPTY -> { }
+            }
+        }
+    }
+}
+```
+
+`XlsxReader.open` takes a `Path`, a `SeekableByteChannel`, a `byte[]` or an `InputStream`. The
+XLSX directory sits at the end of the file, so an `InputStream` is read into memory first; use a
+`Path` for large files. Closing the reader closes the file or channel.
+
+Convenience over the same stream:
+
+```java
+for (Row row : reader.worksheet(0)) { ... }                 // Iterable; the Row is reused
+List<Value> dense = row.values();                           // columns 1..lastColumn(), Value.EMPTY for gaps
+List<Object> objects = row.toList();                        // String, Double, Boolean, LocalDateTime, ..., null for gaps
+for (CellValue cell : row.cells()) { cell.column(); cell.value(); }
+
+try (Stream<Row> rows = reader.worksheet("Orders").stream()) {   // independent copies
+    List<List<Object>> table = rows.map(Row::toList).toList();
+}
+```
+
+`SheetReader.nextRow()` and its iterator reuse one `Row`: it is valid until the next row is read.
+Keep `row.copy()`, `row.toList()` or the values you need. `stream()` yields copies, so they may be
+collected.
+
+**`XlsxReader`**
+
+| Method | Purpose |
+| --- | --- |
+| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats |
+| `sheets()`, `sheetNames()` | Sheets in workbook order: name, `SheetVisibility` (`VISIBLE`, `HIDDEN`, `VERY_HIDDEN`), `SheetKind` (`WORKSHEET`, `CHARTSHEET`, `OTHER`) |
+| `worksheet(name)` | Sheet by name: exact match first, then ignoring case |
+| `worksheet(index)` | Sheet by 0-based position |
+| `isDate1904()` | Whether the workbook uses the 1904 date system |
+| `sharedStringCount()` | Entries in the shared string table (loads it) |
+
+**`Row`**
+
+| Method | Purpose |
+| --- | --- |
+| `number()`, `cellCount()`, `lastColumn()`, `column(i)` | Row number, cells with a value and their columns |
+| `type(column)` | `CellType`: `EMPTY`, `STRING`, `NUMBER`, `BOOLEAN`, `DATE_TIME`, `ERROR` |
+| `getString`, `getNumber`, `getBoolean`, `getError` | Typed values without allocation (except the `String` of inline text) |
+| `getDateTime(column)` | `ExcelDateTime`: `serial()`, `kind()`, `toLocalDateTime()`, `toLocalDate()`, `toLocalTime()`, `toDuration()`, `toObject()` |
+| `getLocalDateTime(column)` | Shortcut for `getDateTime(column).toLocalDateTime()` |
+| `getValue(column)`, `getObject(column)`, `getText(column)` | Value as `Value`, as a plain Java object, or as text like Excel's General format |
+| `sharedStringIndex(column)` | Index in the shared string table, to convert repeated text once |
+| `cells()`, `values()`, `toList()`, `copy()` | Cells with values, dense values, dense objects, a detached copy |
+
+- **Values:** text (shared strings, inline strings, cached formula results), numbers, booleans,
+  errors and dates. A number whose built-in or custom number format shows a date, time or
+  duration becomes `DATE_TIME` with a `DateKind` (`DATE`, `DATE_TIME`, `TIME`, `DURATION`); the
+  raw serial stays available. `toObject()` gives a `LocalDateTime`, a `LocalTime` for times below
+  one day, or a `Duration`. Both date systems are supported, including Excel's fictitious
+  1900-02-29 (serial 60, which converts to null). Times are rounded to the millisecond. Formulas
+  yield their cached result; a formula that was never calculated has no value.
+- **Memory:** worksheets are decompressed and parsed as a stream; what stays in memory is the
+  shared string table (text that a workbook stores once) plus the current row. Reading the 1M-row
+  benchmark file completes with `-Xmx16m` when its text is inline and with `-Xmx96m` when its
+  1M distinct strings are in the shared table.
+- **Compatibility:** files from Excel, LibreOffice, Apache POI, openpyxl and other producers:
+  package relationships instead of fixed paths, Strict Open XML, prefixed namespaces, cells and
+  rows without references, out-of-order cells, rich text, phonetic runs, inline strings, CDATA,
+  ISO 8601 dates (`t="d"`) and Excel's `_xHHHH_` escapes.
+- **Safety:** document type declarations are rejected (no entity expansion or external entities),
+  every XML token (16 MiB) and row (16,384 cells, 256 MiB of text) is bounded, ZIP entries must
+  match their declared size and CRC-32, and `ReadOptions.builder().maxSharedStringsBytes(...)`
+  (default 1 GiB) caps the shared string table. Legacy `.xls` files, encrypted workbooks, CSV and
+  Word files fail with `XlsxException` of kind `INVALID_FILE`, damaged parts with `MALFORMED` and
+  a `part()` such as `xl/worksheets/sheet1.xml`; messages name the part and row. Invalid UTF-8 in
+  text is replaced with U+FFFD.
+- **Threads:** one `XlsxReader` can open several worksheets at once, also from different threads;
+  they share the parsed workbook and the shared string table. Each `SheetReader` is used by one
+  thread at a time.
+
+Not read (yet): formula text, styles beyond date detection, merged ranges, comments, hyperlinks
+and other drawing or table parts.
 
 ## Streaming HTTP responses
 
@@ -445,9 +547,66 @@ java -jar benchmarks/target/benchmarks.jar jmh WriteBenchmark -prof gc    # 100k
 ```
 
 The benchmarks are a separate Maven project in `benchmarks/`, so JMH, FastExcel and POI are not
-dependencies of the library.
+dependencies of the library. The read benchmark is described [below](#reading-1).
 
-### Why it's fast
+### Reading
+
+The 1M-row dataset of the write benchmark (10 columns: int, two strings, two doubles, a decimal,
+a date-time, a boolean, a long and a unique string), written by Hypaxel once with inline strings
+(40.7 MB) and once with a shared string table (43.0 MB, 1M distinct strings). Each reader streams
+the first worksheet and visits every cell with its typed accessors; all of them must produce the
+same checksum (10,000,000 cells, sum of all numbers and date serials, 42,833,558 characters of
+text, 500,000 `TRUE`s).
+
+Measured on an Apple M1 Max (10 cores, 64 GB, macOS 26.6) with OpenJDK 24.0.1 against
+FastExcel reader 0.20.2 (`ReadableWorkbook`, Aalto StAX) and Apache POI 6.0.0 (`XSSFReader` with
+a SAX handler and `ReadOnlySharedStringsTable`, the event API as POI documents it). The machine
+was running other work at the time (load average about 12), so treat differences of a few percent
+as noise. Time: mean of 5 runs after 2 warm-ups in one JVM. Allocated: bytes allocated by the
+reading thread per run. Peak RSS: a separate single read in a fresh JVM with default settings.
+
+| Reader | Inline strings | Allocated | Peak RSS | Shared strings | Allocated | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **Hypaxel** `XlsxReader` | **0.70 s** | **322 MB** | **354 MB** | **0.69 s** | **74 MB** | **155 MB** |
+| FastExcel `ReadableWorkbook` | 2.69 s | 3,913 MB | 732 MB | 2.97 s | 4,068 MB | 1,015 MB |
+| Apache POI `XSSFReader` + SAX | 3.27 s | 1,267 MB | 616 MB | 4.65 s | 7,886 MB | 827 MB |
+
+How to read this:
+
+- All three readers stream with bounded live memory: each one completes with `-Xmx16m` on the
+  inline file and with `-Xmx96m` on the shared one, whose string table must be held. The RSS
+  differences come from garbage: under default settings the JVM lets it accumulate between
+  collections, so the reader that allocates least also has the smallest footprint.
+- Hypaxel's allocation on the inline file is the `String` of each text cell, which the benchmark
+  asks for; shared strings are created once when the table is loaded. Numbers, booleans and
+  dates allocate nothing.
+- FastExcel did not read number formats (its default); Hypaxel and the POI handler detect date
+  formats.
+- About 25% of Hypaxel's time is inflate and CRC-32 verification in the JDK.
+
+```bash
+./mvnw -q -DskipTests install
+./mvnw -q -f benchmarks/pom.xml package
+./benchmarks/read.sh 1000000                        # generates the files, then time and peak memory
+```
+
+### Why reading is fast
+
+- **Own XML pull parser over UTF-8 bytes.** No StAX or SAX, no `char[]` decoding of markup;
+  names are compared as bytes and namespace prefixes are ignored by matching local names.
+- **One-pass fast path for common cells.** `<c r="B2" s="1" t="s"><v>42</v></c>` and
+  `<c t="inlineStr"><is><t>text</t></is></c>` are recognized in a single scan; anything else
+  (formulas, rich text, comments, unusual whitespace) falls back to the general parser, so both
+  give the same result.
+- **No objects per cell.** Rows are parallel primitive arrays reused from row to row; text stays
+  UTF-8 until you ask for a `String`, and shared strings are created once.
+- **Correctly rounded number parsing without `Double.parseDouble`.** Clinger's fast path for up
+  to 15 digits, then the Eisel-Lemire algorithm for up to 19 digits; the JDK only handles the
+  rare rest. Results are bit-identical to `Double.parseDouble`.
+- **Own ZIP reader.** Positional reads and `java.util.zip.Inflater` directly into the parser's
+  buffer, which also lets several worksheets be read at once.
+
+### Why writing is fast
 
 - **No XML library.** Markup is appended as precomputed ASCII byte arrays to one reusable buffer;
   text is transcoded from UTF-16 to UTF-8 and escaped in a single pass.
@@ -469,7 +628,8 @@ cd java
 ./mvnw -B verify      # compile for Java 17, run the tests, check 80% line coverage
 ```
 
-The tests read every workbook back with Apache POI. The coverage report is written to
+The writer tests read every workbook back with Apache POI; the reader tests round-trip through
+the writer, read files written by POI, handcrafted packages and thousands of damaged files. The coverage report is written to
 `target/site/jacoco/index.html`.
 
 ## License

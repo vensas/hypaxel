@@ -78,19 +78,20 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hypaxel"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "crc32fast",
  "flate2",
  "hashbrown",
  "itoa",
+ "memchr",
  "zmij",
 ]
 
 [[package]]
 name = "hypaxel-py"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "hypaxel",
@@ -108,6 +109,12 @@ name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
+
+[[package]]
+name = "memchr"
+version = "2.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "num-traits"

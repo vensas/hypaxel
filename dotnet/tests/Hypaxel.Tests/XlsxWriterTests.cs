@@ -361,9 +361,10 @@ public class XlsxWriterTests
     public async Task Date1904System()
     {
         using var wb = await WriteAsync(
-            async w => await w.AddWorksheet("S").AddRowAsync(new DateOnly(1904, 1, 2)),
+            async w => await w.AddWorksheet("S").AddRowAsync(new DateOnly(1904, 1, 2), new DateOnly(9999, 12, 31)),
             new XlsxWriterOptions { Use1904DateSystem = true });
         Assert.Equal("1", wb.Value("S", "A1"));
+        Assert.Equal("2957003", wb.Value("S", "B1"));
         Assert.True(wb.Part.Workbook.WorkbookProperties!.Date1904!.Value);
     }
 

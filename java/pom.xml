@@ -6,11 +6,11 @@
 
   <groupId>de.vensas</groupId>
   <artifactId>hypaxel</artifactId>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <packaging>jar</packaging>
 
   <name>Hypaxel</name>
-  <description>High-performance, constant-memory streaming XLSX (Excel) writer for the JVM with zero runtime dependencies.</description>
+  <description>High-performance, constant-memory streaming XLSX (Excel) writer and reader for the JVM with zero runtime dependencies.</description>
   <url>https://github.com/vensas/hypaxel</url>
   <inceptionYear>2026</inceptionYear>
 

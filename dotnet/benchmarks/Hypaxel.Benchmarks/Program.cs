@@ -9,6 +9,12 @@ if (args is ["--quick", ..])
     return;
 }
 
+if (args is ["--read-quick", ..])
+{
+    ReadCases.RunQuick(args.Length > 1 ? int.Parse(args[1]) : 1_000_000, args.Length > 2 ? args[2] : null, args.Length > 3 ? args[3] : null);
+    return;
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(WriteBenchmarks).Assembly).Run(args);
 
 public sealed record Row(int Id, string Name, string Category, double Price, decimal Amount, DateTime Created, bool Active, long Quantity, string Comment, double Ratio);

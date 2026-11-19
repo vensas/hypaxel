@@ -11,16 +11,16 @@
   -->
   <groupId>de.vensas</groupId>
   <artifactId>hypaxel-benchmarks</artifactId>
-  <version>0.2.0</version>
+  <version>0.3.0</version>
   <packaging>jar</packaging>
 
   <name>Hypaxel Benchmarks</name>
-  <description>Benchmarks of Hypaxel against Apache POI SXSSF and FastExcel.</description>
+  <description>Benchmarks of Hypaxel against Apache POI and FastExcel (writing and reading).</description>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <hypaxel.version>0.2.0</hypaxel.version>
+    <hypaxel.version>0.3.0</hypaxel.version>
     <jmh.version>1.37</jmh.version>
     <poi.version>6.0.0</poi.version>
     <fastexcel.version>0.20.2</fastexcel.version>
@@ -46,6 +46,11 @@
     <dependency>
       <groupId>org.dhatim</groupId>
       <artifactId>fastexcel</artifactId>
+      <version>${fastexcel.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.dhatim</groupId>
+      <artifactId>fastexcel-reader</artifactId>
       <version>${fastexcel.version}</version>
     </dependency>
     <dependency>

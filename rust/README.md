@@ -1,6 +1,6 @@
 # Hypaxel for Rust
 
-**High-performance, constant-memory Excel (XLSX) writer for Rust, built for web services.**
+**High-performance, constant-memory Excel (XLSX) writer and streaming reader for Rust, built for web services.**
 
 Hypaxel writes `.xlsx` files as a forward-only stream. Each cell is serialized to UTF-8 XML the moment
 you write it and compressed straight into a small buffer, which is flushed to any `io::Write` or tokio
@@ -21,15 +21,18 @@ the HTTP client while your query is still running.
   filters, Excel tables, row grouping, auto-fit columns and formulas.
 - **Valid output:** every feature is checked against the Office Open XML schema validator, and
   the files are read back with calamine, openpyxl and LibreOffice.
+- **Streaming reader:** `XlsxReader` reads any `Read + Seek` source one row at a time, about
+  about 2.8x faster than calamine's cell reader. Dates are recognised from number formats, and damaged
+  or hostile files fail with a clear error. See [Reading](#reading).
 - **Safe Rust:** `#![deny(unsafe_code)]`.
 
-> Status: **Milestone 1: creating Excel files.** The .NET version lives in [`dotnet/`](../dotnet/README.md).
+> Status: **creating Excel files** (milestone 1) and **streaming reads**. The .NET version lives in [`dotnet/`](../dotnet/README.md).
 
 ## Crates
 
 | Crate | Purpose |
 | --- | --- |
-| `hypaxel` | Core writer. Features: `chrono` (default), `serde` (default), `tokio` |
+| `hypaxel` | Core writer and reader. Features: `chrono` (default), `serde` (default), `tokio` |
 | `hypaxel-axum` | `Xlsx` response type for axum 0.8 |
 
 ## Quick start
@@ -61,6 +64,58 @@ Cell methods (`write`, `write_styled`, `skip_cells`) are infallible and chainabl
 the cell level are reported by the next `end_row` / `add_row` / `finish`, for example text over
 32,767 characters or more than 16,384 columns. The offending cell is left empty, so the file
 stays valid.
+
+## Reading
+
+```rust
+use hypaxel::{Value, XlsxReader};
+
+fn main() -> hypaxel::Result<()> {
+    let mut reader = XlsxReader::open("orders.xlsx")?;
+    println!("{:?}", reader.sheet_names().collect::<Vec<_>>());
+
+    let mut rows = reader.worksheet("Orders")?;          // or worksheet_at(0)
+    while let Some(row) = rows.next_row()? {
+        // row.number() is the 1-based Excel row; rows without values are skipped.
+        for cell in row.cells() {
+            match cell.value() {
+                Value::String(s) => println!("{}: {s}", hypaxel::cell_ref(row.number(), cell.column())),
+                Value::Number(n) => println!("{n}"),
+                Value::DateTime(d) => println!("{:?}", d.to_naive_datetime()),
+                Value::Bool(b) => println!("{b}"),
+                Value::Error(e) => println!("error {e}"),
+                _ => {}
+            }
+        }
+        let amount = row.get(3).as_f64();                   // by 1-based column
+        let dense: Vec<Value> = row.values().collect();     // columns 1..=last, Empty for gaps
+    }
+    Ok(())
+}
+```
+
+- **Memory:** rows are decompressed and parsed as a stream. What stays in memory is the shared
+  string table (text that Excel stores once per workbook) plus the current row. Reading 1M rows
+  peaks at 7 MB RSS for a file with inline strings and 57 MB for one whose 1M unique strings are
+  in the shared table.
+- **Values:** `String`, `Number`, `Bool`, `Error` (`#N/A`, ...), `Empty` and `DateTime` for numbers
+  whose built-in or custom number format shows a date, time or duration (`ExcelDateTime`: serial,
+  `kind()`, `to_naive_datetime()`, `to_naive_date()`, `to_naive_time()`, `to_duration()`, in the
+  1900 and 1904 systems). Times are rounded to the millisecond. Formulas yield their cached
+  result; a formula that was never calculated has no value.
+- **Compatibility:** files from Excel, LibreOffice, openpyxl, rust_xlsxwriter and other
+  producers: package relationships instead of fixed paths, Strict Open XML, prefixed namespaces,
+  cells without references, rich text, inline strings and ISO 8601 dates.
+- **Safety:** DTDs are rejected (no entity expansion), every XML token and row is bounded, ZIP
+  entries must match their declared size and CRC, and `ReadOptions::max_shared_strings_bytes`
+  (default 1 GiB) caps the shared string table. Legacy `.xls` files, encrypted workbooks, CSV
+  and Word files are reported as `Error::InvalidFile`; damaged parts as `Error::Malformed`.
+- **Several sheets at once:** `reader.with_source(File::open(path)?)` creates a second reader that
+  shares the parsed workbook and string table, e.g. for another thread; `into_worksheet` gives
+  rows that own their source.
+
+Not read (yet): formulas' text, styles beyond date detection, merged ranges, comments and
+hyperlinks.
 
 ## Serde records
 
@@ -209,6 +264,28 @@ cargo bench -p hypaxel                          # Criterion, 10k and 100k rows
 HYPAXEL_QUICK=1000000 cargo bench -p hypaxel    # stopwatch run, 1M rows
 ```
 
+### Reading
+
+The same dataset (1M rows × 10 columns, written by hypaxel) read cell by cell, with a checksum
+over all values that every reader must match. macOS, Apple M1 Max, Rust 1.100, calamine 0.38,
+`--release`, each run in its own process (best of three).
+
+| Reader | Inline strings (49 MB) | Peak RSS | Shared strings (52 MB) | Peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| **hypaxel** `XlsxReader` | **0.78 s** | **7 MB** | **0.73 s** | **57 MB** |
+| calamine `worksheet_cells_reader` | 2.18 s | 7 MB | 2.05 s | 64 MB |
+| calamine `worksheet_range` | 2.43 s | 793 MB | 2.33 s | 849 MB |
+
+About a quarter of the time is inflate. Cells of the shapes nearly every producer writes
+(`<c r="B2" s="1"><v>42</v></c>`, `<c t="inlineStr"><is><t>…</t></is></c>`) and plain shared string
+items are matched in a single pass over the buffer; anything else goes through the general pull
+parser. Row buffers are reused, so reading allocates nothing per cell.
+
+```bash
+cargo run --release -p hypaxel --example read_bench -- generate data.xlsx 1000000 inline
+cargo run --release -p hypaxel --example read_bench -- hypaxel data.xlsx     # or calamine, calamine-stream
+```
+
 ### Why it's fast
 
 - **Hand-written XML.** Markup is appended as byte literals to one reused buffer, with no XML library.
@@ -249,5 +326,8 @@ Options::new()
 cargo test --workspace --all-features
 ```
 
-The tests read files back with calamine and inspect the raw parts with the `zip` crate. The axum
-tests drive real routers, including error propagation and client disconnects.
+The writer tests read files back with calamine and inspect the raw parts with the `zip` crate.
+The reader tests round-trip every value type, read files from rust_xlsxwriter and handcrafted
+packages (Strict Open XML, unusual XML), check error messages, and feed thousands of randomly
+damaged files to make sure they fail cleanly. The axum tests drive real routers, including error
+propagation and client disconnects.
