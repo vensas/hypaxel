@@ -10,7 +10,7 @@
   <packaging>jar</packaging>
 
   <name>Hypaxel</name>
-  <description>High-performance, constant-memory streaming XLSX (Excel) writer for the JVM with zero runtime dependencies.</description>
+  <description>High-performance, constant-memory streaming XLSX (Excel) writer and reader for the JVM with zero runtime dependencies.</description>
   <url>https://github.com/vensas/hypaxel</url>
   <inceptionYear>2026</inceptionYear>
 

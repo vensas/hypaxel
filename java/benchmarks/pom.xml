@@ -15,7 +15,7 @@
   <packaging>jar</packaging>
 
   <name>Hypaxel Benchmarks</name>
-  <description>Benchmarks of Hypaxel against Apache POI SXSSF and FastExcel.</description>
+  <description>Benchmarks of Hypaxel against Apache POI and FastExcel (writing and reading).</description>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
@@ -46,6 +46,11 @@
     <dependency>
       <groupId>org.dhatim</groupId>
       <artifactId>fastexcel</artifactId>
+      <version>${fastexcel.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.dhatim</groupId>
+      <artifactId>fastexcel-reader</artifactId>
       <version>${fastexcel.version}</version>
     </dependency>
     <dependency>
