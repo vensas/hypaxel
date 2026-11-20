@@ -1,0 +1,118 @@
+{
+  "id": "dotnet-read-1m-memory",
+  "language": "dotnet",
+  "group": "Reading",
+  "title": ".NET reading: 1,000,000 rows, memory",
+  "dataset": "1,000,000 rows × 10 columns, written by the Hypaxel writer with inline or shared strings, read cell by cell",
+  "method": "Each reader runs in its own process with the --read-quick stopwatch runner: one warm-up, then the best of three runs. Every reader produces the same checksum (10,000,000 cells, the sum of all numbers including date serials, 42,833,558 string characters, 500,000 TRUEs). The machine was otherwise idle. Allocations are for one run; peak RSS is the whole process (/usr/bin/time -l), including the runtime.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores, 64 GB",
+    "os": "macOS 26.6",
+    "runtime": ".NET 10.0.13"
+  },
+  "versions": [
+    "Sylvan.Data.Excel 0.5.8",
+    "ExcelDataReader 3.9.0",
+    "MiniExcel 1.47.1"
+  ],
+  "metrics": [
+    {
+      "id": "inlineAllocated",
+      "label": "Inline: allocated",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "inlineRss",
+      "label": "Inline: peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    },
+    {
+      "id": "sharedAllocated",
+      "label": "Shared: allocated",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "sharedRss",
+      "label": "Shared: peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "inlineRss",
+  "rows": [
+    {
+      "label": "Hypaxel, TryGetText/TryGetDouble",
+      "subject": true,
+      "values": {
+        "inlineAllocated": 0.1,
+        "inlineRss": 49,
+        "sharedAllocated": 92,
+        "sharedRss": 141
+      }
+    },
+    {
+      "label": "Hypaxel, GetValue (ExcelValue)",
+      "subject": true,
+      "values": {
+        "inlineAllocated": 153,
+        "inlineRss": 55,
+        "sharedAllocated": 92,
+        "sharedRss": 141
+      }
+    },
+    {
+      "label": "Hypaxel, BackgroundDecompression",
+      "subject": true,
+      "values": {
+        "inlineAllocated": 0.6,
+        "inlineRss": 51,
+        "sharedAllocated": 92,
+        "sharedRss": 137
+      }
+    },
+    {
+      "label": "Sylvan.Data.Excel",
+      "subject": false,
+      "values": {
+        "inlineAllocated": 154,
+        "inlineRss": 75,
+        "sharedAllocated": 85,
+        "sharedRss": 156
+      }
+    },
+    {
+      "label": "ExcelDataReader",
+      "subject": false,
+      "values": {
+        "inlineAllocated": 1937,
+        "inlineRss": 77,
+        "sharedAllocated": 1717,
+        "sharedRss": 158
+      }
+    },
+    {
+      "label": "MiniExcel",
+      "subject": false,
+      "values": {
+        "inlineAllocated": 10649,
+        "inlineRss": 81,
+        "sharedAllocated": 10157,
+        "sharedRss": 84
+      }
+    }
+  ],
+  "notes": [
+    "The other runtimes are within a few MB of these figures.",
+    "With inline strings, the only allocations are the strings you ask for: the 153 MB are the 3M cell strings, and reading text as a span allocates nothing.",
+    "With shared strings, the 92 MB are the shared string table (1M distinct strings), which is loaded once and then read without allocating. Nothing else grows with the number of rows."
+  ],
+  "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --read-quick 1000000                    # all readers, both files\ndotnet run -c Release -f net10.0 -- --read-quick 1000000 Sylvan shared      # one reader, one file",
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}

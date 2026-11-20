@@ -406,12 +406,15 @@ the number of rows: the row buffers are sized by the widest row.
 worksheet (and the shared string table) on a thread-pool thread while the calling thread parses. Measured on .NET 10, interleaved
 with the default on the same files:
 
-| | Default | `BackgroundDecompression` |
-| --- | ---: | ---: |
-| One reader, inline: time / CPU time | 0.77 s / 0.76 s | 0.53 s / 0.92 s |
-| One reader, shared: time / CPU time | 0.83 s / 0.84 s | 0.58 s / 0.97 s |
-| 4 readers at once (10 cores), inline: total time | 0.80–0.84 s | 0.56–0.59 s |
-| 10 readers at once (10 cores), inline: total time | 1.14–1.15 s | 1.54–1.56 s |
+| Mode | File | Time | CPU time |
+| --- | --- | ---: | ---: |
+| Default | inline | 0.77 s | 0.76 s |
+| `BackgroundDecompression` | inline | 0.53 s | 0.92 s |
+| Default | shared | 0.83 s | 0.84 s |
+| `BackgroundDecompression` | shared | 0.58 s | 0.97 s |
+
+With several readers at once on the 10 cores (inline file), the total time is 0.80–0.84 s by default
+and 0.56–0.59 s with it for 4 readers, but 1.14–1.15 s and 1.54–1.56 s for 10 readers.
 
 It saves about 30% of the time when cores are idle, but costs about 20% more CPU. When every core
 is busy, as on a server reading many uploads at once, it makes the total slower. That is why it is

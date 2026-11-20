@@ -1,0 +1,113 @@
+{
+  "id": "dotnet-100k-time",
+  "language": "dotnet",
+  "title": ".NET: 100,000 rows, mean time",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, written to a MemoryStream",
+  "method": "BenchmarkDotNet ShortRun, in-process toolchain.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores",
+    "os": "macOS 26.6",
+    "runtime": ".NET 8.0.34, 9.0.23, 10.0.15 and 11.0.0"
+  },
+  "versions": [
+    "SpreadCheetah 1.29.0",
+    "ClosedXML 0.105.1",
+    "BenchmarkDotNet 0.15.8"
+  ],
+  "metrics": [
+    {
+      "id": "net8",
+      "label": ".NET 8",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net9",
+      "label": ".NET 9",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net10",
+      "label": ".NET 10",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net11",
+      "label": ".NET 11",
+      "unit": "ms",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "net10",
+  "rows": [
+    {
+      "label": "Hypaxel, typed Write",
+      "subject": true,
+      "values": {
+        "net8": 122,
+        "net9": 78,
+        "net10": 78,
+        "net11": 74
+      }
+    },
+    {
+      "label": "Hypaxel, AddRowAsync",
+      "subject": true,
+      "values": {
+        "net8": 127,
+        "net9": 87,
+        "net10": 76,
+        "net11": 75
+      }
+    },
+    {
+      "label": "Hypaxel, object mapping",
+      "subject": true,
+      "values": {
+        "net8": 118,
+        "net9": 78,
+        "net10": 80,
+        "net11": 75
+      }
+    },
+    {
+      "label": "Hypaxel, shared strings",
+      "subject": true,
+      "values": {
+        "net8": 159,
+        "net9": 97,
+        "net10": 89,
+        "net11": 90
+      }
+    },
+    {
+      "label": "SpreadCheetah",
+      "subject": false,
+      "values": {
+        "net8": 123,
+        "net9": 79,
+        "net10": 75,
+        "net11": 74
+      }
+    },
+    {
+      "label": "ClosedXML",
+      "subject": false,
+      "values": {
+        "net8": 2369,
+        "net9": 1910,
+        "net10": 1845,
+        "net11": 1773
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel and SpreadCheetah are within measurement noise of each other; both are roughly 20 to 25 times faster than ClosedXML.",
+    ".NET 8 is the slowest target and allocates more per workbook.",
+    "--inProcess is required on .NET 11, which BenchmarkDotNet 0.15.8 does not recognise otherwise."
+  ],
+  "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --filter '*' --job short --inProcess",
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}

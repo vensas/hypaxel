@@ -56,5 +56,9 @@ required-features = ["chrono"]
 name = "read_bench"
 required-features = ["chrono"]
 
+[[example]]
+name = "write_bench"
+required-features = ["chrono", "serde"]
+
 [package.metadata.docs.rs]
 all-features = true

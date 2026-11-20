@@ -1,0 +1,17 @@
+name: Benchmark results
+
+# Checks that the published benchmark results (*/benchmarks/results/*.json and
+# benchmarks/highlights.json) agree with the README tables. See benchmarks/README.md.
+on:
+  push:
+    paths: ["**/README.md", "**/benchmarks/results/**", "benchmarks/**", "scripts/check_benchmarks.py", ".github/workflows/benchmarks.yml"]
+  pull_request:
+    paths: ["**/README.md", "**/benchmarks/results/**", "benchmarks/**", "scripts/check_benchmarks.py", ".github/workflows/benchmarks.yml"]
+
+jobs:
+  check:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 scripts/check_benchmarks.py

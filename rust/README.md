@@ -264,6 +264,31 @@ cargo bench -p hypaxel                          # Criterion, 10k and 100k rows
 HYPAXEL_QUICK=1000000 cargo bench -p hypaxel    # stopwatch run, 1M rows
 ```
 
+**Peak memory, 1M rows.** Each case writes to a file in its own process, generating every row as
+it is written, as a service streaming a database cursor would. macOS, Apple M1 Max, Rust 1.100,
+`--release`, peak RSS from `/usr/bin/time -l`, median of three runs (all three within 0.2 MB, or
+2 MB with shared strings). The first row only generates the rows, without writing them; that
+memory is included in every other figure.
+
+| Case | Peak RSS (1M) |
+| --- | ---: |
+| rows only, nothing written | 6.1 MB |
+| **hypaxel** (tuples) | **6.9 MB** |
+| **hypaxel** (serde records) | **7.0 MB** |
+| hypaxel (shared strings) | 121 MB |
+| hypaxel (deflate level 6) | 6.9 MB |
+| rust_xlsxwriter 0.102 (constant memory) | 7.6 MB |
+| rust_xlsxwriter 0.102 | 1,436 MB |
+
+Hypaxel's memory does not grow with the row count. Shared strings grow with the number of distinct
+strings, here one per row. rust_xlsxwriter's constant-memory mode stays low by writing the
+worksheet to a temporary file and zipping it on `save`; its default mode keeps the worksheet in
+memory.
+
+```bash
+cargo run --release -p hypaxel --example write_bench -- hypaxel 1000000 out.xlsx   # or baseline, hypaxel-serde, hypaxel-shared, hypaxel-level6, rust_xlsxwriter, rust_xlsxwriter-constant-memory
+```
+
 ### Reading
 
 The same dataset (1M rows × 10 columns, written by hypaxel) read cell by cell, with a checksum

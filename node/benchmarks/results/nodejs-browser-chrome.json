@@ -1,0 +1,82 @@
+{
+  "id": "nodejs-browser-chrome",
+  "language": "nodejs",
+  "group": "Browsers (WebAssembly)",
+  "title": "Browsers: an XLSX Blob in headless Chrome",
+  "dataset": "10 columns per row: five numbers, three strings (one unique per row), a Date and a boolean, built before timing; every library gets the same array",
+  "method": "Each library runs in a fresh browser; the time is the median of three runs after the library has loaded. SheetJS writes with compression: true.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Chrome 158.0.8127.36 (headless)"
+  },
+  "versions": [
+    "SheetJS 0.20.3",
+    "ExcelJS 4.4.0"
+  ],
+  "metrics": [
+    {
+      "id": "t100k",
+      "label": "100k rows",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "file100k",
+      "label": "File (100k)",
+      "unit": "MB",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "t300k",
+      "label": "300k rows",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "file300k",
+      "label": "File (300k)",
+      "unit": "MB",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "t100k",
+  "rows": [
+    {
+      "label": "Hypaxel (WebAssembly)",
+      "subject": true,
+      "values": {
+        "t100k": 153,
+        "file100k": 5,
+        "t300k": 484,
+        "file300k": 15.2
+      }
+    },
+    {
+      "label": "SheetJS",
+      "subject": false,
+      "values": {
+        "t100k": 1913,
+        "file100k": 15.1,
+        "t300k": 7099,
+        "file300k": 45.5
+      }
+    },
+    {
+      "label": "ExcelJS",
+      "subject": false,
+      "values": {
+        "t100k": 3074,
+        "file100k": 5.8,
+        "t300k": 9617,
+        "file300k": 17.5
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel's WebAssembly memory stayed at 2.4 MB in both runs. The browser does not expose the peak JavaScript heap, so memory is not compared across libraries.",
+    "Download sizes, gzipped: Hypaxel 171 KB of WebAssembly plus about 7 KB of minified JavaScript; SheetJS xlsx.full.min.js 335 KB (xlsx.mini.min.js 86 KB); ExcelJS exceljs.min.js 256 KB."
+  ],
+  "reproduce": "npm run bench:browser                        # 100,000 rows; needs Chrome (or set CHROME_PATH)\nnode benchmarks/browser/run.mjs 300000",
+  "sourcePath": "node/benchmarks/browser"
+}

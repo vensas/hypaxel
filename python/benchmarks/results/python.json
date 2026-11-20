@@ -1,0 +1,120 @@
+{
+  "id": "python",
+  "language": "python",
+  "title": "Python: 100,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean",
+  "method": "benchmarks/bench.py. Rows marked with * include building the DataFrame from the row list.",
+  "environment": {
+    "hardware": "Xeon 2.1 GHz",
+    "os": "Linux",
+    "runtime": "Python 3.13"
+  },
+  "versions": [
+    "XlsxWriter (constant_memory)",
+    "openpyxl (write_only)",
+    "pandas",
+    "polars"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rate",
+      "label": "Throughput",
+      "unit": "rows/s",
+      "lowerIsBetter": false
+    },
+    {
+      "id": "mem",
+      "label": "Peak Python memory",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakHeap"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel write_rows",
+      "subject": true,
+      "values": {
+        "time": 0.1,
+        "rate": 1000000,
+        "mem": 5
+      }
+    },
+    {
+      "label": "Hypaxel stream_rows",
+      "subject": true,
+      "values": {
+        "time": 0.09,
+        "rate": 1080000,
+        "mem": 11
+      }
+    },
+    {
+      "label": "XlsxWriter (constant_memory)",
+      "subject": false,
+      "values": {
+        "time": 5.15,
+        "rate": 19400,
+        "mem": 7
+      }
+    },
+    {
+      "label": "openpyxl (write_only)",
+      "subject": false,
+      "values": {
+        "time": 9.48,
+        "rate": 10500,
+        "mem": 7
+      }
+    },
+    {
+      "label": "Hypaxel pandas DataFrame*",
+      "subject": true,
+      "values": {
+        "time": 0.27,
+        "rate": 371000,
+        "mem": 16
+      }
+    },
+    {
+      "label": "pandas.to_excel (xlsxwriter)*",
+      "subject": false,
+      "values": {
+        "time": 8.68,
+        "rate": 11500,
+        "mem": 147
+      }
+    },
+    {
+      "label": "Hypaxel polars DataFrame*",
+      "subject": true,
+      "values": {
+        "time": 0.21,
+        "rate": 475000,
+        "mem": 8
+      }
+    },
+    {
+      "label": "polars.write_excel*",
+      "subject": false,
+      "values": {
+        "time": 6.15,
+        "rate": 16300,
+        "mem": 265
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel write_rows peak memory is the output itself (5 MB).",
+    "Hypaxel writes 1M rows in about 0.9 s (write_rows) and 2.5–3.4 s from a DataFrame, scaling linearly."
+  ],
+  "reproduce": "python benchmarks/bench.py 100000",
+  "sourcePath": "python/benchmarks"
+}

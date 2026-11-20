@@ -1,0 +1,69 @@
+{
+  "id": "dotnet-read-background",
+  "language": "dotnet",
+  "group": "Reading",
+  "title": ".NET reading: background decompression",
+  "dataset": "1,000,000 rows × 10 columns, written by the Hypaxel writer with inline or shared strings, read cell by cell",
+  "method": "XlsxReaderOptions.BackgroundDecompression measured interleaved with the default on the same files.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores, 64 GB",
+    "os": "macOS 26.6",
+    "runtime": ".NET 10.0.13"
+  },
+  "versions": [],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "cpu",
+      "label": "CPU time",
+      "unit": "s",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Default (inline)",
+      "subject": true,
+      "values": {
+        "time": 0.77,
+        "cpu": 0.76
+      }
+    },
+    {
+      "label": "BackgroundDecompression (inline)",
+      "subject": true,
+      "values": {
+        "time": 0.53,
+        "cpu": 0.92
+      }
+    },
+    {
+      "label": "Default (shared)",
+      "subject": true,
+      "values": {
+        "time": 0.83,
+        "cpu": 0.84
+      }
+    },
+    {
+      "label": "BackgroundDecompression (shared)",
+      "subject": true,
+      "values": {
+        "time": 0.58,
+        "cpu": 0.97
+      }
+    }
+  ],
+  "notes": [
+    "With several readers at once on the 10 cores (inline file), the total time is 0.80–0.84 s by default and 0.56–0.59 s with it for 4 readers, but 1.14–1.15 s and 1.54–1.56 s for 10 readers.",
+    "It saves about 30% of the time when cores are idle but costs about 20% more CPU; when every core is busy it makes the total slower, which is why it is off by default. Each open worksheet holds 1 MiB of buffers (four 256 KiB chunks) while it is on."
+  ],
+  "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --read-quick 1000000                    # all readers, both files\ndotnet run -c Release -f net10.0 -- --read-quick 1000000 Sylvan shared      # one reader, one file",
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}

@@ -52,30 +52,36 @@ Rust core. The Node.js package also runs in browsers, on the Rust core compiled 
 
 | | Package | Runs on | Engine | Web integration | 1M rows × 10 columns | Compared with |
 | --- | --- | --- | --- | --- | ---: | --- |
-| [.NET](dotnet/README.md) | `Hypaxel`, `Hypaxel.AspNetCore` | .NET 8, 9, 10, 11 | native | ASP.NET Core: `Results.Extensions.Excel(...)`, `this.Excel(...)` | ~0.8 s on .NET 9+ | ~20–25x faster than ClosedXML |
-| [Rust](rust/README.md) | `hypaxel`, `hypaxel-axum` | Rust 1.85+ | native | axum: `Xlsx::from_records(...)`, `Xlsx::from_stream(...)` | ~0.73 s | ~11–14x faster than rust_xlsxwriter |
+| [.NET](dotnet/README.md) | `Hypaxel`, `Hypaxel.AspNetCore` | .NET 8, 9, 10, 11 | native | ASP.NET Core: `Results.Extensions.Excel(...)`, `this.Excel(...)` | ~0.8 s on .NET 9+, < 1 MB allocated | ~20–25x faster than ClosedXML |
+| [Rust](rust/README.md) | `hypaxel`, `hypaxel-axum` | Rust 1.85+ | native | axum: `Xlsx::from_records(...)`, `Xlsx::from_stream(...)` | ~0.75 s, 6.9 MB peak | ~11–14x faster than rust_xlsxwriter |
 | [Python](python/README.md) | `hypaxel` | CPython 3.10+ | Rust core (PyO3) | FastAPI/Starlette `XlsxResponse`, Django, Flask | ~0.9 s | ~50x faster than XlsxWriter, ~95x faster than openpyxl |
-| [Node.js](node/README.md) | `hypaxel` | Node.js 22+ | Rust core (napi-rs) | `stream()` for Express, Fastify, Koa; `webStream()` for Next.js, Hono | ~1.2 s | ~6x faster than ExcelJS's streaming writer |
-| [Browsers](node/README.md#browsers) | `hypaxel` | Chrome/Edge 96+, Firefox 79+, Safari 15+ | Rust core (WebAssembly) | `toBlob()` for downloads, `webStream()` | 300k rows: ~0.5 s in Chrome | ~12–15x faster than SheetJS, ~20x faster than ExcelJS |
-| [Go](go/README.md) | `github.com/vensas/hypaxel/go` | Go 1.26+ | native | `hypaxelhttp.Handler`, `hypaxelhttp.Serve` | ~0.9 s | ~5–6x faster than excelize's `StreamWriter` |
-| [Java](java/README.md) | `de.vensas:hypaxel` | Java 17+ | native | any `OutputStream`: Servlet, Spring `StreamingResponseBody` | ~1.2 s | ~2.5–3x faster than FastExcel, ~8–9x faster than Apache POI SXSSF |
-| [PHP](php/README.md) | `vensas/hypaxel` | PHP 8.2+ | native | `Xlsx::download()`, Symfony `StreamedResponse`, Laravel `streamDownload()` | ~4.2 s (~2.9 s with JIT) | ~11x faster than OpenSpout, ~40x faster than PhpSpreadsheet |
+| [Node.js](node/README.md) | `hypaxel` | Node.js 22+ | Rust core (napi-rs) | `stream()` for Express, Fastify, Koa; `webStream()` for Next.js, Hono | ~1.2 s, 104 MB peak (85 MB of it Node.js) | ~6x faster than ExcelJS's streaming writer |
+| [Browsers](node/README.md#browsers) | `hypaxel` | Chrome/Edge 96+, Firefox 79+, Safari 15+ | Rust core (WebAssembly) | `toBlob()` for downloads, `webStream()` | 300k rows: ~0.5 s in Chrome, 2.4 MB WebAssembly memory | ~12–15x faster than SheetJS, ~20x faster than ExcelJS |
+| [Go](go/README.md) | `github.com/vensas/hypaxel/go` | Go 1.26+ | native | `hypaxelhttp.Handler`, `hypaxelhttp.Serve` | ~0.9 s, 19 MB peak | ~5–6x faster than excelize's `StreamWriter` |
+| [Java](java/README.md) | `de.vensas:hypaxel` | Java 17+ | native | any `OutputStream`: Servlet, Spring `StreamingResponseBody` | ~1.2 s, 0.16 MB allocated | ~2.5–3x faster than FastExcel, ~8–9x faster than Apache POI SXSSF |
+| [PHP](php/README.md) | `vensas/hypaxel` | PHP 8.2+ | native | `Xlsx::download()`, Symfony `StreamedResponse`, Laravel `streamDownload()` | ~4.2 s (~2.9 s with JIT), 4.0 MB peak | ~11x faster than OpenSpout, ~40x faster than PhpSpreadsheet |
 
 Timings come from each implementation's own benchmark, run at different times and partly on
 different machines, so compare each row with its "compared with" library, not the rows with each
 other. Each README has the full tables, versions and how to reproduce them. None of the packages
 is published to a registry yet.
 
+"Peak" is the peak resident memory of the whole process, including the runtime, except for PHP,
+where it is `memory_get_peak_usage()`. .NET and Java report the bytes the writer allocates instead.
+Two read figures are for inline strings / a shared string table. The figures are also published as JSON in
+[`benchmarks/highlights.json`](benchmarks/highlights.json) and each implementation's
+`benchmarks/results/` directory.
+
 **Reading** (.NET, Rust, Python, Go and Java) streams rows the same way, with memory bounded by
 the workbook's shared strings plus one row. Node.js and PHP do not read yet.
 
 | | Read 1M rows × 10 columns | Compared with |
 | --- | ---: | --- |
-| [.NET](dotnet/README.md#reading) `XlsxReader` | ~0.75–0.85 s (~0.55 s with background decompression) | ~2.4x faster than Sylvan.Data.Excel, ~5.5x faster than ExcelDataReader, 9–15x faster than MiniExcel |
-| [Rust](rust/README.md#reading) `XlsxReader` | ~0.75 s, 7–57 MB peak | ~2.8x faster than calamine's cell reader, 15–115x less memory than calamine's `Range` |
+| [.NET](dotnet/README.md#reading) `XlsxReader` | ~0.75–0.85 s (~0.55 s with background decompression), 49 / 141 MB peak | ~2.4x faster than Sylvan.Data.Excel, ~5.5x faster than ExcelDataReader, 9–15x faster than MiniExcel |
+| [Rust](rust/README.md#reading) `XlsxReader` | ~0.75 s, 7 / 57 MB peak | ~2.8x faster than calamine's cell reader, 15–115x less memory than calamine's `Range` |
 | [Python](python/README.md#reading) `iter_rows`, `read_dataframe` | ~1.35 s, 68 MB peak | ~27x faster than openpyxl (100k rows), ~3.5x faster than python-calamine with ~12x less memory |
-| [Go](go/README.md#reading) `OpenReader` | ~1.2 s* | ~11–14x faster than excelize's `Rows` and xlsxreader |
-| [Java](java/README.md#reading) `XlsxReader` | ~0.7 s | ~4x faster than the FastExcel reader, ~5–7x faster than POI's streaming XSSFReader |
+| [Go](go/README.md#reading) `OpenReader` | ~1.2 s*, 21 / 73 MB peak | ~11–14x faster than excelize's `Rows` and xlsxreader |
+| [Java](java/README.md#reading) `XlsxReader` | ~0.7 s, 354 / 155 MB peak | ~4x faster than the FastExcel reader, ~5–7x faster than POI's streaming XSSFReader |
 
 \* The Go files carry a cell reference on every cell, as Excel writes them, so they are about 40%
 larger than the other benchmarks' files. As above, compare each row with its own competitors.
@@ -175,12 +181,14 @@ from Excel, LibreOffice and other producers, including Strict Open XML; clear er
 
 ```
 dotnet/    .NET solution: src/, tests/, samples/, benchmarks/
-rust/      Cargo workspace: hypaxel/, hypaxel-axum/
+rust/      Cargo workspace: hypaxel/, hypaxel-axum/, benchmarks/results/
 python/    PyO3 + maturin package over rust/hypaxel: src/ (bindings), hypaxel/ (Python API), tests/, benchmarks/
 node/      npm package over rust/hypaxel: engine/ (shared), src/ (napi-rs), wasm/ (WebAssembly), ts/ (TypeScript API), test/, benchmarks/
 go/        Go module: the library, hypaxelhttp/, and tests/ (nested module with read-back tests and benchmarks)
 java/      Maven project: src/, benchmarks/ (separate project)
 php/       Composer package: src/, tests/, benchmarks/, examples/
+benchmarks/ highlights.json and the format of each implementation's benchmarks/results/*.json
+scripts/   check_benchmarks.py: checks the benchmark JSON against the README tables
 .github/   CI: one workflow per implementation, each triggered only by changes to its own code
 ```
 
