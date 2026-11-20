@@ -24,6 +24,10 @@ updates:
       npm:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # Types track the oldest supported Node.js (engines.node), not the latest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /python
@@ -91,3 +95,6 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # The ref selects the Rust toolchain (stable, or the MSRV), not an action version.
+      - dependency-name: "dtolnay/rust-toolchain"
