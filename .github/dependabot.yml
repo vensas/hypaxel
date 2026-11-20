@@ -95,6 +95,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-    ignore:
-      # The ref selects the Rust toolchain (stable, or the MSRV), not an action version.
-      - dependency-name: "dtolnay/rust-toolchain"
