@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 280" width="960" height="280" role="img" aria-label="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, Go, Java and PHP" shape-rendering="crispEdges">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 280" width="960" height="280" role="img" aria-label="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, browsers (WebAssembly), Go, Java and PHP" shape-rendering="crispEdges">
 <style>
 .l{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px;fill:#4b5b7a;text-anchor:middle}
 .t{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;font-weight:600;fill:#9fb0c8}
@@ -275,5 +275,5 @@
 <rect x="881" y="201" width="19" height="19" fill="#15803d" class="s" style="animation-delay:2.80s"/>
 <rect class="c" x="900" y="200" width="21" height="21" fill="none" stroke="#86efac" stroke-width="2"/>
 <rect x="81" y="241" width="819" height="19" fill="#0b1220"/>
-<text class="t" x="86" y="255">=STREAM("xlsx", ".NET", "Rust", "Python", "Node.js", "Go", "Java", "PHP")</text>
+<text class="t" x="86" y="255">=STREAM("xlsx", ".NET", "Rust", "Python", "Node.js", "WebAssembly", "Go", "Java", "PHP")</text>
 </svg>

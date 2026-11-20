@@ -23,7 +23,7 @@ def col_name(i):
     return s
 
 o = []
-o.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, Go, Java and PHP" shape-rendering="crispEdges">')
+o.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, browsers (WebAssembly), Go, Java and PHP" shape-rendering="crispEdges">')
 o.append("""<style>
 .l{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px;fill:%s;text-anchor:middle}
 .t{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:15px;font-weight:600;fill:#9fb0c8}
@@ -69,6 +69,6 @@ o.append(f'<rect class="c" x="{cx*C}" y="{sy*C}" width="{C+1}" height="{C+1}" fi
 
 ty = 12
 o.append(f'<rect x="{x0*C+1}" y="{ty*C+1}" width="{n*C-1}" height="{C-1}" fill="{BG}"/>')
-o.append(f'<text class="t" x="{x0*C+6}" y="{ty*C+15}">=STREAM("xlsx", ".NET", "Rust", "Python", "Node.js", "Go", "Java", "PHP")</text>')
+o.append(f'<text class="t" x="{x0*C+6}" y="{ty*C+15}">=STREAM("xlsx", ".NET", "Rust", "Python", "Node.js", "WebAssembly", "Go", "Java", "PHP")</text>')
 o.append("</svg>")
 open(sys.argv[1], "w", encoding="utf-8").write("\n".join(o) + "\n")
