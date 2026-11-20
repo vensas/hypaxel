@@ -184,6 +184,7 @@ public readonly struct ExcelDateTime : IEquatable<ExcelDateTime>
 #pragma warning restore CS1591
 
     /// <summary>Days since 0001-01-01 (day 1), proleptic Gregorian.</summary>
+    /// <remarks>Howard Hinnant's <c>days_from_civil</c>: https://howardhinnant.github.io/date_algorithms.html</remarks>
     internal static long DaysFromCe(long year, int month, int day)
     {
         var y = month <= 2 ? year - 1 : year;

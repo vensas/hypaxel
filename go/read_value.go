@@ -242,6 +242,8 @@ func appendPadded(dst []byte, n, width int) []byte {
 }
 
 // daysFromCivil returns the days from the Unix epoch to a proleptic Gregorian date.
+//
+// Howard Hinnant's days_from_civil: https://howardhinnant.github.io/date_algorithms.html
 func daysFromCivil(y int64, m, d int) int64 {
 	if m <= 2 {
 		y--

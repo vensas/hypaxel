@@ -532,7 +532,9 @@ struct DurationCapture<'a> {
     style: StyleId,
 }
 
-/// Days from 0001-01-01 (= day 1), proleptic Gregorian (H. Hinnant's `days_from_civil`).
+/// Days from 0001-01-01 (= day 1), proleptic Gregorian.
+///
+/// Howard Hinnant's `days_from_civil`: <https://howardhinnant.github.io/date_algorithms.html>
 fn days_from_ce(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
