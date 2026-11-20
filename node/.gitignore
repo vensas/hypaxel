@@ -4,3 +4,4 @@
 /binding.js
 /binding.d.ts
 *.node
+/ts/wasm

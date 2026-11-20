@@ -1,0 +1,20 @@
+[package]
+name = "hypaxel-js-engine"
+description = "Engine shared by the hypaxel Node.js and WebAssembly bindings: option parsing and the binary cell-batch decoder."
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+publish = false
+
+[features]
+## Deserialize the option structs from camelCase JavaScript objects.
+serde = ["dep:serde"]
+
+[dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+hypaxel = { version = "0.3.0", path = "../../rust/hypaxel", default-features = false, features = ["chrono"] }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+
+[dev-dependencies]
+zip = { version = "9.7.0", default-features = false, features = ["deflate"] }

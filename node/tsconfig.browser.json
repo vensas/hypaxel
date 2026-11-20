@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [],
+    "outDir": "lib/browser"
+  },
+  "include": [
+    "ts/core.ts",
+    "ts/browser.ts"
+  ]
+}
