@@ -152,6 +152,8 @@ pub(crate) const EPOCH_1900: i64 = 693_594;
 pub(crate) const EPOCH_1904: i64 = 695_056;
 
 /// Days since 0001-01-01 (where 0001-01-01 is day 1), proleptic Gregorian.
+///
+/// Howard Hinnant's `days_from_civil`: <https://howardhinnant.github.io/date_algorithms.html>
 pub(crate) fn days_from_ce(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);
@@ -162,6 +164,7 @@ pub(crate) fn days_from_ce(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468 + 719_163
 }
 
+/// Howard Hinnant's `civil_from_days`: <https://howardhinnant.github.io/date_algorithms.html>
 fn civil_from_days(days_from_ce: i64) -> (i64, u32, u32) {
     let z = days_from_ce - 719_163 + 719_468;
     let era = z.div_euclid(146_097);

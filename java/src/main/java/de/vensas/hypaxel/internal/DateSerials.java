@@ -64,7 +64,10 @@ public final class DateSerials {
         return (long) whole * MILLIS_PER_DAY + (fraction < 0 ? -rounded : rounded);
     }
 
-    /** Days since 0001-01-01 (day 1), proleptic Gregorian, without validating the day of the month. */
+    /**
+     * Days since 0001-01-01 (day 1), proleptic Gregorian, without validating the day of the month.
+     * Howard Hinnant's {@code days_from_civil}: https://howardhinnant.github.io/date_algorithms.html
+     */
     static long daysFromCe(long y, int m, int d) {
         y = m <= 2 ? y - 1 : y;
         long era = Math.floorDiv(y, 400);
