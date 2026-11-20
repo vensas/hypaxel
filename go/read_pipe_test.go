@@ -54,9 +54,8 @@ func TestConcurrentInflateLeavesNoGoroutines(t *testing.T) {
 	}
 	noErr(t, rows.Close())
 	noErr(t, rows.Close())
-	if n := runtime.NumGoroutine(); n != base {
-		t.Errorf("%d goroutines after Close, want %d", n, base)
-	}
+	// Close returns once the goroutine has signalled exit, which can be just before it is gone.
+	settles(t, base)
 	if rows.Next() {
 		t.Error("Next after Close")
 	}
