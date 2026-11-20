@@ -1,0 +1,93 @@
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directories: ["/rust", "/node", "/python"]
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /node
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: nuget
+    directory: /dotnet
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      nuget:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: maven
+    directories: ["/java", "/java/benchmarks"]
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      maven:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: gomod
+    directories: ["/go", "/go/tests"]
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      gomod:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: composer
+    directory: /php
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      composer:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
