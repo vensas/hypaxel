@@ -4,6 +4,7 @@
 //   node benchmarks/bench.mjs 1000000    # 1,000,000 rows (skips the non-streaming ExcelJS case)
 
 import { execFileSync } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 import { Writable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import ExcelJS from 'exceljs'
 
 import { stream, toBufferSync } from '../lib/index.js'
+import * as wasm from '../lib/browser/browser.js'
 
 const CATEGORIES = ['Hardware', 'Software', 'Services', 'Consulting', 'Support', 'Training']
 const START = Date.UTC(2024, 0, 1)
@@ -57,6 +59,10 @@ const CASES = {
     await pipeline(stream(rows(count)), sink)
     return sink.bytes
   },
+  'hypaxel (WebAssembly), arrays to buffer': async (count) => {
+    wasm.initSync(await readFile(new URL('../lib/browser/wasm/hypaxel_bg.wasm', import.meta.url)))
+    return wasm.toBufferSync(rows(count)).length
+  },
   'ExcelJS, streaming writer': async (count) => {
     const sink = new Counter()
     const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: sink, useSharedStrings: false, useStyles: false })
@@ -89,6 +95,6 @@ if (process.argv[2] === '--case') {
     const output = execFileSync(process.execPath, [fileURLToPath(import.meta.url), '--case', name, String(count)], { encoding: 'utf8' })
     const { ms, bytes, rss } = JSON.parse(output)
     const megabytes = (value) => (value / 1024 / 1024).toFixed(1).padStart(8)
-    console.log(`${name.padEnd(30)} ${ms.toFixed(0).padStart(8)} ms  ${megabytes(rss * 1024)} MB peak RSS  ${megabytes(bytes)} MB file`)
+    console.log(`${name.padEnd(40)} ${ms.toFixed(0).padStart(8)} ms  ${megabytes(rss * 1024)} MB peak RSS  ${megabytes(bytes)} MB file`)
   }
 }

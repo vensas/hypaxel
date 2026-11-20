@@ -1,0 +1,59 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>hypaxel browser test</title>
+<script src="/node_modules/jszip/dist/jszip.min.js"></script>
+<script type="module">
+  const checks = []
+  const check = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), detail })
+
+  async function sheetXml(bytes, index = 1) {
+    const zip = await JSZip.loadAsync(bytes)
+    return zip.file(`xl/worksheets/sheet${index}.xml`).async('string')
+  }
+
+  try {
+    const hypaxel = await import('/lib/browser/browser.js')
+    const { Writer, Formula, Styled, XlsxError, CONTENT_TYPE, init, toBlob, toBuffer, webStream, columnName } = hypaxel
+
+    let threw = false
+    try {
+      new Writer()
+    } catch (error) {
+      threw = error instanceof XlsxError && /init\(\)/.test(error.message)
+    }
+    check('Writer before init() throws a clear XlsxError', threw)
+
+    await init()
+    check('init() loads the module from its default URL', columnName(28) === 'AB')
+
+    const writer = new Writer({ dates: 'utc' })
+    const money = writer.addStyle({ numFormat: '#,##0.00', bold: true })
+    const sheet = writer.addWorksheet('Browser', { freezeRows: 1 })
+    sheet.writeRow(['name', 'amount', 'when', 'formula'])
+    sheet.writeRow(['Grüße 🚀', new Styled(1234.5, money), new Date(Date.UTC(2024, 0, 2)), new Formula('B2*2')])
+    const bytes = writer.finish()
+    check('Writer.finish returns a Uint8Array zip', bytes instanceof Uint8Array && bytes[0] === 0x50 && bytes[1] === 0x4b)
+    const xml = await sheetXml(bytes)
+    check('cells round-trip', xml.includes('Grüße 🚀') && xml.includes('<v>1234.5</v>') && xml.includes('<f>B2*2</f>') && xml.includes('<v>45293</v>'), xml.slice(0, 400))
+
+    const blob = await toBlob(
+      (function* () {
+        for (let i = 0; i < 50_000; i++) yield { id: i, label: `row ${i}`, value: i / 3 }
+      })(),
+    )
+    check('toBlob has the XLSX content type', blob.type === CONTENT_TYPE)
+    const big = await sheetXml(await blob.arrayBuffer())
+    check('toBlob writes every row', big.includes('row 49999') && big.includes('<v>49999</v>'))
+
+    const parts = []
+    const reader = webStream([[1], [2], [3]]).getReader()
+    for (let next = await reader.read(); !next.done; next = await reader.read()) parts.push(next.value)
+    const streamed = new Uint8Array(await new Blob(parts).arrayBuffer())
+    const buffered = await toBuffer([[1], [2], [3]])
+    check('webStream and toBuffer agree', streamed.length === buffered.length && streamed.every((b, i) => b === buffered[i]))
+  } catch (error) {
+    check('no unexpected error', false, String(error && error.stack ? error.stack : error))
+  }
+
+  await fetch('/result', { method: 'POST', body: JSON.stringify({ userAgent: navigator.userAgent, checks }) })
+</script>

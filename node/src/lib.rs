@@ -1,39 +1,18 @@
 //! Node.js bindings for the hypaxel XLSX writer.
 //!
-//! The public API lives in `node/ts/`. This module is the native core: a writer that keeps its
-//! output in memory and takes cells as a compact binary batch, so a whole batch of rows crosses
-//! the JavaScript boundary in one call.
+//! The public API lives in `node/ts/`. This module adapts [`hypaxel_js_engine::Engine`], which the
+//! WebAssembly build in `node/wasm` shares, to N-API.
 
-use chrono::DateTime;
-use hypaxel::{
-    Alignment, AutoFit, Blank, Border, BorderLine, BorderStyle, Color, Formula, HAlign, Options, RowOptions, SheetOptions, StringStorage,
-    Style, StyleId, Table, TableStyle, VAlign, XlsxWriter,
-};
+use hypaxel_js_engine::{Engine, RowConfig, SheetConfig, StyleConfig, TableConfig, WriterConfig};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-const TAG_END_ROW: u8 = 0;
-const TAG_BLANK: u8 = 1;
-const TAG_NUMBER: u8 = 2;
-const TAG_STRING: u8 = 3;
-const TAG_TRUE: u8 = 4;
-const TAG_FALSE: u8 = 5;
-const TAG_DATE: u8 = 6;
-const TAG_FORMULA: u8 = 7;
-const TAG_STYLE: u8 = 8;
-const TAG_ROW_STYLE: u8 = 9;
-const TAG_SKIP: u8 = 10;
-
-fn err(message: impl Into<String>) -> Error {
-    Error::new(Status::GenericFailure, message.into())
-}
-
-fn invalid(message: impl Into<String>) -> Error {
-    Error::new(Status::InvalidArg, message.into())
-}
-
-fn core(e: hypaxel::Error) -> Error {
-    err(e.to_string())
+fn to_napi(e: hypaxel_js_engine::Error) -> Error {
+    let status = match e {
+        hypaxel_js_engine::Error::Invalid(_) => Status::InvalidArg,
+        hypaxel_js_engine::Error::Failed(_) => Status::GenericFailure,
+    };
+    Error::new(status, e.to_string())
 }
 
 #[napi(object)]
@@ -44,6 +23,18 @@ pub struct NativeWriterOptions {
     pub flush_threshold: Option<u32>,
     pub date1904: Option<bool>,
     pub cell_references: Option<bool>,
+}
+
+impl From<NativeWriterOptions> for WriterConfig {
+    fn from(o: NativeWriterOptions) -> Self {
+        WriterConfig {
+            compression_level: o.compression_level,
+            shared_strings: o.shared_strings,
+            flush_threshold: o.flush_threshold,
+            date1904: o.date1904,
+            cell_references: o.cell_references,
+        }
+    }
 }
 
 #[napi(object)]
@@ -68,6 +59,30 @@ pub struct NativeStyleOptions {
     pub num_format: Option<String>,
 }
 
+impl From<NativeStyleOptions> for StyleConfig {
+    fn from(o: NativeStyleOptions) -> Self {
+        StyleConfig {
+            bold: o.bold,
+            italic: o.italic,
+            underline: o.underline,
+            strikethrough: o.strikethrough,
+            font_name: o.font_name,
+            font_size: o.font_size,
+            font_color: o.font_color,
+            fill: o.fill,
+            border: o.border,
+            border_color: o.border_color,
+            border_bottom: o.border_bottom,
+            align: o.align,
+            valign: o.valign,
+            wrap: o.wrap,
+            indent: o.indent,
+            rotation: o.rotation,
+            num_format: o.num_format,
+        }
+    }
+}
+
 #[napi(object)]
 #[derive(Default)]
 pub struct NativeSheetOptions {
@@ -84,6 +99,24 @@ pub struct NativeSheetOptions {
     pub outline_summary_above: Option<bool>,
 }
 
+impl From<NativeSheetOptions> for SheetConfig {
+    fn from(o: NativeSheetOptions) -> Self {
+        SheetConfig {
+            freeze_rows: o.freeze_rows,
+            freeze_columns: o.freeze_columns,
+            column_widths: o.column_widths,
+            hidden: o.hidden,
+            show_grid_lines: o.show_grid_lines,
+            tab_color: o.tab_color,
+            autofit: o.autofit,
+            autofit_sample_rows: o.autofit_sample_rows,
+            autofit_max_width: o.autofit_max_width,
+            row_outline_levels: o.row_outline_levels,
+            outline_summary_above: o.outline_summary_above,
+        }
+    }
+}
+
 #[napi(object)]
 #[derive(Default)]
 pub struct NativeRowOptions {
@@ -92,6 +125,12 @@ pub struct NativeRowOptions {
     pub outline_level: Option<u8>,
     pub hidden: Option<bool>,
     pub collapsed: Option<bool>,
+}
+
+impl From<NativeRowOptions> for RowConfig {
+    fn from(o: NativeRowOptions) -> Self {
+        RowConfig { height: o.height, style: o.style, outline_level: o.outline_level, hidden: o.hidden, collapsed: o.collapsed }
+    }
 }
 
 #[napi(object)]
@@ -109,300 +148,56 @@ pub struct NativeTableOptions {
     pub last_column: Option<bool>,
 }
 
-fn parse_table_style(name: Option<&str>) -> Result<TableStyle> {
-    let Some(name) = name else { return Ok(TableStyle::default()) };
-    if name.eq_ignore_ascii_case("none") {
-        return Ok(TableStyle::None);
-    }
-    let invalid = || invalid(format!("unknown table style {name:?}; expected e.g. 'TableStyleMedium2' or 'none'"));
-    let rest = name.strip_prefix("TableStyle").ok_or_else(invalid)?;
-    let (kind, number): (fn(u8) -> TableStyle, &str) = if let Some(n) = rest.strip_prefix("Light") {
-        (TableStyle::Light, n)
-    } else if let Some(n) = rest.strip_prefix("Medium") {
-        (TableStyle::Medium, n)
-    } else if let Some(n) = rest.strip_prefix("Dark") {
-        (TableStyle::Dark, n)
-    } else {
-        return Err(invalid());
-    };
-    Ok(kind(number.parse().map_err(|_| invalid())?))
-}
-
-fn parse_color(s: &str) -> Result<Color> {
-    Color::hex(s).ok_or_else(|| invalid(format!("invalid color {s:?}; expected '#RRGGBB' or '#AARRGGBB'")))
-}
-
-fn parse_border(s: &str) -> Result<BorderStyle> {
-    Ok(match s {
-        "none" => BorderStyle::None,
-        "thin" => BorderStyle::Thin,
-        "medium" => BorderStyle::Medium,
-        "dashed" => BorderStyle::Dashed,
-        "dotted" => BorderStyle::Dotted,
-        "thick" => BorderStyle::Thick,
-        "double" => BorderStyle::Double,
-        "hair" => BorderStyle::Hair,
-        "mediumDashed" => BorderStyle::MediumDashed,
-        "dashDot" => BorderStyle::DashDot,
-        "mediumDashDot" => BorderStyle::MediumDashDot,
-        "dashDotDot" => BorderStyle::DashDotDot,
-        "mediumDashDotDot" => BorderStyle::MediumDashDotDot,
-        "slantDashDot" => BorderStyle::SlantDashDot,
-        other => return Err(invalid(format!("unknown border style {other:?}"))),
-    })
-}
-
-fn parse_halign(s: &str) -> Result<HAlign> {
-    Ok(match s {
-        "general" => HAlign::General,
-        "left" => HAlign::Left,
-        "center" => HAlign::Center,
-        "right" => HAlign::Right,
-        "fill" => HAlign::Fill,
-        "justify" => HAlign::Justify,
-        "centerContinuous" => HAlign::CenterContinuous,
-        "distributed" => HAlign::Distributed,
-        other => return Err(invalid(format!("unknown align {other:?}"))),
-    })
-}
-
-fn parse_valign(s: &str) -> Result<VAlign> {
-    Ok(match s {
-        "bottom" => VAlign::Bottom,
-        "top" => VAlign::Top,
-        "center" => VAlign::Center,
-        "justify" => VAlign::Justify,
-        "distributed" => VAlign::Distributed,
-        other => return Err(invalid(format!("unknown valign {other:?}"))),
-    })
-}
-
-fn build_style(o: NativeStyleOptions) -> Result<Style> {
-    let mut style = Style::new();
-    let (bold, italic) = (o.bold.unwrap_or(false), o.italic.unwrap_or(false));
-    let (underline, strikethrough) = (o.underline.unwrap_or(false), o.strikethrough.unwrap_or(false));
-    if bold || italic || underline || strikethrough || o.font_name.is_some() || o.font_size.is_some() || o.font_color.is_some() {
-        let mut font = hypaxel::Font { bold, italic, underline, strikethrough, ..Default::default() };
-        if let Some(name) = o.font_name {
-            font.name = name.into();
+impl From<NativeTableOptions> for TableConfig {
+    fn from(o: NativeTableOptions) -> Self {
+        TableConfig {
+            name: o.name,
+            columns: o.columns,
+            style: o.style,
+            header_row: o.header_row,
+            autofilter: o.autofilter,
+            row_stripes: o.row_stripes,
+            column_stripes: o.column_stripes,
+            first_column: o.first_column,
+            last_column: o.last_column,
         }
-        if let Some(size) = o.font_size {
-            font = font.size(size);
-        }
-        if let Some(c) = &o.font_color {
-            font.color = Some(parse_color(c)?);
-        }
-        style = style.font(font);
-    }
-    if let Some(c) = &o.fill {
-        style = style.fill(parse_color(c)?);
-    }
-    let color = o.border_color.as_deref().map(parse_color).transpose()?;
-    if o.border.is_some() || o.border_bottom.is_some() {
-        let mut border = match &o.border {
-            Some(s) => Border::all(parse_border(s)?, color),
-            None => Border::default(),
-        };
-        if let Some(s) = &o.border_bottom {
-            border.bottom = BorderLine { style: parse_border(s)?, color };
-        }
-        style = style.border(border);
-    }
-    let (wrap, indent, rotation) = (o.wrap.unwrap_or(false), o.indent.unwrap_or(0), o.rotation.unwrap_or(0));
-    if o.align.is_some() || o.valign.is_some() || wrap || indent != 0 || rotation != 0 {
-        style = style.alignment(Alignment {
-            horizontal: parse_halign(o.align.as_deref().unwrap_or("general"))?,
-            vertical: parse_valign(o.valign.as_deref().unwrap_or("bottom"))?,
-            wrap_text: wrap,
-            shrink_to_fit: false,
-            indent,
-            rotation,
-        });
-    }
-    if let Some(code) = o.num_format {
-        style = style.num_format(code);
-    }
-    Ok(style)
-}
-
-struct Reader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn take(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self.pos.checked_add(len).filter(|&end| end <= self.data.len()).ok_or_else(|| invalid("truncated cell batch"))?;
-        let bytes = &self.data[self.pos..end];
-        self.pos = end;
-        Ok(bytes)
-    }
-
-    fn u32(&mut self) -> Result<u32> {
-        let bytes = self.take(4)?;
-        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-    }
-
-    fn f64(&mut self) -> Result<f64> {
-        let bytes = self.take(8)?;
-        Ok(f64::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]]))
-    }
-
-    fn str(&mut self) -> Result<&'a str> {
-        let len = self.u32()? as usize;
-        std::str::from_utf8(self.take(len)?).map_err(|_| invalid("cell batch contains invalid UTF-8"))
     }
 }
 
 /// In-memory XLSX writer. Output accumulates in a buffer that JavaScript takes with `drain`.
 #[napi]
 pub struct NativeWriter {
-    inner: Option<XlsxWriter<Vec<u8>>>,
-    styles: Vec<StyleId>,
-}
-
-impl NativeWriter {
-    fn inner(&mut self) -> Result<&mut XlsxWriter<Vec<u8>>> {
-        self.inner.as_mut().ok_or_else(|| err("the workbook is already finished"))
-    }
-
-    fn style(&self, index: u32) -> Result<StyleId> {
-        self.styles.get(index as usize).copied().ok_or_else(|| invalid("the style does not belong to this writer"))
-    }
+    engine: Engine,
 }
 
 #[napi]
 impl NativeWriter {
     #[napi(constructor)]
     pub fn new(options: Option<NativeWriterOptions>) -> Self {
-        let o = options.unwrap_or_default();
-        let flush_threshold = o.flush_threshold.unwrap_or(65536) as usize;
-        let options = Options::new()
-            .compression_level(o.compression_level.unwrap_or(1))
-            .string_storage(if o.shared_strings.unwrap_or(false) { StringStorage::Shared } else { StringStorage::Inline })
-            .flush_threshold(flush_threshold)
-            .date_1904(o.date1904.unwrap_or(false))
-            .cell_references(o.cell_references.unwrap_or(false));
-        NativeWriter {
-            inner: Some(XlsxWriter::with_options(Vec::with_capacity(flush_threshold * 2), options)),
-            styles: vec![StyleId::DEFAULT],
-        }
+        NativeWriter { engine: Engine::new(options.unwrap_or_default().into()) }
     }
 
     /// Registers a cell format and returns its handle. Handle 0 is the default style.
     #[napi]
     pub fn add_style(&mut self, options: NativeStyleOptions) -> Result<u32> {
-        let style = build_style(options)?;
-        let id = self.inner()?.add_style(&style);
-        self.styles.push(id);
-        Ok((self.styles.len() - 1) as u32)
+        self.engine.add_style(options.into()).map_err(to_napi)
     }
 
     #[napi]
     pub fn add_worksheet(&mut self, name: String, options: Option<NativeSheetOptions>) -> Result<()> {
-        let o = options.unwrap_or_default();
-        let mut sheet = SheetOptions::new().freeze_rows(o.freeze_rows.unwrap_or(0)).freeze_columns(o.freeze_columns.unwrap_or(0));
-        if let Some(widths) = &o.column_widths {
-            sheet = sheet.column_widths(widths);
-        }
-        if o.hidden.unwrap_or(false) {
-            sheet = sheet.hidden();
-        }
-        if !o.show_grid_lines.unwrap_or(true) {
-            sheet = sheet.hide_grid_lines();
-        }
-        if let Some(c) = &o.tab_color {
-            sheet = sheet.tab_color(parse_color(c)?);
-        }
-        if o.autofit.unwrap_or(false) {
-            let defaults = AutoFit::default();
-            sheet = sheet.autofit(
-                AutoFit::new()
-                    .sample_rows(o.autofit_sample_rows.unwrap_or(defaults.sample_rows))
-                    .max_width(o.autofit_max_width.unwrap_or(defaults.max_width)),
-            );
-        }
-        sheet = sheet.row_outline_levels(o.row_outline_levels.unwrap_or(0));
-        if o.outline_summary_above.unwrap_or(false) {
-            sheet = sheet.outline_summary_above();
-        }
-        self.inner()?.add_worksheet_with(&name, &sheet).map_err(core)?;
-        Ok(())
+        self.engine.add_worksheet(&name, options.unwrap_or_default().into()).map_err(to_napi)
     }
 
     /// Writes a batch of cells encoded by the JavaScript `RowEncoder`. Returns the rows completed.
     #[napi]
     pub fn write_batch(&mut self, data: &[u8]) -> Result<u32> {
-        let mut reader = Reader { data, pos: 0 };
-        let mut rows = 0u32;
-        let mut row_style = StyleId::DEFAULT;
-        let mut next_style: Option<StyleId> = None;
-        while reader.pos < data.len() {
-            let tag = reader.take(1)?[0];
-            if tag == TAG_STYLE {
-                next_style = Some(self.style(reader.u32()?)?);
-                continue;
-            }
-            if tag == TAG_ROW_STYLE {
-                row_style = self.style(reader.u32()?)?;
-                continue;
-            }
-            let style = next_style.take().unwrap_or(row_style);
-            let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-            match tag {
-                TAG_END_ROW => {
-                    sheet.end_row().map_err(core)?;
-                    row_style = StyleId::DEFAULT;
-                    rows += 1;
-                }
-                TAG_BLANK => {
-                    sheet.write_styled(Blank, style);
-                }
-                TAG_NUMBER => {
-                    sheet.write_styled(reader.f64()?, style);
-                }
-                TAG_STRING => {
-                    sheet.write_styled(reader.str()?, style);
-                }
-                TAG_TRUE => {
-                    sheet.write_styled(true, style);
-                }
-                TAG_FALSE => {
-                    sheet.write_styled(false, style);
-                }
-                TAG_DATE => {
-                    let millis = reader.f64()?;
-                    match millis.is_finite().then(|| DateTime::from_timestamp_millis(millis as i64)).flatten() {
-                        Some(instant) => sheet.write_styled(instant.naive_utc(), style),
-                        None => sheet.write_styled(Blank, style),
-                    };
-                }
-                TAG_FORMULA => {
-                    sheet.write_styled(Formula(reader.str()?), style);
-                }
-                TAG_SKIP => {
-                    sheet.skip_cells(reader.u32()?);
-                }
-                other => return Err(invalid(format!("unknown cell tag {other}"))),
-            }
-        }
-        Ok(rows)
+        self.engine.write_batch(data).map_err(to_napi)
     }
 
     /// Starts the next row explicitly, to set its height (points), style, outline level or hidden state.
     #[napi]
     pub fn begin_row(&mut self, options: Option<NativeRowOptions>) -> Result<()> {
-        let o = options.unwrap_or_default();
-        let row = RowOptions {
-            height: o.height,
-            style: self.style(o.style.unwrap_or(0))?,
-            outline_level: o.outline_level.unwrap_or(0),
-            hidden: o.hidden.unwrap_or(false),
-            collapsed: o.collapsed.unwrap_or(false),
-        };
-        let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        sheet.begin_row_with(&row).map_err(core)?;
-        Ok(())
+        self.engine.begin_row(options.unwrap_or_default().into()).map_err(to_napi)
     }
 
     #[napi]
@@ -414,56 +209,34 @@ impl NativeWriter {
         last_col: u32,
         options: Option<NativeTableOptions>,
     ) -> Result<()> {
-        let o = options.unwrap_or_default();
-        let mut table = Table::new(first_row, first_col, last_row, last_col)
-            .columns(o.columns.unwrap_or_default())
-            .style(parse_table_style(o.style.as_deref())?)
-            .header_row(o.header_row.unwrap_or(true))
-            .autofilter(o.autofilter.unwrap_or(true))
-            .row_stripes(o.row_stripes.unwrap_or(true))
-            .column_stripes(o.column_stripes.unwrap_or(false))
-            .highlight_first_column(o.first_column.unwrap_or(false))
-            .highlight_last_column(o.last_column.unwrap_or(false));
-        if let Some(name) = o.name {
-            table = table.name(name);
-        }
-        let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        sheet.add_table(&table).map_err(core)?;
-        Ok(())
+        self.engine.add_table(first_row, first_col, last_row, last_col, options.unwrap_or_default().into()).map_err(to_napi)
     }
 
     #[napi]
     pub fn skip_rows(&mut self, count: u32) -> Result<()> {
-        let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        sheet.skip_rows(count);
-        Ok(())
+        self.engine.skip_rows(count).map_err(to_napi)
     }
 
     #[napi]
     pub fn merge_cells(&mut self, first_row: u32, first_col: u32, last_row: u32, last_col: u32) -> Result<()> {
-        let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        sheet.merge_cells(first_row, first_col, last_row, last_col).map_err(core)?;
-        Ok(())
+        self.engine.merge_cells(first_row, first_col, last_row, last_col).map_err(to_napi)
     }
 
     #[napi]
     pub fn autofilter(&mut self, first_row: u32, first_col: u32, last_row: u32, last_col: u32) -> Result<()> {
-        let mut sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        sheet.autofilter(first_row, first_col, last_row, last_col).map_err(core)?;
-        Ok(())
+        self.engine.autofilter(first_row, first_col, last_row, last_col).map_err(to_napi)
     }
 
     /// 1-based number of the last written row of the current worksheet (0 before the first row).
     #[napi]
     pub fn row(&mut self) -> Result<u32> {
-        let sheet = self.inner()?.current_worksheet().ok_or_else(|| err("no open worksheet"))?;
-        Ok(sheet.row())
+        self.engine.row().map_err(to_napi)
     }
 
     /// Number of compressed bytes waiting to be drained.
     #[napi]
     pub fn buffered(&mut self) -> Result<u32> {
-        Ok(self.inner()?.get_ref().len() as u32)
+        self.engine.buffered().map_err(to_napi)
     }
 
     /// Returns and removes the compressed bytes produced so far.
@@ -473,7 +246,7 @@ impl NativeWriter {
     /// chunks too late and lets memory grow with the size of the file.
     #[napi]
     pub fn drain<'env>(&mut self, env: &'env Env) -> Result<BufferSlice<'env>> {
-        let buffer = self.inner()?.get_mut();
+        let buffer = self.engine.output().map_err(to_napi)?;
         let chunk = BufferSlice::copy_from(env, buffer.as_slice())?;
         buffer.clear();
         Ok(chunk)
@@ -482,21 +255,17 @@ impl NativeWriter {
     /// Completes the workbook and returns the remaining bytes.
     #[napi]
     pub fn finish<'env>(&mut self, env: &'env Env) -> Result<BufferSlice<'env>> {
-        let inner = self.inner.take().ok_or_else(|| err("the workbook is already finished"))?;
-        BufferSlice::copy_from(env, inner.finish().map_err(core)?.as_slice())
+        BufferSlice::copy_from(env, self.engine.finish().map_err(to_napi)?.as_slice())
     }
 
     #[napi(getter)]
     pub fn finished(&self) -> bool {
-        self.inner.is_none()
+        self.engine.finished()
     }
 }
 
 /// Returns the column letters for a 1-based column index (1 → "A", 27 → "AA").
 #[napi]
 pub fn column_name(column: u32) -> Result<String> {
-    if !(1..=hypaxel::MAX_COLUMNS).contains(&column) {
-        return Err(invalid("column must be within 1..=16384"));
-    }
-    Ok(hypaxel::column_name(column))
+    hypaxel_js_engine::column_name(column).map_err(to_napi)
 }

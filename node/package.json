@@ -1,7 +1,7 @@
 {
   "name": "hypaxel",
   "version": "0.3.0",
-  "description": "High-performance, constant-memory streaming XLSX (Excel) writer for Node.js, powered by Rust.",
+  "description": "High-performance, constant-memory streaming XLSX (Excel) writer for Node.js and browsers, powered by Rust (native in Node.js, WebAssembly in browsers).",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -15,15 +15,34 @@
     "streaming",
     "express",
     "fastify",
-    "napi"
+    "napi",
+    "browser",
+    "wasm",
+    "webassembly"
   ],
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
     ".": {
-      "types": "./lib/index.d.ts",
-      "default": "./lib/index.js"
-    }
+      "browser": {
+        "types": "./lib/browser/browser.d.ts",
+        "default": "./lib/browser/browser.js"
+      },
+      "node": {
+        "types": "./lib/index.d.ts",
+        "default": "./lib/index.js"
+      },
+      "default": {
+        "types": "./lib/browser/browser.d.ts",
+        "default": "./lib/browser/browser.js"
+      }
+    },
+    "./wasm": {
+      "types": "./lib/browser/browser.d.ts",
+      "default": "./lib/browser/browser.js"
+    },
+    "./hypaxel_bg.wasm": "./lib/browser/wasm/hypaxel_bg.wasm",
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
@@ -49,16 +68,21 @@
   },
   "scripts": {
     "build:native": "napi build --platform --release --js binding.js --dts binding.d.ts",
-    "build:ts": "tsc -p tsconfig.json",
-    "build": "npm run build:native && npm run build:ts",
+    "build:wasm": "cargo build -p hypaxel-wasm --release --target wasm32-unknown-unknown && wasm-bindgen --target web --remove-name-section --remove-producers-section --out-dir ts/wasm --out-name hypaxel target/wasm32-unknown-unknown/release/hypaxel_wasm.wasm",
+    "build:ts": "tsc -p tsconfig.json && tsc -p tsconfig.browser.json && node scripts/finish-browser-build.mjs",
+    "build": "npm run build:native && npm run build:wasm && npm run build:ts",
     "test": "node --test test/*.test.mjs",
-    "bench": "node benchmarks/bench.mjs"
+    "test:browser": "node test/browser/run.mjs",
+    "bench": "node benchmarks/bench.mjs",
+    "bench:browser": "node benchmarks/browser/run.mjs"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.10.12",
     "@types/node": "^22.0.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.2",
-    "typescript": "^5.9.0"
-  }
+    "typescript": "^5.9.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "browser": "lib/browser/browser.js"
 }

@@ -30,6 +30,13 @@ Python, Node.js, .NET, Java, Go and PHP).
   - Accepts Strict Open XML, prefixed namespaces, cells without references, rich and inline text
     and ISO 8601 dates. Rejects DTDs, oversized tokens and ZIP entries that do not match their
     declared size or CRC. Names legacy `.xls`, encrypted and non-spreadsheet files in the error.
+- **Browser support for the Node.js package (WebAssembly).** The `hypaxel` npm package now runs in
+  browsers and other runtimes without native modules on the Rust core compiled to WebAssembly
+  (171 KB gzipped), with the same API as in Node.js. Bundlers pick the build through the `browser` export
+  condition; `hypaxel/wasm` selects it explicitly. Adds `init()` / `initSync()` to load the
+  module, `toBlob()` for downloads, and a pull-based `webStream()`. In Node.js `init()` is a no-op
+  and nothing else changes. Both engines share one Rust crate (`node/engine`) and produce
+  byte-identical files. Browser benchmarks against SheetJS and ExcelJS in headless Chrome.
 - Read benchmarks against each ecosystem's readers: calamine (Rust); openpyxl, python-calamine,
   pandas and fastexcel (Python); Sylvan.Data.Excel, ExcelDataReader and MiniExcel (.NET);
   excelize, xlsxreader and tealeg/xlsx (Go); FastExcel and Apache POI (Java).

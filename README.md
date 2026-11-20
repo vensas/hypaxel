@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, Go, Java and PHP, built for web services. Streaming readers for .NET, Rust, Python, Go and Java.</b>
+  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, browsers (WebAssembly), Go, Java and PHP, built for web services. Streaming readers for .NET, Rust, Python, Go and Java.</b>
 </p>
 
 <p align="center">
@@ -44,7 +44,7 @@ query is still running.
 
 All implementations share one design. .NET, Rust, Go, Java and PHP are independent native engines
 with no runtime dependencies; the Python and Node.js packages are thin, idiomatic layers over the
-Rust core.
+Rust core. The Node.js package also runs in browsers, on the Rust core compiled to WebAssembly.
 
 ## At a glance
 
@@ -54,6 +54,7 @@ Rust core.
 | [Rust](rust/README.md) | `hypaxel`, `hypaxel-axum` | Rust 1.85+ | native | axum: `Xlsx::from_records(...)`, `Xlsx::from_stream(...)` | ~0.73 s | ~11–14x faster than rust_xlsxwriter |
 | [Python](python/README.md) | `hypaxel` | CPython 3.10+ | Rust core (PyO3) | FastAPI/Starlette `XlsxResponse`, Django, Flask | ~0.9 s | ~50x faster than XlsxWriter, ~95x faster than openpyxl |
 | [Node.js](node/README.md) | `hypaxel` | Node.js 22+ | Rust core (napi-rs) | `stream()` for Express, Fastify, Koa; `webStream()` for Next.js, Hono | ~1.2 s | ~6x faster than ExcelJS's streaming writer |
+| [Browsers](node/README.md#browsers) | `hypaxel` | Chrome/Edge 96+, Firefox 79+, Safari 15+ | Rust core (WebAssembly) | `toBlob()` for downloads, `webStream()` | 300k rows: ~0.5 s in Chrome | ~12–15x faster than SheetJS, ~20x faster than ExcelJS |
 | [Go](go/README.md) | `github.com/vensas/hypaxel/go` | Go 1.26+ | native | `hypaxelhttp.Handler`, `hypaxelhttp.Serve` | ~0.9 s | ~5–6x faster than excelize's `StreamWriter` |
 | [Java](java/README.md) | `de.vensas:hypaxel` | Java 17+ | native | any `OutputStream`: Servlet, Spring `StreamingResponseBody` | ~1.2 s | ~2.5–3x faster than FastExcel, ~8–9x faster than Apache POI SXSSF |
 | [PHP](php/README.md) | `vensas/hypaxel` | PHP 8.2+ | native | `Xlsx::download()`, Symfony `StreamedResponse`, Laravel `streamDownload()` | ~4.2 s (~2.9 s with JIT) | ~11x faster than OpenSpout, ~40x faster than PhpSpreadsheet |
@@ -164,7 +165,7 @@ from Excel, LibreOffice and other producers, including Strict Open XML; clear er
 dotnet/    .NET solution: src/, tests/, samples/, benchmarks/
 rust/      Cargo workspace: hypaxel/, hypaxel-axum/
 python/    PyO3 + maturin package over rust/hypaxel: src/ (bindings), hypaxel/ (Python API), tests/, benchmarks/
-node/      napi-rs package over rust/hypaxel: src/ (bindings), ts/ (TypeScript API), test/, benchmarks/
+node/      npm package over rust/hypaxel: engine/ (shared), src/ (napi-rs), wasm/ (WebAssembly), ts/ (TypeScript API), test/, benchmarks/
 go/        Go module: the library, hypaxelhttp/, and tests/ (nested module with read-back tests and benchmarks)
 java/      Maven project: src/, benchmarks/ (separate project)
 php/       Composer package: src/, tests/, benchmarks/, examples/
