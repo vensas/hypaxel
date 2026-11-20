@@ -1,0 +1,38 @@
+name: CLA
+
+# Asks first-time contributors to sign CLA.md and records signatures on the cla-signatures branch.
+# pull_request_target runs in the context of the base repository; the job never checks out pull
+# request code. The action is free for public repositories only, so it is skipped while the
+# repository is private.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed]
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    if: >-
+      !github.event.repository.private && (
+        github.event_name == 'pull_request_target' ||
+        (github.event.issue.pull_request && (
+          github.event.comment.body == 'recheck' ||
+          contains(github.event.comment.body, 'hereby sign the CLA'))))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/contributor-assistant-github-action@b9bd60bf1b766fa48dae03427059187137236239 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/${{ github.repository }}/blob/main/CLA.md
+          path-to-signatures: signatures/cla.json
+          branch: cla-signatures
+          allowlist: esskar,dependabot[bot]
+          signed-commit-message: "chore(cla): $contributorName signed the CLA in $owner/$repo#$pullRequestNo"
+          create-file-commit-message: "chore(cla): create the signature file"

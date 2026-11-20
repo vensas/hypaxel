@@ -182,4 +182,5 @@ Evaluate:
 - Everything in this repository is Apache 2.0. Packages that ship from a subdirectory carry their own copy of `LICENSE` and `NOTICE`; keep them in sync with the root files.
 - Do not add proprietary code, artificial limits, intentionally slow paths, usage tracking or mandatory cloud dependencies.
 - Check the licence of any new dependency, including test and benchmark dependencies, for Apache 2.0 compatibility.
+- Outside contributors sign the [Contributor License Agreement](CLA.md) before their first pull request is merged; the CLA workflow asks for it. Do not merge code from authors who have not signed, and do not copy code from other projects into a contribution.
 - Flag legal or licensing uncertainty for review.
