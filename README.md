@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/banner.svg" alt="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, Go, Java and PHP" width="100%">
+  <img src="docs/assets/banner.svg" alt="Hypaxel: streaming XLSX writers for .NET, Rust, Python, Node.js, browsers (WebAssembly), Go, Java and PHP" width="100%">
 </p>
 
 <p align="center">
@@ -11,6 +11,7 @@
   <img alt="Rust 1.85+" src="https://img.shields.io/badge/Rust-1.85%2B-dea584?style=flat-square">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square">
   <img alt="Node.js 22+" src="https://img.shields.io/badge/Node.js-22%2B-5fa04e?style=flat-square">
+  <img alt="WebAssembly: Chrome/Edge 96+ | Firefox 79+ | Safari 15+" src="https://img.shields.io/badge/WebAssembly-Chrome%2FEdge_96%2B_%7C_Firefox_79%2B_%7C_Safari_15%2B-654ff0?style=flat-square">
   <img alt="Go 1.26+" src="https://img.shields.io/badge/Go-1.26%2B-00add8?style=flat-square">
   <img alt="Java 17+" src="https://img.shields.io/badge/Java-17%2B-e76f00?style=flat-square">
   <img alt="PHP 8.2+" src="https://img.shields.io/badge/PHP-8.2%2B-777bb4?style=flat-square">
@@ -22,6 +23,7 @@
   <a href="rust/README.md">Rust</a> ·
   <a href="python/README.md">Python</a> ·
   <a href="node/README.md">Node.js</a> ·
+  <a href="node/README.md#browsers">Browsers</a> ·
   <a href="go/README.md">Go</a> ·
   <a href="java/README.md">Java</a> ·
   <a href="php/README.md">PHP</a> ·
@@ -108,6 +110,16 @@ app.get('/orders.xlsx', async (req, res) => {
   res.setHeader('Content-Type', CONTENT_TYPE)
   await pipeline(stream(db.orders.cursor()), res)
 })
+```
+
+**Browser (WebAssembly)**
+
+```ts
+import { toBlob } from 'hypaxel'   // bundlers pick the WebAssembly build
+
+const blob = await toBlob(orders, { sheetName: 'Orders' })
+const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'orders.xlsx' })
+link.click()
 ```
 
 **Go / net/http**
