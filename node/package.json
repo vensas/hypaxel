@@ -81,7 +81,7 @@
     "@types/node": "^22.0.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.2",
-    "typescript": "^5.9.0",
+    "typescript": "^7.0.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "browser": "lib/browser/browser.js"
