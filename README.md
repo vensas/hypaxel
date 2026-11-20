@@ -193,6 +193,11 @@ php/       Composer package: src/, tests/, benchmarks/, examples/
 4. ✅ Streaming readers for .NET, Rust, Python, Go and Java; Node.js and PHP when there is demand
 5. Read-modify-write for templates
 
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). First-time
+contributors sign the [Contributor License Agreement](CLA.md) on their pull request.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 vensas GmbH.
