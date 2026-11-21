@@ -30,6 +30,9 @@ public sealed class XlsxReader : IDisposable
 {
     private const int MaxTables = 4096;
 
+    /// <summary>Most relationships to other parts that one part may have. Links to external targets are not kept and do not count.</summary>
+    private const int MaxRelationships = 65_536;
+
     /// <summary>Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes per column on top of its name.</summary>
     private const long MaxTableText = 64 * 1024 * 1024;
     private const string NotAWorkbook = "The package has no workbook part; it may be a Word or PowerPoint file.";
@@ -337,6 +340,11 @@ public sealed class XlsxReader : IDisposable
 
             if (Attribute(attributes, "Id"u8) is { } id && Attribute(attributes, "Type"u8) is { } type && Attribute(attributes, "Target"u8) is { } target)
             {
+                if (rels.Count >= MaxRelationships)
+                {
+                    throw XlsxReadException.LimitExceeded(part, $"The part has more than {MaxRelationships} relationships.");
+                }
+
                 rels.Add(new Relationship(id, type, Resolve(baseDir, target)));
             }
         }

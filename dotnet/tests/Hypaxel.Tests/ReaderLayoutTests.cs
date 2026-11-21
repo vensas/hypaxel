@@ -400,6 +400,37 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void BoundsTheRelationshipsOfAPart()
+    {
+        const string RelsStart = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">";
+        var table = $"""<table xmlns="{Main}" name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns></table>""";
+        var external = """<Relationship Id="x" Type="t/hyperlink" Target="https://example.com" TargetMode="External"/>""";
+        var tableRel = $"""<Relationship Id="rId1" Type="{TableRelType}" Target="../tables/table1.xml"/>""";
+        var links = SingleSheet(
+            $"""<worksheet xmlns="{Main}"><sheetData/></worksheet>""",
+            "",
+            ("xl/worksheets/_rels/sheet1.xml.rels", RelsStart + string.Concat(Enumerable.Repeat(external, 70_000)) + tableRel + "</Relationships>"),
+            ("xl/tables/table1.xml", table));
+        using (var reader = Reader(links))
+        {
+            Assert.Single(reader.GetTables(0));
+        }
+
+        var @internal = """<Relationship Id="x" Type="t/other" Target="other.xml"/>""";
+        var flood = SingleSheet(
+            $"""<worksheet xmlns="{Main}"><sheetData/></worksheet>""",
+            "",
+            ("xl/worksheets/_rels/sheet1.xml.rels", RelsStart + string.Concat(Enumerable.Repeat(@internal, 65_537)) + "</Relationships>"));
+        using (var reader = Reader(flood))
+        {
+            var e = Assert.Throws<XlsxReadException>(() => reader.GetTables(0));
+            Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
+            Assert.Equal("xl/worksheets/_rels/sheet1.xml.rels", e.Part);
+            Assert.Contains("more than 65536 relationships", e.Message);
+        }
+    }
+
+    [Fact]
     public void LayoutIsNotAvailableAfterDisposeUnlessItWasRead()
     {
         var bytes = SheetWithTables("""<cols><col min="1" max="1" width="9" hidden="1"/></cols><sheetData><row><c><v>1</v></c></row></sheetData>""");

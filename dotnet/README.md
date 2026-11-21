@@ -254,7 +254,8 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
   CSV, legacy `.xls`, a password-protected workbook, a Word file), `Malformed` (with the `Part`, and the
   row in the message), `LimitExceeded` or `Unsupported`. Besides `MaxSharedStringsBytes`, fixed limits
   apply: a sheet may have 4,096 tables holding 64 MiB of table and column names in total, a table 16,384
-  columns, and a sheet 16,384 column ranges.
+  columns, a sheet 16,384 column ranges, and a part 65,536 relationships to other parts (links to
+  external targets do not count).
 - **Sheets:** `reader.Sheets` lists every sheet with its `Visibility` (`Visible`, `Hidden`,
   `VeryHidden`) and `Kind` (`Worksheet`, `Chartsheet`, `Other`). `OpenWorksheet(name)` matches exactly,
   then ignoring case. Several worksheets of one reader can be open at once on one thread; use one reader
