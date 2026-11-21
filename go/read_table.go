@@ -157,8 +157,9 @@ func (r *Reader) readTable(part string, budget *int) (Table, error) {
 				return Table{}, x.malformed("the table has no valid cell range")
 			}
 			t.FirstRow, t.FirstColumn, t.LastRow, t.LastColumn = rng[0], rng[1], rng[2], rng[3]
-			if t.Name, ok = decodedAttr(x.attrs, "displayName"); !ok {
-				t.Name, _ = decodedAttr(x.attrs, "name")
+			// Excel escapes table names like other text: T_x0041_ is stored as T_x005f_x0041_.
+			if t.Name, ok = tableName(x.attrs, "displayName"); !ok {
+				t.Name, _ = tableName(x.attrs, "name")
 			}
 			if count, ok := attr(x.attrs, "headerRowCount"); ok {
 				t.NoHeaderRow = string(trimSpace(count)) == "0"
@@ -299,4 +300,14 @@ func parseMeasure(raw []byte) (float64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// tableName decodes a table name attribute, including Excel's _xHHHH_ escapes.
+func tableName(attrs []byte, name string) (string, bool) {
+	raw, ok := attr(attrs, name)
+	if !ok {
+		return "", false
+	}
+	out, msg := decodeText(nil, raw, true, true)
+	return string(out), msg == ""
 }

@@ -887,3 +887,28 @@ func TestReadSheetExportedByNumbers(t *testing.T) {
 		t.Errorf("without WithEmptyRows the first row read should be row 2 (err %v)", first.Err())
 	}
 }
+
+func TestTableNamesThatLookLikeExcelEscapesRoundTrip(t *testing.T) {
+	table := Table{FirstRow: 1, FirstColumn: 1, LastRow: 2, LastColumn: 1, Name: "T_x0041_", Columns: []string{"a_x0042_"}}
+	data := writeBook(t, func(w *Writer) {
+		s, err := w.AddSheet("S")
+		noErr(t, err)
+		noErr(t, s.WriteRow("a_x0042_"))
+		noErr(t, s.WriteRow(1))
+		noErr(t, s.AddTable(table))
+	})
+	tables, err := openBytes(t, data).TablesAt(0)
+	noErr(t, err)
+	if len(tables) != 1 || !reflect.DeepEqual(tables[0], table) {
+		t.Errorf("tables = %+v, want %+v", tables, table)
+	}
+
+	// As Excel saves a table it was told to name T_x0041_: lower-case hex digits.
+	excel := sheetWithTable(t, `<worksheet><sheetData/></worksheet>`,
+		`<table name="T_x005f_x0041_" displayName="T_x005f_x0041_" ref="A1:A2"><tableColumns><tableColumn name="a"/></tableColumns></table>`)
+	tables, err = openBytes(t, excel).TablesAt(0)
+	noErr(t, err)
+	if len(tables) != 1 || tables[0].Name != "T_x0041_" {
+		t.Errorf("Excel-escaped name = %+v, want T_x0041_", tables)
+	}
+}
