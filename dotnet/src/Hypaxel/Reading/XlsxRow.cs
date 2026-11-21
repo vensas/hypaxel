@@ -5,7 +5,8 @@ using Hypaxel.Internal.Reading;
 namespace Hypaxel;
 
 /// <summary>
-/// One worksheet row that has at least one value. The same instance is reused by its
+/// One worksheet row. It has at least one value unless the workbook was opened with
+/// <see cref="XlsxReaderOptions.IncludeEmptyRows"/>. The same instance is reused by its
 /// <see cref="WorksheetReader"/> for every row, so read what you need before advancing; copy values
 /// (<see cref="GetValue"/>, <see cref="GetValues()"/>) to keep them.
 /// </summary>

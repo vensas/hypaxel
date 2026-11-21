@@ -1,11 +1,17 @@
 using System.Globalization;
+using System.Text;
 
 namespace Hypaxel.Internal.Reading;
 
 /// <summary>Reads a table part (<c>xl/tables/tableN.xml</c>) into the <see cref="ExcelTable"/> the writer accepts.</summary>
 internal static class TableReader
 {
-    public static ExcelTable Parse(Utf8XmlReader xml)
+    /// <summary>Bytes charged against the name budget for each column, on top of its name.</summary>
+    private const int ColumnCost = 32;
+
+    /// <param name="xml">The table part.</param>
+    /// <param name="budget">Name bytes the caller still accepts; reduced by what the table holds.</param>
+    public static ExcelTable Parse(Utf8XmlReader xml, ref long budget)
     {
         ExcelTable? table = null;
         List<string>? columns = null;
@@ -49,6 +55,7 @@ internal static class TableReader
                     HasTotalsRow = XmlAttributes.TryGet(attributes, "totalsRowCount"u8, out var totals)
                         && uint.TryParse(Trim(totals), NumberStyles.None, CultureInfo.InvariantCulture, out var totalsRows) && totalsRows > 0,
                 };
+                Charge(xml, ref budget, table.Name is null ? 0 : Encoding.UTF8.GetByteCount(table.Name));
                 descend = true;
             }
             else if (name.SequenceEqual("autoFilter"u8))
@@ -69,7 +76,9 @@ internal static class TableReader
 
                 buffer.Clear();
                 var decoded = XmlAttributes.TryGet(attributes, "name"u8, out var raw) && XmlText.Decode(buffer, raw, entities: true, excelEscapes: true) is null;
-                columns.Add(decoded ? buffer.Span.ToString() : string.Empty);
+                var columnName = decoded ? buffer.Span.ToString() : string.Empty;
+                Charge(xml, ref budget, Encoding.UTF8.GetByteCount(columnName) + ColumnCost);
+                columns.Add(columnName);
             }
             else if (name.SequenceEqual("tableStyleInfo"u8))
             {
@@ -101,6 +110,15 @@ internal static class TableReader
             HighlightFirstColumn = firstColumn,
             HighlightLastColumn = lastColumn,
         };
+    }
+
+    private static void Charge(Utf8XmlReader xml, ref long budget, int cost)
+    {
+        budget -= cost;
+        if (budget < 0)
+        {
+            throw XlsxReadException.LimitExceeded(xml.Part, "The tables of a worksheet hold too many names.");
+        }
     }
 
     internal static bool IsTrue(ReadOnlySpan<byte> raw)

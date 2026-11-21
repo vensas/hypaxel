@@ -40,6 +40,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     private int _scratchLength;
     private readonly List<ColumnWidth> _columnWidths = [];
     private State _state;
+    private bool _layoutUnread;
     private int _previousRow;
     private bool _outlineSummaryAbove;
     private int _rowOutlineLevels;
@@ -84,6 +85,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     /// are not covered have the default width. Available before the first row is read.
     /// </summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
     public IReadOnlyList<ColumnWidth> ColumnWidths
     {
         get
@@ -95,6 +97,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 
     /// <summary>True if summary rows sit above their groups (<see cref="WorksheetOptions.OutlineSummaryAbove"/>).</summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
     public bool OutlineSummaryAbove
     {
         get
@@ -106,6 +109,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 
     /// <summary>The deepest row outline level the sheet declares (0 without grouping).</summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
     public int RowOutlineLevels
     {
         get
@@ -117,6 +121,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 
     /// <summary>True if a 1-based column is hidden.</summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
     public bool IsColumnHidden(int column)
     {
         ReadLayout();
@@ -133,6 +138,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 
     /// <summary>The width of a 1-based column in characters of the default font; null if the sheet leaves it at the default.</summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
     public double? GetColumnWidth(int column)
     {
         ReadLayout();
@@ -261,12 +267,14 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     /// <summary>Releases the decompression stream and pooled buffers.</summary>
     public void Dispose()
     {
+        _layoutUnread |= _state == State.BeforeData;
         _state = State.Done;
         _xml.Dispose();
     }
 
     private void ReadLayout()
     {
+        ObjectDisposedException.ThrowIf(_layoutUnread, this);
         if (_state == State.BeforeData)
         {
             FindSheetData();

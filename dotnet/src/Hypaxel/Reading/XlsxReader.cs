@@ -29,6 +29,9 @@ namespace Hypaxel;
 public sealed class XlsxReader : IDisposable
 {
     private const int MaxTables = 4096;
+
+    /// <summary>Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes per column on top of its name.</summary>
+    private const long MaxTableText = 64 * 1024 * 1024;
     private const string NotAWorkbook = "The package has no workbook part; it may be a Word or PowerPoint file.";
 
     private readonly Stream _stream;
@@ -207,10 +210,12 @@ public sealed class XlsxReader : IDisposable
     /// <remarks>
     /// Tables live in their own parts, which are read on each call; reading rows does not touch them.
     /// They are returned from top to bottom, then left to right, whatever order the file lists them in.
+    /// A part that the sheet references more than once is read once. A sheet may have at most 4,096
+    /// tables holding 64 MiB of table and column names in total.
     /// A table style that is not one of Excel's built-in styles is reported as <see cref="TableStyle.None"/>.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">There is no sheet at this position.</exception>
-    /// <exception cref="XlsxReadException">A table part is missing or damaged.</exception>
+    /// <exception cref="XlsxReadException">A table part is missing or damaged, or the tables exceed a limit.</exception>
     public IReadOnlyList<ExcelTable> GetTables(int index)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -226,21 +231,32 @@ public sealed class XlsxReader : IDisposable
             return [];
         }
 
-        var tables = new List<ExcelTable>();
+        var targets = new List<string>();
         foreach (var rel in rels)
         {
-            if (!rel.Is("table"))
+            if (rel.Is("table"))
+            {
+                targets.Add(rel.Target);
+            }
+        }
+
+        if (targets.Count > MaxTables)
+        {
+            throw XlsxReadException.LimitExceeded(part, $"The sheet has more than {MaxTables} tables.");
+        }
+
+        var tables = new List<ExcelTable>(targets.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        long budget = MaxTableText;
+        foreach (var target in targets)
+        {
+            if (!seen.Add(target))
             {
                 continue;
             }
 
-            if (tables.Count >= MaxTables)
-            {
-                throw XlsxReadException.LimitExceeded(part, $"The sheet has more than {MaxTables} tables.");
-            }
-
-            using var xml = OpenXml(rel.Target);
-            tables.Add(TableReader.Parse(xml));
+            using var xml = OpenXml(target);
+            tables.Add(TableReader.Parse(xml, ref budget));
         }
 
         return [.. tables.OrderBy(t => t.FirstRow).ThenBy(t => t.FirstColumn)];

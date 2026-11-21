@@ -375,6 +375,57 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void BoundsTheMemoryOfASheetsTables()
+    {
+        var rel = $"""<Relationship Id="rId1" Type="{TableRelType}" Target="../tables/table1.xml"/>""";
+        var rels = $"""<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{string.Concat(Enumerable.Repeat(rel, 3))}</Relationships>""";
+        var repeated = SingleSheet(
+            $"""<worksheet xmlns="{Main}"><sheetData/></worksheet>""",
+            "",
+            ("xl/worksheets/_rels/sheet1.xml.rels", rels),
+            ("xl/tables/table1.xml", $"""<table xmlns="{Main}" name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns></table>"""));
+        using (var reader = Reader(repeated))
+        {
+            Assert.Single(reader.GetTables(0));
+        }
+
+        var column = $"""<tableColumn name="{new string('n', 4200)}"/>""";
+        var heavy = $"""<table xmlns="{Main}" name="T" ref="A1:B2"><tableColumns>{string.Concat(Enumerable.Repeat(column, 16384))}</tableColumns></table>""";
+        using (var reader = Reader(SheetWithTables("<sheetData/>", heavy)))
+        {
+            var e = Assert.Throws<XlsxReadException>(() => reader.GetTables(0));
+            Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
+            Assert.Contains("too many names", e.Message);
+        }
+    }
+
+    [Fact]
+    public void LayoutIsNotAvailableAfterDisposeUnlessItWasRead()
+    {
+        var bytes = SheetWithTables("""<cols><col min="1" max="1" width="9" hidden="1"/></cols><sheetData><row><c><v>1</v></c></row></sheetData>""");
+        using var reader = Reader(bytes);
+
+        var unread = reader.OpenWorksheet(0);
+        unread.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => unread.ColumnWidths);
+        Assert.Throws<ObjectDisposedException>(() => unread.GetColumnWidth(1));
+        Assert.Throws<ObjectDisposedException>(() => unread.IsColumnHidden(1));
+        Assert.Throws<ObjectDisposedException>(() => unread.OutlineSummaryAbove);
+        Assert.Throws<ObjectDisposedException>(() => unread.RowOutlineLevels);
+
+        var read = reader.OpenWorksheet(0);
+        Assert.Single(read.ColumnWidths);
+        read.Dispose();
+        Assert.Equal(9, read.GetColumnWidth(1));
+        Assert.True(read.IsColumnHidden(1));
+
+        var streamed = reader.OpenWorksheet(0);
+        Assert.True(streamed.Read());
+        streamed.Dispose();
+        Assert.Single(streamed.ColumnWidths);
+    }
+
+    [Fact]
     public void IgnoresOtherRelationshipsAndReportsMissingTableParts()
     {
         const string sheet = $"""<worksheet xmlns="{Main}"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>""";
