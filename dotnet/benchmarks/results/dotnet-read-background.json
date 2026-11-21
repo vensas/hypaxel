@@ -10,7 +10,9 @@
     "os": "macOS 26.6",
     "runtime": ".NET 10.0.13"
   },
-  "versions": [],
+  "versions": [
+    "Hypaxel 0.3.0 reader with background decompression off (the default)"
+  ],
   "metrics": [
     {
       "id": "time",
