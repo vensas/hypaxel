@@ -123,7 +123,10 @@ fn main() -> hypaxel::Result<()> {
   `column_widths()` (runs of columns with a first column, last column and width, explicit and
   auto-fitted alike), `column_width(column)`, `outline_summary_above()` and
   `row_outline_levels()`. These precede the rows in the file, so they are available before the
-  first `next_row()`. Rows without values are still skipped, whatever their properties.
+  first `next_row()`.
+- **Rows without values** (a spacer row with a height, an empty hidden row) are skipped by
+  default. Open the workbook with `ReadOptions::new().include_empty_rows(true)` to get every row
+  the file stores; such a row has no cells (`row.is_empty()`) but its number and properties.
 
   ```rust
   let table = &reader.tables("Orders")?[0];               // table.name, table.columns, table.style, ...

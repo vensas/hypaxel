@@ -590,3 +590,44 @@ fn reader_rows_error_at_layout(bytes: &[u8]) -> String {
     let mut rows = reader.worksheet("S").unwrap();
     rows.layout().unwrap_err().to_string()
 }
+
+#[test]
+fn returns_rows_without_values_on_request() {
+    let bytes = write(|w| {
+        let mut s = w.add_worksheet_with("Data", &SheetOptions::new().row_outline_levels(1))?;
+        s.add_row(("first",))?;
+        s.begin_row_with(&RowOptions::new().height(40.0))?.end_row()?;
+        s.begin_row_at(5, None, StyleId::default())?.write(5).end_row()?;
+        s.begin_row_with(&RowOptions::new().outline_level(1).hidden())?.end_row()?;
+        Ok(())
+    });
+    let props = |options: &ReadOptions| {
+        let mut reader = XlsxReader::with_options(Cursor::new(&bytes[..]), options).unwrap();
+        let mut rows = reader.worksheet_at(0).unwrap();
+        let mut seen = Vec::new();
+        while let Some(row) = rows.next_row().unwrap() {
+            assert_eq!(row.is_empty(), row.cells().len() == 0);
+            assert_eq!(row.values().count(), row.last_column() as usize);
+            seen.push((row.number(), row.len(), row.outline_level(), row.is_hidden(), row.height()));
+        }
+        seen
+    };
+    assert_eq!(props(&ReadOptions::new()), [(1, 1, 0, false, None), (5, 1, 0, false, None)]);
+    assert_eq!(
+        props(&ReadOptions::new().include_empty_rows(true)),
+        [(1, 1, 0, false, None), (2, 0, 0, false, Some(40.0)), (5, 1, 0, false, None), (6, 0, 1, true, None)]
+    );
+
+    let other = single_sheet(
+        r#"<worksheet><sheetData><row r="2" ht="30"/><row r="3" hidden="1"><c r="A3" s="1"/></row><row><c><v>1</v></c></row></sheetData></worksheet>"#,
+        "",
+        &[],
+    );
+    let mut reader = XlsxReader::with_options(Cursor::new(other), &ReadOptions::new().include_empty_rows(true)).unwrap();
+    let mut rows = reader.worksheet("S").unwrap();
+    let mut seen = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        seen.push((row.number(), row.len(), row.is_hidden(), row.height()));
+    }
+    assert_eq!(seen, [(2, 0, false, Some(30.0)), (3, 0, true, None), (4, 1, false, None)]);
+}

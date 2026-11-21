@@ -30,11 +30,12 @@ const MAX_TABLES: usize = 4096;
 #[derive(Debug, Clone)]
 pub struct ReadOptions {
     max_shared_strings_bytes: u64,
+    include_empty_rows: bool,
 }
 
 impl Default for ReadOptions {
     fn default() -> Self {
-        Self { max_shared_strings_bytes: 1 << 30 }
+        Self { max_shared_strings_bytes: 1 << 30, include_empty_rows: false }
     }
 }
 
@@ -49,6 +50,14 @@ impl ReadOptions {
     /// rows; everything else is streamed. Lower this when reading untrusted uploads.
     pub fn max_shared_strings_bytes(mut self, bytes: u64) -> Self {
         self.max_shared_strings_bytes = bytes;
+        self
+    }
+
+    /// Also return the rows that the file stores without any value (default false), for example
+    /// a spacer row with a height or an empty hidden row. They have no cells but carry their
+    /// number and properties. Rows that the file does not store are never returned.
+    pub fn include_empty_rows(mut self, include: bool) -> Self {
+        self.include_empty_rows = include;
         self
     }
 }
@@ -340,7 +349,7 @@ fn open_rows<S: Read + Seek>(meta: &Meta, sst: Arc<SharedStrings>, index: usize,
         message: format!("the worksheet part of sheet {:?} is missing", info.name),
     })?;
     let xml = XmlReader::new(Directory::open(entry, source)?, part);
-    Ok(Rows::new(xml, sst, meta.styles.clone(), meta.is_1904))
+    Ok(Rows::new(xml, sst, meta.styles.clone(), meta.is_1904, meta.options.include_empty_rows))
 }
 
 struct Relationship {

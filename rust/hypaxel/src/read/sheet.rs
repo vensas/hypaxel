@@ -139,6 +139,7 @@ pub struct Rows<R> {
     sst: Arc<SharedStrings>,
     styles: Arc<Styles>,
     is_1904: bool,
+    include_empty: bool,
     state: State,
     previous_row: u32,
     number: u32,
@@ -156,12 +157,19 @@ impl<R> fmt::Debug for Rows<R> {
 }
 
 impl<R: Read> Rows<R> {
-    pub(crate) fn new(xml: XmlReader<EntryReader<R>>, sst: Arc<SharedStrings>, styles: Arc<Styles>, is_1904: bool) -> Self {
+    pub(crate) fn new(
+        xml: XmlReader<EntryReader<R>>,
+        sst: Arc<SharedStrings>,
+        styles: Arc<Styles>,
+        is_1904: bool,
+        include_empty: bool,
+    ) -> Self {
         Self {
             xml,
             sst,
             styles,
             is_1904,
+            include_empty,
             state: State::BeforeData,
             previous_row: 0,
             number: 0,
@@ -183,7 +191,9 @@ impl<R: Read> Rows<R> {
     }
 
     /// Reads the next row that contains at least one value. Rows that are missing from the file
-    /// or only carry formatting are skipped; [`Row::number`] tells where the row is.
+    /// or only carry formatting are skipped; [`Row::number`] tells where the row is. With
+    /// [`ReadOptions::include_empty_rows`](crate::ReadOptions::include_empty_rows), rows that the
+    /// file stores without values are returned as well.
     pub fn next_row(&mut self) -> Result<Option<Row<'_>>> {
         loop {
             match self.state {
@@ -224,13 +234,18 @@ impl<R: Read> Rows<R> {
                         return Err(self.xml.malformed(format!("row number {number} is outside 1..=1048576")));
                     }
                     self.previous_row = number;
-                    if !start {
+                    if !start && !self.include_empty {
                         continue;
                     }
                     self.number = number;
                     self.props = props;
-                    self.read_cells()?;
-                    if !self.cells.is_empty() {
+                    if start {
+                        self.read_cells()?;
+                    } else {
+                        self.cells.clear();
+                        self.text.clear();
+                    }
+                    if self.include_empty || !self.cells.is_empty() {
                         return Ok(Some(Row {
                             number: self.number,
                             props: self.props,
@@ -689,7 +704,8 @@ impl<'a> Row<'a> {
         self.cells.len()
     }
 
-    /// Always false: rows without values are skipped by [`Rows::next_row`].
+    /// True for a row without values. Such rows are only returned with
+    /// [`ReadOptions::include_empty_rows`](crate::ReadOptions::include_empty_rows).
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
     }
