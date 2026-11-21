@@ -1,5 +1,7 @@
 import datetime as dt
 import io
+import os
+import sys
 
 import openpyxl
 import pandas as pd
@@ -150,6 +152,19 @@ def test_reads_the_opened_file_after_its_path_is_replaced_or_deleted(tmp_path):
         assert list(book.rows()) == expected
         path.unlink()
         assert list(book.rows()) == expected
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="counts descriptors in /dev/fd")
+def test_close_releases_the_file(tmp_path):
+    path = tmp_path / "book.xlsx"
+    path.write_bytes(build(lambda wb: wb.add_worksheet("Data").write_row([1])))
+    before = len(os.listdir("/dev/fd"))
+    book = hypaxel.open_workbook(path)
+    assert len(os.listdir("/dev/fd")) == before + 1
+    book.close()
+    assert len(os.listdir("/dev/fd")) == before
+    with pytest.raises(ValueError, match="closed"):
+        book.rows()
 
 
 def test_round_trips_a_dataframe():

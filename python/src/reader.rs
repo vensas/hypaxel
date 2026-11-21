@@ -136,7 +136,8 @@ fn origin_from(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Origin> {
 /// Reads an XLSX workbook. See :func:`hypaxel.open_workbook`.
 #[pyclass(module = "hypaxel")]
 pub(crate) struct Reader {
-    origin: Origin,
+    /// Cleared by `close()`, which releases the file; open row iterators keep their own handle.
+    origin: Option<Origin>,
     reader: Option<XlsxReader<Source>>,
 }
 
@@ -177,7 +178,7 @@ impl Reader {
         let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes);
         let handle = origin.open();
         let reader = py.detach(|| XlsxReader::with_options(handle, &options)).map_err(read_err)?;
-        Ok(Reader { origin, reader: Some(reader) })
+        Ok(Reader { origin: Some(origin), reader: Some(reader) })
     }
 
     /// Sheet names in workbook order, including hidden sheets.
@@ -229,7 +230,7 @@ impl Reader {
             Some(s) if !s.is_none() => self.sheet_index(s)?,
             _ => 0,
         };
-        let handle = self.origin.open();
+        let handle = self.origin.as_ref().ok_or_else(|| PyValueError::new_err("the reader is closed"))?.open();
         let reader = self.reader()?;
         let rows = py.detach(|| reader.with_source(handle)?.into_worksheet_at(index)).map_err(read_err)?;
         Ok(RowIterator {
@@ -243,6 +244,7 @@ impl Reader {
     }
 
     fn close(&mut self) {
+        self.origin = None;
         self.reader = None;
     }
 
