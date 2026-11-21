@@ -60,6 +60,11 @@ Python, Node.js, .NET, Java, Go and PHP).
 - Rust: peak memory for writing 1M rows, against rust_xlsxwriter, with a `write_bench` example
   that runs each case in its own process.
 - README "At a glance": memory figures next to the write and read timings.
+- `benchmarks/highlights.json`: each entry links to the results files behind it with `suite`, and
+  with `comparisonSuite` and `memorySuite` when the comparison or memory figure comes from another
+  table. The check fails on a link to a missing file or to another language's file.
+- .NET: peak RSS for writing 100k and 1M rows, against SpreadCheetah and ClosedXML, with a
+  `--write-rss` mode that runs each case in its own process and writes to a file.
 
 ### Changed
 
@@ -73,6 +78,11 @@ Python, Node.js, .NET, Java, Go and PHP).
   threads.
 - .NET README: the background decompression table lists time and CPU time in separate columns;
   the figures for several concurrent readers moved to the text.
+- README "At a glance" and highlights: comparisons from another scale than the timing say so (.NET
+  against ClosedXML and PHP against PhpSpreadsheet are from 100k rows), the browser comparison
+  uses the 300k-row figures only (~14x faster than SheetJS), and paired read memory figures name both files ("peak 49 MB inline / 141 MB shared").
+- `dotnet-read-background.json` names what it compares with, and the check requires every suite to
+  list its compared versions.
 
 ### Fixed
 

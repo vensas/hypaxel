@@ -43,4 +43,17 @@ Metrics whose `id` starts with `file` are file sizes and have no `memoryKind`.
 
 Each entry has `language`, optional `title` and `group`, and the `value`, `label` and
 `comparison` shown in the root README, plus `memory` and `memoryKind` where a memory figure is
-published.
+published. Paired memory figures name both files, as in "peak 49 MB inline / 141 MB shared".
+
+Each entry also links to the results files that back it, so a reader can go from the claim to
+the table. Each link is a suite `id` or a list of them, and every suite must be for the same
+language:
+
+| Field | Meaning |
+| --- | --- |
+| `suite` | Required. The suites that back `value` and `label`, the main one first |
+| `comparisonSuite` | Optional. Set when `comparison` comes from other suites than `suite` |
+| `memorySuite` | Optional. Set when `memory` comes from other suites than `suite` |
+
+When `comparison` comes from a different scale than `label` (for example 100k rows against a
+1M-row time), it says so, as in "~19–24x faster than ClosedXML (100k rows)".

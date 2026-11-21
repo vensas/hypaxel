@@ -328,6 +328,24 @@ Hypaxel and SpreadCheetah are within measurement noise of each other; both are r
 times faster than ClosedXML and allocate a small fraction of its memory. .NET 8 is the slowest
 target.
 
+**Peak RSS (.NET 10)**
+
+| Library | 100k rows | 1M rows |
+| --- | ---: | ---: |
+| Rows only, nothing written | 51 MB | 51 MB |
+| Hypaxel, typed `Write` | 67 MB | 68 MB |
+| Hypaxel, `AddRowAsync` | 64 MB | 66 MB |
+| Hypaxel, object mapping | 69 MB | 69 MB |
+| Hypaxel, shared strings | 78 MB | 216 MB |
+| SpreadCheetah | 61 MB | 68 MB |
+| ClosedXML | 344 MB | 2,031 MB |
+
+Peak resident memory of the whole process, the median of three runs, each case in its own process
+with the `--write-rss` mode. Rows are generated as they are written and the file goes to disk, so
+neither the dataset nor the output is held in memory. The first row is the .NET runtime plus
+generating the rows: Hypaxel adds 16 to 17 MB on top of it at 100k rows and at 1M, while ClosedXML
+grows with the sheet. Shared strings grow with the number of distinct values.
+
 Allocations stay constant as rows grow (except with shared strings, whose table grows with the
 number of distinct values). Memory per concurrent export is therefore bounded by the buffers:
 about 64 KiB of XML plus about 96 KiB of compressed output by default.
@@ -337,6 +355,8 @@ Run them yourself (pick the .NET version with `-f`):
 ```bash
 cd dotnet/benchmarks/Hypaxel.Benchmarks
 dotnet run -c Release -f net10.0 -- --quick 1000000                         # quick stopwatch run
+dotnet build -c Release && /usr/bin/time -l \
+  dotnet bin/Release/net10.0/Hypaxel.Benchmarks.dll --write-rss hypaxel 1000000 out.xlsx   # one case, peak RSS (macOS)
 dotnet run -c Release -f net10.0 -- --filter '*' --job short --inProcess    # BenchmarkDotNet run
 ```
 

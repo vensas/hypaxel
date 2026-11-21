@@ -15,6 +15,12 @@ if (args is ["--read-quick", ..])
     return;
 }
 
+if (args is ["--write-rss", var rssCase, var rssRows, var rssPath])
+{
+    await WriteRss.RunAsync(rssCase, int.Parse(rssRows), rssPath);
+    return;
+}
+
 BenchmarkSwitcher.FromAssembly(typeof(WriteBenchmarks).Assembly).Run(args);
 
 public sealed record Row(int Id, string Name, string Category, double Price, decimal Amount, DateTime Created, bool Active, long Quantity, string Comment, double Ratio);
@@ -23,13 +29,14 @@ public static class Data
 {
     private static readonly string[] Categories = ["Hardware", "Software", "Services", "Consulting", "Support", "Training"];
 
-    public static Row[] Create(int count)
+    public static Row[] Create(int count) => Stream(count).ToArray();
+
+    public static IEnumerable<Row> Stream(int count)
     {
-        var rows = new Row[count];
         var start = new DateTime(2024, 1, 1);
         for (var i = 0; i < count; i++)
         {
-            rows[i] = new Row(
+            yield return new Row(
                 i,
                 "Customer " + (i % 5000),
                 Categories[i % Categories.Length],
@@ -41,8 +48,6 @@ public static class Data
                 "Unique comment #" + i,
                 i / 7.0);
         }
-
-        return rows;
     }
 }
 
