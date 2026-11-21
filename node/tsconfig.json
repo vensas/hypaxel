@@ -20,6 +20,7 @@
   },
   "include": [
     "ts/core.ts",
+    "ts/read.ts",
     "ts/index.ts"
   ]
 }

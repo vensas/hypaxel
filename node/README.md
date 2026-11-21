@@ -1,6 +1,6 @@
 # Hypaxel for Node.js and browsers
 
-**High-performance, constant-memory XLSX (Excel) writer for Node.js and browsers, powered by Rust.**
+**High-performance, constant-memory XLSX (Excel) writer and streaming reader for Node.js and browsers, powered by Rust.**
 
 Hypaxel writes `.xlsx` files as a forward-only stream. Rows are serialized and compressed in Rust
 as you write them, so memory stays flat whether you export 10 rows or a million, and a download
@@ -19,6 +19,10 @@ same engine compiled to WebAssembly, with the same API.
 - **Browsers too:** one package, picked by your bundler: native in Node.js, WebAssembly (171 KB
   gzipped) in the browser. Generates a 100k-row file in about 0.15 s in Chrome, about **11x faster
   than SheetJS and 19x faster than ExcelJS** there (see [Browsers](#browsers)).
+- **Reading too:** streams rows from uploads and files about **8x faster than ExcelJS's streaming
+  reader** and 13x faster than SheetJS, with memory bounded by the shared strings plus one batch
+  of rows. In Node.js, `for await` parses on the thread pool and leaves the event loop free
+  (see [Reading](#reading)).
 - **Typed:** written in TypeScript (strict), ships its own type declarations, works from ESM and CommonJS.
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md) through [napi-rs](https://napi.rs)
@@ -136,10 +140,73 @@ unconditionally.
 | `toBlob` | | ✓ |
 | `stream` (Node `Readable`), `writeFile` | ✓ | |
 | `init`, `initSync` | `init` (no-op) | ✓ |
+| `openWorkbook`, `readRows`, `readRecords`, `iterRows`, `iterRecords` | paths, bytes, streams | bytes, `Blob`/`File`, `Response`, streams |
+| `openWorkbookSync` | path or bytes | bytes (after `init()`) |
 
 Large exports in the browser: `webStream` keeps memory bounded when its consumer writes to disk,
 e.g. through the File System Access API (`showSaveFilePicker()` and `pipeTo`). `toBlob` holds the
 finished file in memory, compressed.
+
+## Reading
+
+```ts
+import { openWorkbook, readRecords, readRows } from 'hypaxel'
+
+const rows = await readRows('orders.xlsx', 'Orders')       // sheet name or 0-based index
+// [['Product', 'Qty', 'Price', 'Ordered'], ['Widget', 3, 9.99, Date], ...]
+
+const records = await readRecords(upload)                  // [{ Product: 'Widget', Qty: 3, ... }]
+
+using workbook = await openWorkbook(request)               // path, bytes, Blob, stream, ...
+console.log(workbook.sheetNames, workbook.sheets, workbook.date1904)
+for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
+  // ...
+}
+```
+
+- **Rows** are arrays: `row[i]` is column `i + 1`, and a row ends at its last value. Gaps are
+  `null`. Missing rows come back as `[]`, so the row at index `i` is Excel row `i + 1` (pass
+  `skipEmpty: true` to drop them).
+- **Values** are `string`, `number`, `boolean`, `Date` and `null`. Cells formatted as a date, date
+  and time or time of day become a `Date` (a time of day falls on Excel's day zero, 1899-12-31 or
+  1904-01-01 in the 1904 date system, so read it with `getHours()` and friends). `[h]:mm` durations become a number of elapsed
+  milliseconds. Errors such as `#N/A` are strings. Formulas yield their cached result. Dates are
+  recognised from the cell's number format, in both date systems, and rounded to the millisecond.
+- **Time zones:** like the writer, `dates: 'local'` (default) returns the cell's wall-clock time in
+  the local time zone and `dates: 'utc'` in UTC, so a `Date` written and read with the same
+  setting comes back unchanged.
+- **Records:** `readRecords` / `iterRecords` / `workbook.records()` key each row by the header row
+  (`headerRow: 1`). Empty header cells become `column_<n>`, repeated names get `_2`, `_3`, …, and
+  rows without values are skipped. Missing cells are `null`.
+- **Sources:** a path or `file:` URL is read from disk as rows are requested. Anything else (a
+  `Buffer` or `Uint8Array`, an `ArrayBuffer`, a `Blob` or `File`, a `Response`, a web
+  `ReadableStream`, a Node.js `Readable` such as an HTTP request) is held in memory once, because
+  the XLSX directory sits at the end of the file.
+- **Sync or async:** `workbook.rows()` iterates with `for...of` or `for await...of`. In Node.js the
+  async form parses each batch on the libuv thread pool, so a large upload does not block other
+  requests; the sync form is slightly faster. `openWorkbookSync` opens a path or bytes without a
+  promise. In browsers both forms run on the calling thread; use a worker for very large files.
+- **Memory:** beyond the source, memory is bounded by the workbook's shared string table and one
+  batch of rows (about 64 KB). `maxSharedStringsBytes` (default 1 GiB) caps the table for untrusted
+  uploads. Several sheets, or the same sheet twice, can be read at the same time.
+- **Closing:** `workbook.close()` (or `using`) releases the file; rows already started keep
+  reading. Breaking out of a loop releases that sheet. `iterRows` and the other helpers close
+  everything themselves.
+- **Errors:** everything throws an `XlsxError` whose message names the problem: a missing file, a
+  legacy `.xls` or encrypted workbook, a sheet that does not exist (with the sheets that do), a
+  chart sheet, a damaged part or an exceeded limit.
+
+```ts
+// Express: the request body is the .xlsx file itself (not a multipart form).
+app.post('/import', async (req, res) => {
+  let imported = 0
+  for await (const record of iterRecords(req, 'Orders')) {
+    await saveOrder(record)
+    imported++
+  }
+  res.json({ imported })
+})
+```
 
 ## Full control with `Writer`
 
@@ -253,6 +320,34 @@ node benchmarks/bench.mjs            # 100,000 rows
 node benchmarks/bench.mjs 1000000
 ```
 
+### Reading
+
+The write benchmark's 10 columns plus a header row, written by Hypaxel with a shared string table
+and a reference on every cell, as Excel saves them (ExcelJS needs the references). The files are
+9.5 MB (100k rows) and 94 MB (1M rows). Each case runs in its own process and reports the
+non-empty cells it read; every library returns the same 1,000,010 and 10,000,010 cells. Peak RSS
+includes Node.js itself, about 81 MB here.
+
+Measured on an Apple M1 Max (macOS 26.6) with Node.js 22.23.2 against ExcelJS 4.4.0 and SheetJS 0.20.3.
+
+| Case | 100k rows | Peak RSS | 1M rows | Peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Hypaxel, rows, sync | 163 ms | 108 MB | 1.57 s | 148 MB |
+| Hypaxel, rows, for await (thread pool) | 168 ms | 107 MB | 1.60 s | 144 MB |
+| Hypaxel, WebAssembly engine, rows | 244 ms | 141 MB | 2.25 s | 355 MB |
+| ExcelJS, streaming reader | 1,297 ms | 275 MB | 13.05 s | 595 MB |
+| SheetJS, read and sheet_to_json | 2,160 ms | 440 MB | not run | not run |
+
+These are single runs. SheetJS reads the whole file into memory and is not run at 1M rows. With
+inline strings instead of a shared string table, Hypaxel's peak RSS stays at 88 MB at both sizes
+(1.68 s for 1M rows), and ExcelJS takes 12.92 s. The WebAssembly row runs the browser build in
+Node.js; it holds the file in WebAssembly memory as well as in a `Buffer`.
+
+```bash
+node benchmarks/read_bench.mjs                    # 100,000 rows, shared strings
+node benchmarks/read_bench.mjs 1000000 --inline   # 1,000,000 rows, inline strings
+```
+
 ### Browsers
 
 The same 10 columns, turned into an XLSX `Blob` in headless Chrome. The rows are built before
@@ -293,9 +388,10 @@ npm test               # both engines, in Node.js
 npm run test:browser   # the WebAssembly build in headless Chrome
 ```
 
-Layout: `engine/` holds the Rust code both bindings share (options, cell-batch decoding);
-`src/` adapts it to N-API and `wasm/` to WebAssembly. `ts/core.ts` is the platform-neutral API,
-`ts/index.ts` the Node.js entry and `ts/browser.ts` the browser entry.
+Layout: `engine/` holds the Rust code both bindings share (options, cell-batch decoding for
+writing, row-batch encoding for reading); `src/` adapts it to N-API and `wasm/` to WebAssembly.
+`ts/core.ts` (writing) and `ts/read.ts` (reading) are the platform-neutral API, `ts/index.ts` the
+Node.js entry and `ts/browser.ts` the browser entry.
 
 ## License
 

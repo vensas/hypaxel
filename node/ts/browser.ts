@@ -2,7 +2,7 @@
  * Browser entry: the hypaxel API on the WebAssembly engine. Also used by runtimes without native
  * modules (Deno, Bun, edge workers) through the `default` export condition.
  */
-import loadWasm, { WasmWriter, columnName as wasmColumnName, initSync as loadWasmSync } from './wasm/hypaxel.js'
+import loadWasm, { WasmWorkbook, WasmWriter, columnName as wasmColumnName, initSync as loadWasmSync } from './wasm/hypaxel.js'
 import {
   CONTENT_TYPE,
   type ExportOptions,
@@ -15,6 +15,21 @@ import {
   setEngine,
   setMissingEngineMessage,
 } from './core.js'
+import {
+  type BytesSource,
+  type ReadOptions,
+  type ReadRecord,
+  type ReadValue,
+  type RecordsOptions,
+  type RowsOptions,
+  type SheetRef,
+  type Workbook,
+  bytesOf,
+  collectBytes,
+  iterRecordsOf,
+  iterRowsOf,
+  openBytes,
+} from './read.js'
 
 export {
   CONTENT_TYPE,
@@ -41,6 +56,19 @@ export {
   type WorksheetOptions,
   type WriterOptions,
 } from './core.js'
+export {
+  SheetRecords,
+  SheetRows,
+  Workbook,
+  type BytesSource,
+  type ReadOptions,
+  type ReadRecord,
+  type ReadValue,
+  type RecordsOptions,
+  type RowsOptions,
+  type SheetInfo,
+  type SheetRef,
+} from './read.js'
 
 /** Where to load the WebAssembly module from: a URL, a `fetch` response, its bytes or a compiled module. */
 export type WasmSource = RequestInfo | URL | Response | BufferSource | WebAssembly.Module
@@ -50,6 +78,7 @@ setMissingEngineMessage(
 )
 
 const encoder = new TextEncoder()
+const decoder = new TextDecoder()
 let loaded = false
 let loading: Promise<void> | undefined
 
@@ -59,6 +88,8 @@ function install(): void {
     columnName: wasmColumnName,
     alloc: (size) => new Uint8Array(size),
     writeUtf8: (buffer, offset, value) => encoder.encodeInto(value, buffer.subarray(offset)).written,
+    openWorkbook: (bytes, options) => WasmWorkbook.openBytes(bytes, options),
+    decodeUtf8: (buffer, start, end) => decoder.decode(buffer.subarray(start, end)),
   })
   loaded = true
 }
@@ -156,4 +187,69 @@ export async function toBlob(source: Source, options: ExportOptions = {}): Promi
 /** Builds a whole XLSX file in memory from a synchronous source. Requires a prior {@link init}. */
 export function toBufferSync(source: Iterable<Row | RecordLike>, options: ExportOptions = {}): Uint8Array {
   return buildSync(source, options)
+}
+
+/** A workbook to read: its bytes, a `Blob` or `File`, a `Response`, or a stream of its bytes. */
+export type WorkbookSource = BytesSource
+
+/**
+ * Opens an XLSX workbook held in memory, synchronously. Requires a prior {@link init}. The bytes
+ * are copied into WebAssembly memory once; rows are then decoded as they are requested.
+ */
+export function openWorkbookSync(source: Uint8Array | ArrayBuffer | ArrayBufferView, options: ReadOptions = {}): Workbook {
+  const bytes = bytesOf(source)
+  if (bytes === undefined) throw new XlsxError('openWorkbookSync takes bytes; use openWorkbook for a Blob, Response or stream')
+  return openBytes(bytes, options)
+}
+
+/**
+ * Opens an XLSX workbook, e.g. a `File` from an `<input type="file">` or a `fetch` `Response`.
+ * Loads the WebAssembly engine if needed. The file is held in memory once.
+ */
+export async function openWorkbook(source: WorkbookSource, options: ReadOptions = {}): Promise<Workbook> {
+  await init()
+  return openBytes(await collectBytes(source), options)
+}
+
+/**
+ * Yields the rows of a sheet (name or 0-based index, default the first) as arrays: element `i`
+ * is the value in column `i + 1`. Missing rows are yielded as `[]` unless `skipEmpty` is set.
+ */
+export async function* iterRows(
+  source: WorkbookSource,
+  sheet: SheetRef = 0,
+  options: ReadOptions & RowsOptions = {},
+): AsyncGenerator<ReadValue[], void, undefined> {
+  yield* iterRowsOf(await openWorkbook(source, options), sheet, options)
+}
+
+/** Reads all rows of a sheet into an array. See {@link iterRows}. */
+export async function readRows(source: WorkbookSource, sheet: SheetRef = 0, options: ReadOptions & RowsOptions = {}): Promise<ReadValue[][]> {
+  const rows: ReadValue[][] = []
+  for await (const row of iterRows(source, sheet, options)) rows.push(row)
+  return rows
+}
+
+/**
+ * Yields one record per row below the header row (`headerRow`, default 1), keyed by its texts.
+ * Empty header cells are named `column_<n>`, repeated names get `_2`, `_3`, …; rows without values
+ * are skipped and missing cells are `null`.
+ */
+export async function* iterRecords(
+  source: WorkbookSource,
+  sheet: SheetRef = 0,
+  options: ReadOptions & RecordsOptions = {},
+): AsyncGenerator<ReadRecord, void, undefined> {
+  yield* iterRecordsOf(await openWorkbook(source, options), sheet, options)
+}
+
+/** Reads all records of a sheet into an array. See {@link iterRecords}. */
+export async function readRecords(
+  source: WorkbookSource,
+  sheet: SheetRef = 0,
+  options: ReadOptions & RecordsOptions = {},
+): Promise<ReadRecord[]> {
+  const records: ReadRecord[] = []
+  for await (const record of iterRecords(source, sheet, options)) records.push(record)
+  return records
 }

@@ -51,6 +51,17 @@
     const streamed = new Uint8Array(await new Blob(parts).arrayBuffer())
     const buffered = await toBuffer([[1], [2], [3]])
     check('webStream and toBuffer agree', streamed.length === buffered.length && streamed.every((b, i) => b === buffered[i]))
+
+    const { openWorkbook, readRecords } = hypaxel
+    const book = await openWorkbook(new File([bytes], 'upload.xlsx'), { dates: 'utc' })
+    const rows = book.rows('browser').toArray()
+    check(
+      'openWorkbook reads a File',
+      book.sheetNames[0] === 'Browser' && rows[1][0] === 'Grüße 🚀' && rows[1][1] === 1234.5 && rows[1][2].getTime() === Date.UTC(2024, 0, 2),
+      JSON.stringify(rows),
+    )
+    const records = await readRecords(blob)
+    check('readRecords reads every row of a Blob', records.length === 50_000 && records[49_999].label === 'row 49999', JSON.stringify(records[0]))
   } catch (error) {
     check('no unexpected error', false, String(error && error.stack ? error.stack : error))
   }

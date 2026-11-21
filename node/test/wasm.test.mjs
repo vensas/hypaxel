@@ -4,6 +4,7 @@ import { test } from 'node:test'
 
 import * as native from '../lib/index.js'
 import * as wasm from '../lib/browser/browser.js'
+import { excelJsWorkbook, defineReadSuite } from './read-suite.mjs'
 import { STRICT, defineSuite, read, values } from './suite.mjs'
 
 const wasmBytes = await readFile(new URL('../lib/browser/wasm/hypaxel_bg.wasm', import.meta.url))
@@ -21,6 +22,7 @@ test('wasm: the API explains that init() is needed before the engine is loaded',
 })
 
 defineSuite('wasm', wasm)
+defineReadSuite('wasm', wasm)
 
 test('wasm: init after loading resolves without reloading', async () => {
   await wasm.init()
@@ -118,4 +120,16 @@ test('wasm: memory stays bounded while streaming', async () => {
   for (let run = 0; run < 3; run++) last = await exportOnce()
   const grownMegabytes = (last - baseline) / 1024 / 1024
   assert.ok(grownMegabytes < 25, `resident memory grew by ${grownMegabytes.toFixed(1)} MB over three more exports`)
+})
+
+test('wasm: reads the same rows as the native engine', async () => {
+  const writer = new native.Writer({ sharedStrings: true })
+  const hours = writer.addStyle({ numFormat: '[h]:mm' })
+  const sheet = writer.addWorksheet('Data')
+  for (let i = 0; i < 20_000; i++) {
+    sheet.writeRow([i, `name ${i % 700}`, new Date(2024, 0, 1 + (i % 365), i % 24), i % 3 === 0, new native.Styled(i / 96, hours), 'Grüße ' + i])
+  }
+  for (const bytes of [writer.finish(), await excelJsWorkbook()]) {
+    assert.deepEqual(wasm.openWorkbookSync(bytes).rows().toArray(), native.openWorkbookSync(bytes).rows().toArray())
+  }
 })

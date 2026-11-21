@@ -3,9 +3,13 @@
 //! The Node.js (napi) and WebAssembly (wasm-bindgen) bindings both wrap [`Engine`]: a writer that
 //! keeps its output in memory and takes cells as a compact binary batch, so a whole batch of rows
 //! crosses the JavaScript boundary in one call. The batch format is produced by `RowEncoder` in
-//! `node/ts/core.ts`.
+//! `node/ts/core.ts`. Reading works the same way in the other direction; see [`Workbook`].
 
 use std::fmt;
+
+mod read;
+
+pub use read::{BATCH_BYTES, ReadConfig, RowStream, SheetEntry, Workbook};
 
 use chrono::DateTime;
 use hypaxel::{
@@ -53,11 +57,11 @@ impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn failed(message: impl Into<String>) -> Error {
+pub(crate) fn failed(message: impl Into<String>) -> Error {
     Error::Failed(message.into())
 }
 
-fn invalid(message: impl Into<String>) -> Error {
+pub(crate) fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }
 

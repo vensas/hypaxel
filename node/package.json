@@ -1,7 +1,7 @@
 {
   "name": "hypaxel",
   "version": "0.3.0",
-  "description": "High-performance, constant-memory streaming XLSX (Excel) writer for Node.js and browsers, powered by Rust (native in Node.js, WebAssembly in browsers).",
+  "description": "High-performance, constant-memory streaming XLSX (Excel) writer and reader for Node.js and browsers, powered by Rust (native in Node.js, WebAssembly in browsers).",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -13,6 +13,8 @@
     "xlsx",
     "spreadsheet",
     "streaming",
+    "reader",
+    "parser",
     "express",
     "fastify",
     "napi",

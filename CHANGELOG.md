@@ -30,6 +30,18 @@ Python, Node.js, .NET, Java, Go and PHP).
   - Accepts Strict Open XML, prefixed namespaces, cells without references, rich and inline text
     and ISO 8601 dates. Rejects DTDs, oversized tokens and ZIP entries that do not match their
     declared size or CRC. Names legacy `.xls`, encrypted and non-spreadsheet files in the error.
+- **Streaming XLSX reader for Node.js and browsers.** The `hypaxel` npm package reads workbooks on
+  the Rust core reader, natively in Node.js and on WebAssembly in browsers, with the same API.
+  `openWorkbook` (path, `file:` URL, bytes, `Blob`/`File`, `Response`, web or Node.js stream) and
+  `openWorkbookSync` return a `Workbook` with `sheets` (name, visibility, kind), `sheetNames`,
+  `date1904`, `rows(sheet, { skipEmpty })` and `records(sheet, { headerRow })`; helpers
+  `iterRows` / `readRows` and `iterRecords` / `readRecords`. Rows are arrays and iterate with
+  `for...of` or `for await...of`; in Node.js the async form parses on the libuv thread pool so the
+  event loop stays free. Values are `string`, `number`, `boolean`, `Date` (dates, date-times and
+  times of day, in local time or UTC like the writer's `dates` option), elapsed milliseconds for
+  `[h]:mm` durations, error strings and `null`. Rows cross into JavaScript in binary batches, and
+  repeated shared strings are decoded once. Same row and record semantics as Python. Read
+  benchmark against ExcelJS's streaming reader and SheetJS (`node/benchmarks/read_bench.mjs`).
 - **Browser support for the Node.js package (WebAssembly).** The `hypaxel` npm package now runs in
   browsers and other runtimes without native modules on the Rust core compiled to WebAssembly
   (171 KB gzipped), with the same API as in Node.js. Bundlers pick the build through the `browser` export

@@ -8,7 +8,7 @@ license = "Apache-2.0"
 publish = false
 
 [features]
-## Deserialize the option structs from camelCase JavaScript objects.
+## Deserialize the option structs from camelCase JavaScript objects, and serialize the sheet list.
 serde = ["dep:serde"]
 
 [dependencies]

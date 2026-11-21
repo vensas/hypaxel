@@ -12,6 +12,7 @@
   },
   "include": [
     "ts/core.ts",
+    "ts/read.ts",
     "ts/browser.ts"
   ]
 }

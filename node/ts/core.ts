@@ -8,7 +8,7 @@ export const CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.sprea
 export const MAX_ROWS = 1_048_576
 export const MAX_COLUMNS = 16_384
 
-/** Raised when a workbook cannot be written. */
+/** Raised when a workbook cannot be written or read. */
 export class XlsxError extends Error {
   constructor(message: string) {
     super(message)
@@ -195,9 +195,37 @@ export interface EngineWriter {
   readonly finished: boolean
 }
 
+/** @internal A sheet as the engines list it. */
+export interface EngineSheetInfo {
+  name: string
+  visible: string
+  kind: string
+}
+
+/** @internal The rows of one sheet, in batches decoded by `SheetRows` in `read.ts`. */
+export interface EngineRows {
+  /** The next batch, or null or undefined at the end of the sheet. */
+  next(): Uint8Array | null | undefined
+  /** Reads the next batch off the main thread, where the engine can. */
+  nextAsync?(): Promise<Uint8Array | null | undefined>
+  close(): void
+}
+
+/** @internal The native (N-API) or WebAssembly workbook reader. */
+export interface EngineWorkbook {
+  sheets(): EngineSheetInfo[]
+  readonly date1904: boolean
+  rows(index: number): EngineRows
+  close(): void
+}
+
 /** @internal What an entry point supplies to run the API on its engine. */
 export interface Engine {
   createWriter(options: Omit<WriterOptions, 'dates'>): EngineWriter
+  /** Opens a workbook from bytes. */
+  openWorkbook(bytes: Uint8Array, options: { maxSharedStringsBytes?: number }): EngineWorkbook
+  /** Decodes UTF-8 from a batch returned by {@link EngineRows.next}. */
+  decodeUtf8(buffer: Uint8Array, start: number, end: number): string
   columnName(column: number): string
   /** Allocates an encoder buffer. */
   alloc(size: number): Uint8Array
@@ -218,7 +246,8 @@ export function setMissingEngineMessage(message: string): void {
   missingEngineMessage = message
 }
 
-function currentEngine(): Engine {
+/** @internal */
+export function currentEngine(): Engine {
   if (engine === undefined) throw new XlsxError(missingEngineMessage)
   return engine
 }
@@ -240,7 +269,8 @@ const ENCODER_FLUSH_AT = 128 * 1024
 const ASCII_FAST_PATH_LENGTH = 32
 const MS_PER_MINUTE = 60_000
 
-function guard<T>(operation: () => T): T {
+/** @internal Runs an engine call, turning its errors into {@link XlsxError}. */
+export function guard<T>(operation: () => T): T {
   try {
     return operation()
   } catch (error) {

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, browsers (WebAssembly), Go, Java and PHP, built for web services. Streaming readers for .NET, Rust, Python, Go and Java.</b>
+  <b>High-performance, constant-memory Excel (XLSX) writers for .NET, Rust, Python, Node.js, browsers (WebAssembly), Go, Java and PHP, built for web services. Streaming readers for .NET, Rust, Python, Node.js, browsers, Go and Java.</b>
 </p>
 
 <p align="center">
@@ -72,19 +72,21 @@ Two read figures are for inline strings / a shared string table. The figures are
 [`benchmarks/highlights.json`](benchmarks/highlights.json) and each implementation's
 `benchmarks/results/` directory.
 
-**Reading** (.NET, Rust, Python, Go and Java) streams rows the same way, with memory bounded by
-the workbook's shared strings plus one row. Node.js and PHP do not read yet.
+**Reading** (.NET, Rust, Python, Node.js and browsers, Go and Java) streams rows the same way,
+with memory bounded by the workbook's shared strings plus one row. PHP does not read yet.
 
 | | Read 1M rows × 10 columns | Compared with |
 | --- | ---: | --- |
 | [.NET](dotnet/README.md#reading) `XlsxReader` | ~0.7–0.8 s (~0.5–0.6 s with background decompression), 49 / 141 MB peak | ~2.6x faster than Sylvan.Data.Excel, ~6x faster than ExcelDataReader, 9–15x faster than MiniExcel |
 | [Rust](rust/README.md#reading) `XlsxReader` | ~0.72–0.75 s, 7 / 57 MB peak | ~2.8x faster than calamine's cell reader, 15–115x less memory than calamine's `Range` |
 | [Python](python/README.md#reading) `iter_rows`, `read_dataframe` | ~1.3 s, 68 MB peak | ~26x faster than openpyxl (100k rows), ~3.4x faster than python-calamine with ~13x less memory |
+| [Node.js](node/README.md#reading) `openWorkbook`, `readRows` | ~1.6–1.7 s*, 88 / 148 MB peak (most of it Node.js) | ~8x faster than ExcelJS's streaming reader, ~13x faster than SheetJS (100k rows) |
 | [Go](go/README.md#reading) `OpenReader` | ~1.1–1.2 s*, 21 / 74 MB peak | ~10–14x faster than excelize's `Rows` and xlsxreader |
 | [Java](java/README.md#reading) `XlsxReader` | ~0.7 s, 354 / 157 MB peak | ~4x faster than the FastExcel reader, ~5–7x faster than POI's streaming XSSFReader |
 
-\* The Go files carry a cell reference on every cell, as Excel writes them, so they are about 40%
-larger than the other benchmarks' files. As above, compare each row with its own competitors.
+\* The Go and Node.js files carry a cell reference on every cell, as Excel writes them (ExcelJS
+needs them), so they are larger than the other benchmarks' files: about 40% for Go, and 94 MB
+instead of 55 MB for Node.js. As above, compare each row with its own competitors.
 
 ```python
 for row in hypaxel.iter_rows("orders.xlsx", "Orders"):
@@ -172,7 +174,7 @@ Shared by all seven implementations (milestone 1: creating Excel files).
 - **Valid output:** checked against the Office Open XML schema validator and read back by independent readers
   (Open XML SDK, calamine, openpyxl, LibreOffice)
 
-Reading (.NET, Rust, Python, Go, Java): streamed rows of strings, numbers, booleans, errors and dates, times and
+Reading (.NET, Rust, Python, Node.js and browsers, Go, Java): streamed rows of strings, numbers, booleans, errors and dates, times and
 durations recognised from number formats, in both date systems; sheet list with visibility; files
 from Excel, LibreOffice and other producers, including Strict Open XML; clear errors for legacy
 `.xls`, encrypted and damaged files; limits for untrusted input.
@@ -198,7 +200,7 @@ scripts/   check_benchmarks.py: checks the benchmark JSON against the README tab
 2. Hyperlinks, data validation, conditional formatting, images, document properties
 3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
    Python: an Arrow-native DataFrame path
-4. ✅ Streaming readers for .NET, Rust, Python, Go and Java; Node.js and PHP when there is demand
+4. ✅ Streaming readers for .NET, Rust, Python, Node.js (and browsers), Go and Java; PHP when there is demand
 5. Read-modify-write for templates
 
 ## Contributing
