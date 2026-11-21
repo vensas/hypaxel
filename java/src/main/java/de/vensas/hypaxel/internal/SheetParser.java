@@ -666,7 +666,6 @@ public final class SheetParser {
         return to;
     }
 
-    /** Parses a non-negative decimal integer that fits into an int; -1 if invalid. */
     /** Parses digits (no sign) into an unsigned 32-bit integer; -1 if invalid or larger than 4294967295. */
     static long parseUnsigned(byte[] b, int from, int to) {
         int length = to - from;
@@ -684,6 +683,7 @@ public final class SheetParser {
         return n > 0xFFFF_FFFFL ? -1 : n;
     }
 
+    /** Parses a non-negative decimal integer that fits into an int; -1 if invalid. */
     static int parseDigits(byte[] b, int from, int to) {
         int length = to - from;
         if (length == 0 || length > 10) {
