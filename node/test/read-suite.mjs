@@ -177,6 +177,16 @@ export function defineReadSuite(label, api) {
       { id: 2, name: 'two', column_3: null, name_2: null, id_2: null, column_6: 'extra' },
     ])
 
+    const collisions = openWorkbookSync(
+      toBufferSync([
+        ['name', 'name_2', 'name', 'column_5', null, 'name_3', 'name'],
+        [1, 2, 3, 4, 5, 6, 7],
+      ]),
+    )
+    assert.deepEqual(collisions.records().toArray(), [
+      { name: 1, name_2: 2, name_3: 3, column_5: 4, column_5_2: 5, name_3_2: 6, name_4: 7 },
+    ])
+
     const book = openWorkbookSync(toBufferSync([{ a: 1, b: 'x' }, { a: 2, b: 'y' }]))
     assert.deepEqual(book.records().toArray(), [
       { a: 1, b: 'x' },

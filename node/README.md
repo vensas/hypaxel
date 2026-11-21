@@ -176,7 +176,7 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   the local time zone and `dates: 'utc'` in UTC, so a `Date` written and read with the same
   setting comes back unchanged.
 - **Records:** `readRecords` / `iterRecords` / `workbook.records()` key each row by the header row
-  (`headerRow: 1`). Empty header cells become `column_<n>`, repeated names get `_2`, `_3`, …, and
+  (`headerRow: 1`). Empty header cells become `column_<n>`, repeated names get the first free suffix of `_2`, `_3`, …, and
   rows without values are skipped. Missing cells are `null`.
 - **Sources:** a path or `file:` URL is read from disk as rows are requested. Anything else (a
   `Buffer` or `Uint8Array`, an `ArrayBuffer`, a `Blob` or `File`, a `Response`, a web

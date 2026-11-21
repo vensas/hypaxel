@@ -1,3 +1,4 @@
+/// <reference lib="esnext.disposable" preserve="true" />
 /**
  * Platform-neutral reading API, shared by the Node.js entry (native engine) and the browser entry
  * (WebAssembly engine). It uses no Node.js APIs.
@@ -88,6 +89,8 @@ function localDate(wallClock: number): Date {
  * the sheet. Stopping early (`break`) releases the sheet.
  */
 export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<ReadValue[]> {
+  /** Same as `close()`, for `using`. Present where the runtime defines `Symbol.dispose`. */
+  declare [Symbol.dispose]: () => void
   readonly #decodeUtf8: (buffer: Uint8Array, start: number, end: number) => string
   readonly #utc: boolean
   readonly #skipEmpty: boolean
@@ -339,15 +342,18 @@ class RecordBuilder {
 
   #header(row: ReadValue[]): string[] {
     const names: string[] = []
-    const seen = new Map<string, number>()
+    const taken = new Set<string>()
+    const suffixes = new Map<string, number>()
     row.forEach((value, i) => {
-      let name = headerName(value, i + 1)
-      const count = seen.get(name)
-      if (count !== undefined) {
-        seen.set(name, count + 1)
-        name = `${name}_${count + 1}`
+      const base = headerName(value, i + 1)
+      let name = base
+      if (taken.has(name)) {
+        let suffix = suffixes.get(base) ?? 1
+        do name = `${base}_${++suffix}`
+        while (taken.has(name))
+        suffixes.set(base, suffix)
       }
-      if (!seen.has(name)) seen.set(name, 1)
+      taken.add(name)
       names.push(name)
     })
     return names
@@ -366,6 +372,8 @@ class RecordBuilder {
 
 /** A sheet's rows as records keyed by the header row. Iterate it synchronously or with `for await`. */
 export class SheetRecords implements IterableIterator<ReadRecord>, AsyncIterable<ReadRecord> {
+  /** Same as `close()`, for `using`. Present where the runtime defines `Symbol.dispose`. */
+  declare [Symbol.dispose]: () => void
   readonly #rows: SheetRows
   readonly #builder: RecordBuilder
 
@@ -426,6 +434,8 @@ const KINDS = new Set(['worksheet', 'chartsheet', 'other'])
  * {@link rows} or {@link records}, and {@link close} it when done (or use `using`).
  */
 export class Workbook {
+  /** Same as `close()`, for `using`. Present where the runtime defines `Symbol.dispose`. */
+  declare [Symbol.dispose]: () => void
   /** The sheets in workbook order, including hidden sheets and chart sheets. */
   readonly sheets: readonly SheetInfo[]
   /** True if the workbook uses the 1904 date system. Dates are converted either way. */
@@ -512,6 +522,7 @@ export class Workbook {
   }
 }
 
+// Installed only where the runtime has Symbol.dispose; the classes declare the member for TypeScript.
 const dispose = (Symbol as { dispose?: symbol }).dispose
 if (dispose !== undefined) {
   for (const type of [Workbook, SheetRows, SheetRecords]) {

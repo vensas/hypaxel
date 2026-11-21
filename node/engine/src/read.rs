@@ -21,7 +21,7 @@
 
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use hypaxel::{DateKind, ExcelDateTime, ReadOptions, Rows, SheetKind, Value, Visibility, XlsxReader};
@@ -66,26 +66,73 @@ impl AsRef<[u8]> for SharedBytes {
     }
 }
 
-/// Where the workbook comes from. Each row stream opens its own handle, so several sheets can be
+/// A cursor over a file shared with other cursors. Reads are positioned, so each row stream seeks
+/// independently while all of them read the file that was opened, even if its path is later
+/// replaced or deleted.
+struct FileCursor {
+    file: Arc<File>,
+    pos: u64,
+}
+
+impl FileCursor {
+    #[cfg(unix)]
+    fn read_at(&self, buf: &mut [u8]) -> io::Result<usize> {
+        std::os::unix::fs::FileExt::read_at(&*self.file, buf, self.pos)
+    }
+
+    #[cfg(windows)]
+    fn read_at(&self, buf: &mut [u8]) -> io::Result<usize> {
+        std::os::windows::fs::FileExt::seek_read(&*self.file, buf, self.pos)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn read_at(&self, _buf: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "reading files is not supported on this platform"))
+    }
+}
+
+impl Read for FileCursor {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.read_at(buf)?;
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl Seek for FileCursor {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let (base, offset) = match pos {
+            SeekFrom::Start(n) => (n, 0),
+            SeekFrom::Current(d) => (self.pos, d),
+            SeekFrom::End(d) => (self.file.metadata()?.len(), d),
+        };
+        self.pos = base
+            .checked_add_signed(offset)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before the start of the file"))?;
+        Ok(self.pos)
+    }
+}
+
+/// Where the workbook comes from. Each row stream gets its own cursor, so several sheets can be
 /// read at once.
 #[derive(Clone)]
 enum Origin {
-    Path(PathBuf),
+    File(Arc<File>),
     Bytes(SharedBytes),
 }
 
 impl Origin {
-    fn open(&self) -> io::Result<Source> {
-        Ok(match self {
-            Origin::Path(p) => Source::File(BufReader::with_capacity(64 * 1024, File::open(p)?)),
+    fn open(&self) -> Source {
+        match self {
+            Origin::File(f) => Source::File(BufReader::with_capacity(64 * 1024, FileCursor { file: f.clone(), pos: 0 })),
             Origin::Bytes(b) => Source::Bytes(Cursor::new(b.clone())),
-        })
+        }
     }
 }
 
 /// A seekable handle to the workbook.
 enum Source {
-    File(BufReader<File>),
+    File(BufReader<FileCursor>),
     Bytes(Cursor<SharedBytes>),
 }
 
@@ -147,8 +194,9 @@ pub struct Workbook {
 
 impl Workbook {
     /// Opens a workbook file.
-    pub fn open_path(path: impl Into<PathBuf>, config: &ReadConfig) -> Result<Self> {
-        Self::open(Origin::Path(path.into()), config)
+    pub fn open_path(path: impl AsRef<Path>, config: &ReadConfig) -> Result<Self> {
+        let file = File::open(path).map_err(|e| read_error(e.into()))?;
+        Self::open(Origin::File(Arc::new(file)), config)
     }
 
     /// Opens a workbook held in memory. A `Vec` is taken over without copying.
@@ -158,8 +206,7 @@ impl Workbook {
 
     fn open(origin: Origin, config: &ReadConfig) -> Result<Self> {
         let options = config.options()?;
-        let source = origin.open().map_err(|e| read_error(e.into()))?;
-        let reader = XlsxReader::with_options(source, &options).map_err(read_error)?;
+        let reader = XlsxReader::with_options(origin.open(), &options).map_err(read_error)?;
         let sheets = reader
             .sheets()
             .iter()
@@ -247,7 +294,7 @@ fn put_datetime(out: &mut Vec<u8>, d: ExcelDateTime) {
 impl RowStream {
     fn open(&mut self) -> Result<()> {
         let StreamState::Pending { origin, reader, index } = &self.state else { return Ok(()) };
-        let handle = origin.open().map_err(|e| read_error(e.into()))?;
+        let handle = origin.open();
         let rows = {
             let mut reader = reader.lock().map_err(|_| failed("the workbook is unusable after an earlier failure"))?;
             reader.with_source(handle).and_then(|r| r.into_worksheet_at(*index)).map_err(read_error)?
@@ -392,6 +439,33 @@ mod tests {
         assert!(rows.done());
         assert!(!rows.next_batch(&mut out.clone()).unwrap());
         out
+    }
+
+    #[test]
+    fn reads_the_opened_file_after_its_path_is_replaced_or_deleted() {
+        let dir = std::env::temp_dir().join(format!("hypaxel-engine-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("book.xlsx");
+        std::fs::write(&path, workbook(true)).unwrap();
+        let book = Workbook::open_path(&path, &ReadConfig::default()).unwrap();
+        let mut early = book.rows(0).unwrap();
+        let mut out = Vec::new();
+        assert!(early.next_batch(&mut out).unwrap());
+
+        let replacement = dir.join("other.xlsx");
+        std::fs::write(&replacement, b"not a workbook").unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        let mut late = book.rows(0).unwrap();
+        let mut again = Vec::new();
+        let replaced = late.next_batch(&mut again);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let mut last = Vec::new();
+        let deleted = book.rows(0).unwrap().next_batch(&mut last);
+
+        assert!(replaced.unwrap());
+        assert_eq!(again, out);
+        assert!(deleted.unwrap());
+        assert_eq!(last, out);
     }
 
     #[test]
