@@ -8,6 +8,7 @@ mod value;
 mod xml;
 mod zip;
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
@@ -25,6 +26,9 @@ use crate::table::Table;
 
 /// Most tables read from one worksheet.
 const MAX_TABLES: usize = 4096;
+/// Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes
+/// per column on top of its name.
+const MAX_TABLE_TEXT: usize = 64 * 1024 * 1024;
 
 /// Limits that protect against oversized or malicious workbooks.
 #[derive(Debug, Clone)]
@@ -307,7 +311,7 @@ impl<R: Read + Seek> XlsxReader<R> {
     ///
     /// Tables live in their own parts, which are read on each call; reading rows does not touch
     /// them. They are returned from top to bottom, then left to right, whatever order the file
-    /// lists them in. A table style that is not one of Excel's built-in styles is reported as
+    /// lists them in. A part that the sheet references more than once is read once. A table style that is not one of Excel's built-in styles is reported as
     /// [`TableStyle::None`](crate::TableStyle::None).
     pub fn tables_at(&mut self, index: usize) -> Result<Vec<Table>> {
         self.check_index(index)?;
@@ -316,13 +320,17 @@ impl<R: Read + Seek> XlsxReader<R> {
         };
         let mut package = Package { dir: &self.meta.dir, source: &mut self.source };
         let rels = package.relationships(&rels_path(part))?.unwrap_or_default();
-        let mut tables = Vec::new();
-        for rel in rels.iter().filter(|r| r.is("table")) {
-            if tables.len() >= MAX_TABLES {
-                return Err(Error::LimitExceeded(format!("{part} has more than {MAX_TABLES} tables")));
-            }
-            let mut xml = package.xml(&rel.target)?;
-            tables.push(table::parse(&mut xml)?);
+        let mut targets: Vec<&str> = rels.iter().filter(|r| r.is("table")).map(|r| r.target.as_str()).collect();
+        if targets.len() > MAX_TABLES {
+            return Err(Error::LimitExceeded(format!("{part} has more than {MAX_TABLES} tables")));
+        }
+        let mut seen = HashSet::new();
+        targets.retain(|target| seen.insert(*target));
+        let mut tables = Vec::with_capacity(targets.len());
+        let mut budget = MAX_TABLE_TEXT;
+        for target in targets {
+            let mut xml = package.xml(target)?;
+            tables.push(table::parse(&mut xml, &mut budget)?);
         }
         tables.sort_by_key(|t| (t.first_row, t.first_column));
         Ok(tables)

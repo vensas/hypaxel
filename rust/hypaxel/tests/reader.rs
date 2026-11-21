@@ -753,3 +753,30 @@ fn reads_a_table_with_a_totals_row_saved_by_excel() {
     let totals: Vec<_> = totals.iter().map(|(column, value)| (*column, value.as_str())).collect();
     assert_eq!(totals, [(1, "Total"), (5, "21.085"), (6, "33.736"), (8, "99696"), (10, "34500"), (11, "1000")]);
 }
+
+#[test]
+fn bounds_the_memory_of_a_sheets_tables() {
+    let table = r#"<table name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns></table>"#;
+    let rels = format!("<Relationships>{}</Relationships>", TABLE_REL.repeat(3));
+    let repeated = single_sheet(
+        "<worksheet><sheetData/></worksheet>",
+        "",
+        &[("xl/worksheets/_rels/sheet1.xml.rels", rels.as_str()), ("xl/tables/table1.xml", table)],
+    );
+    assert_eq!(reader(&repeated).tables_at(0).unwrap().len(), 1, "a part referenced three times is read once");
+
+    let column = format!(r#"<tableColumn name="{}"/>"#, "n".repeat(4200));
+    let heavy = sheet_with_table(&format!(r#"<table name="T" ref="A1:B2"><tableColumns>{}</tableColumns></table>"#, column.repeat(16_384)));
+    let err = reader(&heavy).tables_at(0).unwrap_err();
+    assert!(matches!(err, Error::LimitExceeded(_)), "{err}");
+
+    let signed = single_sheet(
+        r#"<worksheet><sheetFormatPr outlineLevelRow="+2"/><cols><col min="+1" max="2" width="5"/></cols><sheetData><row r="1" outlineLevel="+3"><c><v>1</v></c></row></sheetData></worksheet>"#,
+        "",
+        &[],
+    );
+    let mut reader = reader(&signed);
+    let mut rows = reader.worksheet_at(0).unwrap();
+    assert_eq!((rows.layout().unwrap().row_outline_levels(), rows.layout().unwrap().column_widths().len()), (0, 0));
+    assert_eq!(rows.next_row().unwrap().unwrap().outline_level(), 0);
+}

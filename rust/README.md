@@ -108,7 +108,8 @@ fn main() -> hypaxel::Result<()> {
   cells without references, rich text, inline strings and ISO 8601 dates.
 - **Safety:** DTDs are rejected (no entity expansion), every XML token and row is bounded, ZIP
   entries must match their declared size and CRC, and `ReadOptions::max_shared_strings_bytes`
-  (default 1 GiB) caps the shared string table. Legacy `.xls` files, encrypted workbooks, CSV
+  (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
+  64 MiB of names, and 16,384 column ranges. Legacy `.xls` files, encrypted workbooks, CSV
   and Word files are reported as `Error::InvalidFile`; damaged parts as `Error::Malformed`.
 - **Several sheets at once:** `reader.with_source(File::open(path)?)` creates a second reader that
   shares the parsed workbook and string table, e.g. for another thread; `into_worksheet` gives

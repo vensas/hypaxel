@@ -6,10 +6,12 @@ use std::io::Read;
 use super::styles::parse_u32;
 use super::xml::{Event, Tag, XmlReader, decode_into};
 use crate::engine::{MAX_COLUMNS, MAX_ROWS};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::table::{Table, TableStyle};
 
-pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>) -> Result<Table> {
+/// `budget` is the number of name bytes the caller still accepts; it is reduced by what the table
+/// holds, plus 32 bytes per column.
+pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>, budget: &mut usize) -> Result<Table> {
     let mut table: Option<Table> = None;
     loop {
         let (start, tag) = match xml.next()? {
@@ -20,6 +22,7 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>) -> Result<Table> {
         };
         let mut descend = false;
         let mut problem = None;
+        let mut cost = 0;
         match (&mut table, tag.name) {
             (None, b"table") => match tag.attr(b"ref").and_then(parse_range) {
                 Some((r1, c1, r2, c2)) => {
@@ -27,6 +30,7 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>) -> Result<Table> {
                     t.name = text(&tag, b"displayName", false).or_else(|| text(&tag, b"name", false));
                     t.header_row = tag.attr(b"headerRowCount").is_none_or(|v| v.trim_ascii() != b"0");
                     t.totals_row = tag.attr(b"totalsRowCount").and_then(parse_u32).is_some_and(|n| n > 0);
+                    cost = t.name.as_ref().map_or(0, String::len);
                     table = Some(t);
                     descend = true;
                 }
@@ -39,7 +43,9 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>) -> Result<Table> {
                 if t.columns.len() >= MAX_COLUMNS as usize {
                     problem = Some("the table has more than 16384 columns");
                 } else {
-                    t.columns.push(Cow::Owned(text(&tag, b"name", true).unwrap_or_default()));
+                    let name = text(&tag, b"name", true).unwrap_or_default();
+                    cost = name.len() + 32;
+                    t.columns.push(Cow::Owned(name));
                 }
             }
             (Some(t), b"tableStyleInfo") => {
@@ -54,6 +60,7 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>) -> Result<Table> {
         if let Some(problem) = problem {
             return Err(xml.malformed(problem));
         }
+        *budget = budget.checked_sub(cost).ok_or_else(|| Error::LimitExceeded("the tables of a worksheet hold too many names".into()))?;
         if start && !descend {
             xml.skip_element()?;
         }
