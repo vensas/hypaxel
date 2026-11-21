@@ -1,0 +1,82 @@
+name: Bug report
+description: A writer, reader or web integration behaves incorrectly or fails.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If a written file does not open in another tool, or a reader rejects a file from another producer, use the **Compatibility problem** template instead.
+
+        Do not report security vulnerabilities here; see the security link on the new-issue page.
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: Implementation
+      multiple: true
+      options:
+        - .NET
+        - Rust
+        - Python
+        - Node.js (native)
+        - Browser (WebAssembly)
+        - Go
+        - Java
+        - PHP
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Writer
+        - Reader
+        - Web integration (ASP.NET Core, axum, FastAPI/Starlette, net/http, stream helpers)
+        - Build or installation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Hypaxel version or commit
+      placeholder: 0.3.0 or e804360
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Runtime and operating system
+      description: Language runtime version, OS and architecture.
+      placeholder: .NET 9.0.4 on Ubuntu 24.04 x64 / Python 3.12 on macOS 15 arm64
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you expected and what happened instead. Include the full error message or stack trace.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: The smallest code that shows the problem.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: |
+        If a file is involved, attach it (zip it first if GitHub rejects `.xlsx`). Remove confidential data before uploading.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
