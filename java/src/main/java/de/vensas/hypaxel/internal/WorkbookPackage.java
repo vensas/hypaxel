@@ -17,6 +17,8 @@ import java.util.Set;
 public final class WorkbookPackage {
     /** Most tables read from one worksheet. */
     static final int MAX_TABLES = 4096;
+    /** Most relationships to other parts that one part may have; links to external targets are not kept and do not count. */
+    static final int MAX_RELATIONSHIPS = 65_536;
     /** Most bytes of table and column names held for the tables of one worksheet (see {@link TableParser#parse}). */
     static final long MAX_TABLE_TEXT = 64L * 1024 * 1024;
 
@@ -213,6 +215,10 @@ public final class WorkbookPackage {
                 String type = xml.attribute(TYPE);
                 String target = xml.attribute(TARGET);
                 if (id != null && type != null && target != null) {
+                    if (rels.size() >= MAX_RELATIONSHIPS) {
+                        throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED,
+                                part + " has more than " + MAX_RELATIONSHIPS + " relationships");
+                    }
                     rels.add(new Relationship(id, type, resolve(base, target)));
                 }
             }

@@ -213,6 +213,30 @@ class ReaderLayoutTest {
     }
 
     @Test
+    void boundsTheRelationshipsOfAPart() throws IOException {
+        String table = "<table " + NS + " name=\"T\" ref=\"A1:B2\"><tableColumns><tableColumn name=\"a\"/><tableColumn name=\"b\"/></tableColumns></table>";
+        String open = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">";
+        String external = "<Relationship Id=\"x\" Type=\"t/hyperlink\" Target=\"https://example.com\" TargetMode=\"External\"/>";
+        String tableRel = "<Relationship Id=\"rId1\" Type=\"" + TABLE_TYPE + "\" Target=\"../tables/table1.xml\"/>";
+        byte[] links = singleSheet("<worksheet " + NS + "><sheetData/></worksheet>", "",
+                "xl/worksheets/_rels/sheet1.xml.rels", open + external.repeat(70_000) + tableRel + "</Relationships>",
+                "xl/tables/table1.xml", table);
+        try (XlsxReader reader = XlsxReader.open(links)) {
+            assertEquals(1, reader.tables(0).size(), "external links do not count");
+        }
+
+        String internal = "<Relationship Id=\"x\" Type=\"t/other\" Target=\"other.xml\"/>";
+        byte[] flood = singleSheet("<worksheet " + NS + "><sheetData/></worksheet>", "",
+                "xl/worksheets/_rels/sheet1.xml.rels", open + internal.repeat(65_537) + "</Relationships>");
+        try (XlsxReader reader = XlsxReader.open(flood)) {
+            XlsxException e = assertThrows(XlsxException.class, () -> reader.tables(0));
+            assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
+            assertTrue(e.getMessage().contains("more than 65536 relationships"), e.getMessage());
+            assertTrue(e.getMessage().contains("xl/worksheets/_rels/sheet1.xml.rels"), e.getMessage());
+        }
+    }
+
+    @Test
     void parsesIntegerAttributesAsUnsigned32BitDigits() throws IOException {
         String sheet = "<worksheet " + NS + "><sheetFormatPr outlineLevelRow=\"4294967295\"/><cols>"
                 + "<col min=\"1\" max=\"4294967295\" width=\"9\"/><col min=\"+2\" max=\"3\" width=\"5\"/>"

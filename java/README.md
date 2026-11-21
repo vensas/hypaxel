@@ -216,7 +216,8 @@ and repeat the error if reading the layout failed.
   match their declared size and CRC-32, and `ReadOptions.builder().maxSharedStringsBytes(...)`
   (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
   64 MiB of table and column names between them, and a table part that is referenced more than
-  once is read once. Legacy `.xls` files, encrypted workbooks, CSV and
+  once is read once. A part may have at most 65,536 relationships to other parts (external links
+  do not count). Legacy `.xls` files, encrypted workbooks, CSV and
   Word files fail with `XlsxException` of kind `INVALID_FILE`, damaged parts with `MALFORMED` and
   a `part()` such as `xl/worksheets/sheet1.xml`; messages name the part and row. Invalid UTF-8 in
   text is replaced with U+FFFD.
