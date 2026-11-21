@@ -128,6 +128,10 @@ Python, Node.js, .NET, Java, Go and PHP).
   uses the 300k-row figures only (~14x faster than SheetJS), and paired read memory figures name both files ("peak 49 MB inline / 141 MB shared").
 - `dotnet-read-background.json` names what it compares with, and the check requires every suite to
   list its compared versions.
+- PHP: `vensas/hypaxel` is prepared for Packagist. A workflow publishes `php/` to a generated,
+  read-only repository with `git subtree split`, fast-forwarding its `main` and creating release
+  tags without ever moving a published one (`docs/publishing-php.md`). The Composer archive leaves
+  out tests, benchmarks, examples and tool configuration.
 
 ## 0.3.0 (2026-11-20)
 
