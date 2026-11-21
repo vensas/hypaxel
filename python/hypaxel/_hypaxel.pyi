@@ -142,7 +142,13 @@ CellValue = Union[str, int, float, bool, datetime.datetime, datetime.time, datet
 @final
 class Reader:
     """Reads an XLSX workbook; rows are streamed. Use :func:`hypaxel.open_workbook`."""
-    def __init__(self, source: Union[str, PathLike[str], bytes, IO[bytes]], *, max_shared_strings_bytes: int = 1073741824) -> None: ...
+    def __init__(
+        self,
+        source: Union[str, PathLike[str], bytes, IO[bytes]],
+        *,
+        max_shared_strings_bytes: int = 1073741824,
+        include_empty_rows: bool = False,
+    ) -> None: ...
     @property
     def sheet_names(self) -> list[str]: ...
     @property

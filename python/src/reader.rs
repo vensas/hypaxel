@@ -179,10 +179,10 @@ impl Reader {
 #[pymethods]
 impl Reader {
     #[new]
-    #[pyo3(signature = (source, *, max_shared_strings_bytes = 1 << 30))]
-    fn new(py: Python<'_>, source: &Bound<'_, PyAny>, max_shared_strings_bytes: u64) -> PyResult<Self> {
+    #[pyo3(signature = (source, *, max_shared_strings_bytes = 1 << 30, include_empty_rows = false))]
+    fn new(py: Python<'_>, source: &Bound<'_, PyAny>, max_shared_strings_bytes: u64, include_empty_rows: bool) -> PyResult<Self> {
         let origin = origin_from(py, source)?;
-        let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes);
+        let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes).include_empty_rows(include_empty_rows);
         let handle = origin.open();
         let reader = py.detach(|| XlsxReader::with_options(handle, &options)).map_err(read_err)?;
         Ok(Reader { origin: Some(origin), reader: Some(reader) })
@@ -424,9 +424,15 @@ impl RowIterator {
         if self.done {
             return Ok(None);
         }
-        let Some(row) = self.rows.next_row().map_err(read_err)? else {
-            self.done = true;
-            return Ok(None);
+        let row = loop {
+            match self.rows.next_row().map_err(read_err)? {
+                Some(row) if self.skip_empty && row.is_empty() => {}
+                Some(row) => break row,
+                None => {
+                    self.done = true;
+                    return Ok(None);
+                }
+            }
         };
         let number = row.number();
         let props =

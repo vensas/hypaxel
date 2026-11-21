@@ -271,3 +271,31 @@ def test_reads_back_tables_row_properties_and_layout():
         ws.add_table(*position, **table)
 
     assert hypaxel.open_workbook(build(copy)).tables()[0] == {**table, **dict(zip(("first_row", "first_col", "last_row", "last_col"), position))}
+
+
+def test_reports_rows_without_values_on_request():
+    def fill(wb):
+        ws = wb.add_worksheet("Data", row_outline_levels=1)
+        ws.write_row(["first"])
+        ws.begin_row(height=40)
+        ws.end_row()
+        ws.skip_rows(2)
+        ws.write_row([5])
+        ws.begin_row(outline_level=1, hidden=True)
+        ws.end_row()
+
+    data = build(fill)
+
+    def scan(**options):
+        with hypaxel.open_workbook(data, include_empty_rows=options.pop("include", False)) as wb:
+            rows = wb.rows(**options)
+            return [(rows.row_number, row, rows.outline_level, rows.hidden, rows.height) for row in rows]
+
+    assert scan() == [(1, ["first"], 0, False, None), (2, [], 0, False, None), (3, [], 0, False, None),
+                      (4, [], 0, False, None), (5, [5], 0, False, None)]
+    assert scan(include=True) == [(1, ["first"], 0, False, None), (2, [], 0, False, 40.0), (3, [], 0, False, None),
+                                  (4, [], 0, False, None), (5, [5], 0, False, None), (6, [], 1, True, None)]
+    assert [number for number, *_ in scan(include=True, skip_empty=True)] == [1, 5]
+    assert hypaxel.read_rows(data, include_empty_rows=True)[-1] == []
+    assert hypaxel.read_records(data, header_row=5, include_empty_rows=True) == []
+    assert len(hypaxel.read_dataframe(data, header=False, include_empty_rows=True)) == 2

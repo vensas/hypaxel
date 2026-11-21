@@ -93,7 +93,10 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   (non-built-in) table style reads as `None`.
 - **Rows and columns:** the iterator returned by `wb.rows()` describes the row it returned last:
   `row_number`, `outline_level`, `hidden`, `collapsed` and `height` (`None` when the row stores no
-  height). Before the first row it already has the sheet's `column_widths` (a list of
+  height). Rows that the file stores without values (a spacer row with a height, an empty hidden
+  row) come back as `[]` with default properties; open the workbook with
+  `include_empty_rows=True` to get their properties as well (such rows after the last value are
+  then returned too, and `skip_empty=True` still drops them). Before the first row it already has the sheet's `column_widths` (a list of
   `(first_col, last_col, width)`, explicit and auto-fitted alike), `column_width(col)`,
   `outline_summary_above` and `row_outline_levels`.
 
@@ -208,7 +211,7 @@ def export():
 | `Worksheet.merge_cells(r1, c1, r2, c2)`, `autofilter(r1, c1, r2, c2)` | ranges (1-based, inclusive) |
 | `Worksheet.add_table(r1, c1, r2, c2, *, columns=, name=, style="TableStyleMedium2", header_row=, autofilter=, row_stripes=, column_stripes=, first_column=, last_column=)` | Excel table; `columns` must equal the header texts |
 | `Formula("SUM(A1:A9)")`, `Styled(value, style)` | special cell values |
-| `open_workbook(source, *, max_shared_strings_bytes=1 GiB)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
+| `open_workbook(source, *, max_shared_strings_bytes=1 GiB, include_empty_rows=False)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
 | `Reader.sheet_names`, `Reader.sheets`, `Reader.date_1904`, `Reader.rows(sheet=0, *, skip_empty=False)`, `Reader.close()` | `rows` iterates lists; several iterators can be open at once |
 | `Reader.tables(sheet=0)` | the sheet's Excel tables as dicts with `add_table`'s keys |
 | `RowIterator.row_number`, `outline_level`, `hidden`, `collapsed`, `height` | properties of the row returned last |
