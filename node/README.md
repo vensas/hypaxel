@@ -182,7 +182,10 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   read only when you ask. A custom (non-built-in) table style reads as `'none'`.
 - **Rows and columns:** the object returned by `workbook.rows()` describes the row it returned
   last: `rowNumber`, `outlineLevel`, `hidden`, `collapsed` and `height` (`undefined` when the row
-  stores no height). `rows.layout()` (or `await rows.layoutAsync()`) gives the sheet's
+  stores no height). Rows that the file stores without values (a spacer row with a height, an
+  empty hidden row) come back as `[]` with default properties; open the workbook with
+  `includeEmptyRows: true` to get their properties as well (such rows after the last value are
+  then returned too, and `skipEmpty: true` still drops them). `rows.layout()` (or `await rows.layoutAsync()`) gives the sheet's
   `columnWidths` (`{ firstColumn, lastColumn, width }`, explicit and auto-fitted alike),
   `columnWidth(column)`, `outlineSummaryAbove` and `rowOutlineLevels`. They can be read before
   the first row; the layout arrives with the first batch of rows.

@@ -16,11 +16,12 @@ use crate::to_napi;
 #[derive(Default)]
 pub struct NativeReadOptions {
     pub max_shared_strings_bytes: Option<f64>,
+    pub include_empty_rows: Option<bool>,
 }
 
 impl From<NativeReadOptions> for ReadConfig {
     fn from(o: NativeReadOptions) -> Self {
-        ReadConfig { max_shared_strings_bytes: o.max_shared_strings_bytes }
+        ReadConfig { max_shared_strings_bytes: o.max_shared_strings_bytes, include_empty_rows: o.include_empty_rows }
     }
 }
 

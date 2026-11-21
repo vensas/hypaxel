@@ -174,11 +174,12 @@ impl Seek for Source {
 #[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(rename_all = "camelCase", default))]
 pub struct ReadConfig {
     pub max_shared_strings_bytes: Option<f64>,
+    pub include_empty_rows: Option<bool>,
 }
 
 impl ReadConfig {
     fn options(&self) -> Result<ReadOptions> {
-        let mut options = ReadOptions::new();
+        let mut options = ReadOptions::new().include_empty_rows(self.include_empty_rows.unwrap_or(false));
         if let Some(bytes) = self.max_shared_strings_bytes {
             if !(bytes.is_finite() && bytes >= 0.0) {
                 return Err(invalid("maxSharedStringsBytes must be a non-negative number"));
@@ -734,14 +735,39 @@ mod tests {
     }
 
     #[test]
+    fn encodes_rows_without_values_on_request() {
+        use hypaxel::RowOptions;
+
+        let mut writer = XlsxWriter::new(Vec::new());
+        let mut sheet = writer.add_worksheet("Data").unwrap();
+        sheet.begin_row_with(&RowOptions::new().height(40.0)).unwrap().end_row().unwrap();
+        sheet.add_row((1,)).unwrap();
+        let bytes = writer.finish().unwrap();
+
+        let config = ReadConfig { include_empty_rows: Some(true), ..Default::default() };
+        let mut rows = Workbook::open_bytes(bytes.clone(), &config).unwrap().rows(0).unwrap();
+        let mut out = Vec::new();
+        assert!(rows.next_batch(&mut out).unwrap());
+        let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
+        assert_eq!((c.u8(), c.u8(), c.f64()), (TAG_ROW_PROPS, PROP_HEIGHT, 40.0));
+        assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 0));
+        assert_eq!((c.u8(), c.u32(), c.u32(), c.u8(), c.f64()), (TAG_ROW, 2, 1, TAG_NUMBER, 1.0));
+        assert_eq!(c.pos, out.len());
+
+        let out = batch(bytes);
+        let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
+        assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 2, 1));
+    }
+
+    #[test]
     fn reports_bad_input() {
         let err = |r: Result<Workbook>| r.err().unwrap().to_string();
         assert!(!err(Workbook::open_bytes(vec![1, 2, 3], &ReadConfig::default())).is_empty());
         assert!(err(Workbook::open_path("/no/such/file.xlsx", &ReadConfig::default())).starts_with("file not found"));
-        let config = ReadConfig { max_shared_strings_bytes: Some(-1.0) };
+        let config = ReadConfig { max_shared_strings_bytes: Some(-1.0), ..Default::default() };
         assert!(matches!(Workbook::open_bytes(workbook(true), &config), Err(Error::Invalid(_))));
 
-        let tight = ReadConfig { max_shared_strings_bytes: Some(1.0) };
+        let tight = ReadConfig { max_shared_strings_bytes: Some(1.0), ..Default::default() };
         let book = Workbook::open_bytes(workbook(true), &tight).unwrap();
         let mut rows = book.rows(0).unwrap();
         assert!(rows.next_batch(&mut Vec::new()).unwrap_err().to_string().contains("limit"));

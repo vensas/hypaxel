@@ -241,7 +241,7 @@ export interface EngineWorkbook {
 export interface Engine {
   createWriter(options: Omit<WriterOptions, 'dates'>): EngineWriter
   /** Opens a workbook from bytes. */
-  openWorkbook(bytes: Uint8Array, options: { maxSharedStringsBytes?: number }): EngineWorkbook
+  openWorkbook(bytes: Uint8Array, options: { maxSharedStringsBytes?: number; includeEmptyRows?: boolean }): EngineWorkbook
   /** Decodes UTF-8 from a batch returned by {@link EngineRows.next}. */
   decodeUtf8(buffer: Uint8Array, start: number, end: number): string
   columnName(column: number): string

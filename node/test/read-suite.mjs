@@ -368,4 +368,39 @@ export function defineReadSuite(label, api) {
     target.addTable(table.firstRow, table.firstColumn, table.lastRow, table.lastColumn, table.options)
     assert.deepEqual(openWorkbookSync(copy.finish()).tables(), [table])
   })
+
+  test('reports rows without values on request', async () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('Data', { rowOutlineLevels: 1 })
+    sheet.writeRow(['first'])
+    sheet.beginRow({ height: 40 })
+    sheet.endRow()
+    sheet.skipRows(1)
+    sheet.writeRow([4])
+    sheet.beginRow({ outlineLevel: 1, hidden: true })
+    sheet.endRow()
+    const bytes = writer.finish()
+
+    const scan = (readOptions, rowsOptions) => {
+      const rows = openWorkbookSync(bytes, readOptions).rows(0, rowsOptions)
+      const seen = []
+      for (const row of rows) seen.push([rows.rowNumber, row, rows.outlineLevel, rows.hidden, rows.height])
+      return seen
+    }
+    assert.deepEqual(scan(), [
+      [1, ['first'], 0, false, undefined],
+      [2, [], 0, false, undefined],
+      [3, [], 0, false, undefined],
+      [4, [4], 0, false, undefined],
+    ])
+    assert.deepEqual(scan({ includeEmptyRows: true }), [
+      [1, ['first'], 0, false, undefined],
+      [2, [], 0, false, 40],
+      [3, [], 0, false, undefined],
+      [4, [4], 0, false, undefined],
+      [5, [], 1, true, undefined],
+    ])
+    assert.deepEqual(scan({ includeEmptyRows: true }, { skipEmpty: true }).map((r) => r[0]), [1, 4])
+    assert.deepEqual(await readRecords(bytes, 0, { includeEmptyRows: true }), [{ first: 4 }])
+  })
 }

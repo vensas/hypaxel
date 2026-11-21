@@ -29,6 +29,13 @@ export interface ReadOptions {
    */
   maxSharedStringsBytes?: number
   /**
+   * Rows that the file stores without any value (a spacer row with a height, an empty hidden row)
+   * read as `[]`, like missing rows. With this option {@link SheetRows} also reports their
+   * `outlineLevel`, `hidden`, `collapsed` and `height`, and such rows after the last value are
+   * returned too. `skipEmpty` still drops them.
+   */
+  includeEmptyRows?: boolean
+  /**
    * Excel stores dates without a time zone. `'local'` (default) returns a `Date` with that wall-clock
    * time in the local time zone, `'utc'` in UTC. Matches the writer's `dates` option.
    */
@@ -328,9 +335,10 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
   }
 
   #take(): ReadValue[] | undefined {
-    if (this.#pending === undefined) {
+    while (this.#pending === undefined) {
       if (this.#position >= this.#batch.length) return undefined
       this.#decodeRow()
+      if (this.#skipEmpty && this.#pending!.length === 0) this.#pending = undefined
     }
     const number = this.#pendingNumber
     if (this.#skipEmpty || this.#emitted + 1 >= number) {
@@ -766,7 +774,9 @@ export async function collectBytes(source: BytesSource): Promise<Uint8Array> {
 /** @internal Opens a workbook held in memory on the current engine. */
 export function openBytes(bytes: Uint8Array, options: ReadOptions): Workbook {
   const engine = currentEngine()
-  const native = guard(() => engine.openWorkbook(bytes, { maxSharedStringsBytes: options.maxSharedStringsBytes }))
+  const native = guard(() =>
+    engine.openWorkbook(bytes, { maxSharedStringsBytes: options.maxSharedStringsBytes, includeEmptyRows: options.includeEmptyRows }),
+  )
   return new Workbook(native, options)
 }
 
