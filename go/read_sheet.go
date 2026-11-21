@@ -125,11 +125,6 @@ func (r *Rows) Layout() (*SheetLayout, error) {
 		if err := r.readHeader(); err != nil {
 			r.err = err
 			r.finish()
-		} else if r.state == rowsDone {
-			r.finish()
-			if r.err != nil {
-				r.layoutRead, r.layoutErr = false, r.err
-			}
 		}
 	}
 	switch {
@@ -141,9 +136,15 @@ func (r *Rows) Layout() (*SheetLayout, error) {
 	return &r.layout, ErrRowsClosed
 }
 
-// readHeader reads the worksheet up to its rows and records whether the layout is complete.
+// readHeader reads the worksheet up to its rows and records whether the layout is complete. On a
+// sheet without rows it also verifies the rest of the entry, so that Layout and Next report a
+// damaged entry alike, whichever is called first.
 func (r *Rows) readHeader() error {
 	err := r.findSheetData()
+	if err == nil && r.state == rowsDone {
+		r.finish()
+		err = r.err
+	}
 	r.layoutRead, r.layoutErr = err == nil, err
 	return err
 }

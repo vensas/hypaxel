@@ -688,13 +688,14 @@ func TestLayoutOnSheetWithoutRowsVerifiesTheEntry(t *testing.T) {
 	damaged := bytes.Clone(data)
 	damaged[centralEntry(t, data, "xl/worksheets/sheet1.xml")+16] ^= 0xFF
 
+	checksum := func(err error) bool { return errors.Is(err, ErrMalformed) && errors.Is(err, zip.ErrChecksum) }
 	for _, concurrent := range []bool{false, true} {
-		for _, withLayout := range []bool{false, true} {
+		for _, layoutFirst := range []bool{false, true} {
 			rows, err := openBytes(t, damaged, WithConcurrentInflate(concurrent)).Rows("S")
 			noErr(t, err)
-			if withLayout {
+			if layoutFirst {
 				for range 2 {
-					if _, err := rows.Layout(); !errors.Is(err, ErrMalformed) || !errors.Is(err, zip.ErrChecksum) {
+					if _, err := rows.Layout(); !checksum(err) {
 						t.Errorf("concurrent %v: Layout() = %v, want a checksum error", concurrent, err)
 					}
 				}
@@ -702,8 +703,13 @@ func TestLayoutOnSheetWithoutRowsVerifiesTheEntry(t *testing.T) {
 			if rows.Next() {
 				t.Fatal("unexpected row")
 			}
-			if err := rows.Err(); !errors.Is(err, ErrMalformed) || !errors.Is(err, zip.ErrChecksum) {
-				t.Errorf("concurrent %v, layout %v: Err() = %v, want a checksum error", concurrent, withLayout, err)
+			if err := rows.Err(); !checksum(err) {
+				t.Errorf("concurrent %v, layout first %v: Err() = %v, want a checksum error", concurrent, layoutFirst, err)
+			}
+			for range 2 {
+				if _, err := rows.Layout(); !checksum(err) {
+					t.Errorf("concurrent %v, layout first %v: Layout() after Next = %v, want a checksum error", concurrent, layoutFirst, err)
+				}
 			}
 		}
 	}
