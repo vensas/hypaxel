@@ -837,3 +837,89 @@ fn reads_a_table_downloaded_from_google_sheets() {
     let totals: Vec<_> = totals.iter().map(|(column, value)| (*column, value.as_str())).collect();
     assert_eq!(totals, [(1, "Total"), (5, "21.20421754"), (6, "33.92674806"), (8, "90058"), (10, "31060"), (11, "901")]);
 }
+
+/// A stored (uncompressed) package whose CRC-32 of `xl/worksheets/sheet1.xml` is wrong.
+fn with_bad_sheet_crc(bytes: Vec<u8>) -> Vec<u8> {
+    let mut bytes = bytes;
+    let name = b"xl/worksheets/sheet1.xml";
+    let mut patched = 0;
+    for i in 0..bytes.len().saturating_sub(4) {
+        let signature = &bytes[i..i + 4];
+        let (crc_at, name_at) = match signature {
+            b"PK\x03\x04" => (i + 14, i + 30),
+            b"PK\x01\x02" => (i + 16, i + 46),
+            _ => continue,
+        };
+        if bytes.get(name_at..name_at + name.len()) == Some(&name[..]) {
+            bytes[crc_at] ^= 0xFF;
+            patched += 1;
+        }
+    }
+    assert_eq!(patched, 2, "local and central header");
+    bytes
+}
+
+fn stored_single_sheet(sheet_xml: &str) -> Vec<u8> {
+    let workbook = r#"<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+    let rels = r#"<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#;
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (name, content) in [
+        ("_rels/.rels", ROOT_RELS),
+        ("xl/workbook.xml", workbook),
+        ("xl/_rels/workbook.xml.rels", rels),
+        ("xl/worksheets/sheet1.xml", sheet_xml),
+    ] {
+        zip.start_file(name, stored).unwrap();
+        zip.write_all(content.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn verifies_the_whole_sheet_and_remembers_layout_failures() {
+    let trailer = r#"<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>"#;
+    for sheet in [
+        format!(r#"<worksheet><cols><col min="1" max="1" width="9"/></cols><sheetData/>{trailer}</worksheet>"#),
+        format!(r#"<worksheet><sheetData><row r="1"><c><v>1</v></c></row></sheetData>{trailer}</worksheet>"#),
+    ] {
+        let good = stored_single_sheet(&sheet);
+        let mut book = reader(&good);
+        let mut rows = book.worksheet_at(0).unwrap();
+        rows.layout().unwrap();
+        while rows.next_row().unwrap().is_some() {}
+
+        let bad = with_bad_sheet_crc(good);
+        let mut book = reader(&bad);
+        let mut rows = book.worksheet_at(0).unwrap();
+        let error = match rows.layout() {
+            Err(e) => e,
+            Ok(_) => loop {
+                match rows.next_row() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => panic!("the damaged entry was accepted: {sheet}"),
+                    Err(e) => break e,
+                }
+            },
+        };
+        assert!(error.to_string().contains("CRC-32"), "{error}");
+    }
+
+    let empty = with_bad_sheet_crc(stored_single_sheet(&format!("<worksheet><sheetData/>{trailer}</worksheet>")));
+    let mut book = reader(&empty);
+    let mut rows = book.worksheet_at(0).unwrap();
+    for _ in 0..2 {
+        assert!(rows.layout().unwrap_err().to_string().contains("CRC-32"));
+    }
+    assert!(rows.next_row().unwrap_err().to_string().contains("CRC-32"));
+
+    let cols = r#"<col min="1" max="1" width="1"/>"#.repeat(16_385);
+    let wide =
+        single_sheet(&format!(r#"<worksheet><cols>{cols}</cols><sheetData><row><c><v>1</v></c></row></sheetData></worksheet>"#), "", &[]);
+    let mut book = reader(&wide);
+    let mut rows = book.worksheet_at(0).unwrap();
+    for _ in 0..2 {
+        assert!(matches!(rows.layout(), Err(Error::Malformed { .. })), "the failure is reported every time");
+    }
+    assert!(matches!(rows.next_row(), Err(Error::Malformed { .. })));
+}

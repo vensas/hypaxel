@@ -217,6 +217,22 @@ impl<S: Read> XmlReader<S> {
         Ok(())
     }
 
+    /// Reads the rest of the input without parsing it, so that the source can verify what it
+    /// delivers (for a ZIP entry, its size and CRC-32).
+    pub fn drain(&mut self) -> Result<()> {
+        self.pos = self.end;
+        let mut sink = [0u8; 8192];
+        while !self.eof {
+            match self.src.read(&mut sink) {
+                Ok(0) => self.eof = true,
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(unwrap_io(e)),
+            }
+        }
+        Ok(())
+    }
+
     pub fn next(&mut self) -> Result<Event<'_>> {
         if !self.started {
             self.check_encoding()?;

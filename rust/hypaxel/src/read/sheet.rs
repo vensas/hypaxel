@@ -124,6 +124,18 @@ struct RowProps {
     height: Option<f64>,
 }
 
+/// The errors reading can produce, duplicated so that a failure can be reported more than once.
+fn copy_error(e: &Error) -> Error {
+    match e {
+        Error::Io(io) => Error::Io(std::io::Error::new(io.kind(), io.to_string())),
+        Error::Malformed { part, message } => Error::Malformed { part: part.clone(), message: message.clone() },
+        Error::LimitExceeded(m) => Error::LimitExceeded(m.clone()),
+        Error::Unsupported(m) => Error::Unsupported(m.clone()),
+        Error::InvalidFile(m) => Error::InvalidFile(m.clone()),
+        other => Error::Custom(other.to_string()),
+    }
+}
+
 fn parse_outline_level(raw: &[u8]) -> u8 {
     parse_u32(raw).map_or(0, |n| n.min(7) as u8)
 }
@@ -155,6 +167,8 @@ pub struct Rows<R> {
     number: u32,
     props: RowProps,
     layout: SheetLayout,
+    /// Why reading the layout failed; returned again by every later call.
+    layout_error: Option<Error>,
     cells: Vec<RawCell>,
     text: String,
     scratch: String,
@@ -185,6 +199,7 @@ impl<R: Read> Rows<R> {
             number: 0,
             props: RowProps::default(),
             layout: SheetLayout::default(),
+            layout_error: None,
             cells: Vec::new(),
             text: String::new(),
             scratch: String::new(),
@@ -193,11 +208,25 @@ impl<R: Read> Rows<R> {
 
     /// The column widths and outline settings of the sheet. They precede the rows in the file, so
     /// this is available before the first row is read and costs nothing extra.
+    ///
+    /// If reading the layout fails, this and [`next_row`](Self::next_row) return that error from
+    /// then on.
     pub fn layout(&mut self) -> Result<&SheetLayout> {
-        if self.state == State::BeforeData {
-            self.find_sheet_data()?;
-        }
+        self.read_layout()?;
         Ok(&self.layout)
+    }
+
+    fn read_layout(&mut self) -> Result<()> {
+        if let Some(e) = &self.layout_error {
+            return Err(copy_error(e));
+        }
+        if self.state != State::BeforeData {
+            return Ok(());
+        }
+        self.find_sheet_data().inspect_err(|e| {
+            self.state = State::Done;
+            self.layout_error = Some(copy_error(e));
+        })
     }
 
     /// Reads the next row that contains at least one value. Rows that are missing from the file
@@ -207,8 +236,8 @@ impl<R: Read> Rows<R> {
     pub fn next_row(&mut self) -> Result<Option<Row<'_>>> {
         loop {
             match self.state {
-                State::Done => return Ok(None),
-                State::BeforeData => self.find_sheet_data()?,
+                State::Done => return self.layout_error.as_ref().map_or(Ok(None), |e| Err(copy_error(e))),
+                State::BeforeData => self.read_layout()?,
                 State::InData => {
                     let (start, tag) = match self.xml.next()? {
                         Event::Start(t) if t.name == b"row" => (true, t),
@@ -219,6 +248,7 @@ impl<R: Read> Rows<R> {
                         }
                         Event::End(_) | Event::Eof => {
                             self.state = State::Done;
+                            self.xml.drain()?;
                             continue;
                         }
                         _ => continue,
@@ -283,8 +313,13 @@ impl<R: Read> Rows<R> {
             };
             let mut descend = false;
             match tag.name {
+                b"sheetData" if start => {
+                    self.state = State::InData;
+                    return Ok(());
+                }
                 b"sheetData" => {
-                    self.state = if start { State::InData } else { State::Done };
+                    self.xml.drain()?;
+                    self.state = State::Done;
                     return Ok(());
                 }
                 b"worksheet" | b"dialogsheet" | b"macrosheet" | b"sheetPr" | b"cols" => descend = true,
