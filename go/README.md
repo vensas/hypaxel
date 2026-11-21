@@ -332,6 +332,46 @@ return rows.Err()
 `rows.All()` returns an `iter.Seq2[*Row, error]` for `for row, err := range rows.All()`; the loop
 closes the rows when it ends. `Row` also has `Len`, `LastColumn` and `Cell(i)` for index loops.
 
+### Reading tables, row properties and column widths
+
+What the writer adds on top of the values can be read back, so a test can check a written file
+with Hypaxel alone:
+
+```go
+tables, err := r.Tables("Orders")              // or r.TablesAt(0); []hypaxel.Table, as passed to AddTable
+if err != nil {
+	return err
+}
+fmt.Println(tables[0].Name, tables[0].Columns, tables[0].Style)
+
+rows, err := r.Rows("Orders")
+if err != nil {
+	return err
+}
+defer rows.Close()
+layout, err := rows.Layout()                   // available before the first row
+if err != nil {
+	return err
+}
+width, ok := layout.ColumnWidth(1)             // or layout.ColumnWidths: runs of columns with one width
+fmt.Println(width, ok, layout.OutlineSummaryAbove, layout.RowOutlineLevels)
+for rows.Next() {
+	row := rows.Row()
+	height, hasHeight := row.Height()          // points
+	fmt.Println(row.OutlineLevel(), row.Hidden(), row.Collapsed(), height, hasHeight)
+}
+return rows.Err()
+```
+
+- **Tables** live in parts of their own, which are read on each call to `Tables`; reading rows
+  never touches them. A table comes back as the `Table` that `AddTable` takes: `TableStyleMedium2`
+  as the zero `TableStyle`, a custom (not built-in) style as `TableStyleNone`, generated names such
+  as `Table1` and `Column1` filled in, and `NoFilterButtons` set for a table without a header row.
+- **Row properties** are those of the rows that `Next` returns; rows without values are skipped
+  as before. `Height` is the stored height, whether set explicitly or by Excel.
+- **Layout** precedes the rows in the file, so `Layout` reads nothing extra. `ColumnWidths` holds
+  explicit and auto-fitted widths alike; columns that are not listed have the default width.
+
 **`Reader`**
 
 | Function | Purpose |
@@ -339,6 +379,9 @@ closes the rows when it ends. `Row` also has `Len`, `LastColumn` and `Cell(i)` f
 | `OpenReader(path, opts...)`, `NewReader(src io.ReaderAt, size, opts...)` | Open a workbook; `Close` closes a file opened by path |
 | `Sheets()`, `SheetNames()` | Sheets in workbook order with `Name`, `Visibility` (`SheetVisible`, `SheetHidden`, `SheetVeryHidden`) and `Kind` (`SheetKindWorksheet`, `SheetKindChartsheet`, `SheetKindOther`) |
 | `Rows(name)`, `RowsAt(index)` | Stream a sheet, by name (exact, then case-insensitive) or 0-based index |
+| `Tables(name)`, `TablesAt(index)` | The Excel tables of a sheet as `[]Table` |
+| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths`, `ColumnWidth(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
+| `Row.OutlineLevel()`, `Hidden()`, `Collapsed()`, `Height()` | Properties of the current row |
 | `Date1904()` | Whether the workbook uses the 1904 date system |
 | `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |
 | `WithConcurrentInflate(on)` | Option: decompress on a separate goroutine while parsing (default on, off when `GOMAXPROCS` is 1) |
@@ -379,7 +422,7 @@ closes the rows when it ends. `Row` also has `Len`, `LastColumn` and `Cell(i)` f
   rows without references, out-of-order cells, rich text, inline strings, phonetic runs, CDATA,
   and Excel's `_xHHHH_` escapes.
 - **Safety:** document type declarations are rejected (no entity expansion), every XML token is
-  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, ZIP entries must match
+  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, every sheet to 4,096 tables, ZIP entries must match
   their declared size and CRC-32, and `WithMaxSharedStringsBytes` caps the shared string table.
   Damaged input returns an error, never a panic or a hang; the reader is fuzz-tested.
 

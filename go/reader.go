@@ -238,17 +238,25 @@ func (r *Reader) Date1904() bool {
 
 // Rows streams the rows of the sheet with this name, matched exactly and then ignoring case.
 func (r *Reader) Rows(name string) (*Rows, error) {
+	index, err := r.sheetIndex(name)
+	if err != nil {
+		return nil, err
+	}
+	return r.RowsAt(index)
+}
+
+func (r *Reader) sheetIndex(name string) (int, error) {
 	for i, s := range r.sheets {
 		if s.Name == name {
-			return r.RowsAt(i)
+			return i, nil
 		}
 	}
 	for i, s := range r.sheets {
 		if strings.EqualFold(s.Name, name) {
-			return r.RowsAt(i)
+			return i, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: %q", ErrSheetNotFound, name)
+	return 0, fmt.Errorf("%w: %q", ErrSheetNotFound, name)
 }
 
 // RowsAt streams the rows of the sheet at a 0-based position in [Reader.Sheets].
