@@ -42,6 +42,42 @@ Python, Node.js, .NET, Java, Go and PHP).
   `[h]:mm` durations, error strings and `null`. Rows cross into JavaScript in binary batches, and
   repeated shared strings are decoded once. Same row and record semantics as Python. Read
   benchmark against ExcelJS's streaming reader and SheetJS (`node/benchmarks/read_bench.mjs`).
+- **Readers return tables, row properties and column widths (.NET, Rust, Python, Node.js and
+  browsers, Go, Java)** ([#1](https://github.com/vensas/hypaxel/issues/1)). A file written with
+  Hypaxel can now be checked with Hypaxel alone. Same semantics everywhere:
+  - Tables are returned as the writer's own table type, so a table that was read can be compared
+    with, or passed to, `add_table`: name, range, column names, style, header row, filter buttons,
+    banded rows and columns, first and last column highlight. Table parts are read only on
+    request; reading values does not touch them. A custom (non-built-in) style reads as "no
+    style", and a table written without a header row reads back without filter buttons.
+  - Each row has its outline level (0–7), hidden and collapsed flags and its height (absent when
+    the row stores none). Rows without values are still skipped.
+  - Each worksheet has its column widths (runs of columns, explicit and auto-fitted alike), a
+    lookup by column, `outline_summary_above` and the declared row outline levels. They precede
+    the rows in the file and are available before the first row is read.
+  - Rust: `XlsxReader::tables(name)` / `tables_at(index)` → `Vec<Table>`; `Row::outline_level`,
+    `is_hidden`, `is_collapsed`, `height`; `Rows::layout()` → `SheetLayout` (`column_widths`,
+    `column_width`, `outline_summary_above`, `row_outline_levels`) with `ColumnWidth`;
+    `TableStyle::name()` is now public.
+  - Python: `Reader.tables(sheet)` → dicts with `add_table`'s keys; on the row iterator
+    `row_number`, `outline_level`, `hidden`, `collapsed`, `height`, `column_widths`,
+    `column_width(col)`, `outline_summary_above`, `row_outline_levels`.
+  - Node.js and browsers: `Workbook.tables(sheet)` → `ReadTable` (`firstRow`, `firstColumn`,
+    `lastRow`, `lastColumn`, `options`); on `SheetRows` `rowNumber`, `outlineLevel`, `hidden`,
+    `collapsed`, `height`, `layout()` / `layoutAsync()` → `SheetLayout` with `ColumnWidth`. The
+    layout and row properties travel in the row batches, identically on both engines.
+  - .NET: `XlsxReader.GetTables(name or index)` → `IReadOnlyList<ExcelTable>`;
+    `XlsxRow.OutlineLevel`, `Hidden`, `Collapsed`, `Height`; `WorksheetReader.ColumnWidths`,
+    `GetColumnWidth`, `OutlineSummaryAbove`, `RowOutlineLevels`; `ColumnWidth`.
+  - Go: `Reader.Tables(name)` / `TablesAt(index)` → `[]Table`; `Row.OutlineLevel`, `Hidden`,
+    `Collapsed`, `Height`; `Rows.Layout()` → `*SheetLayout` (`ColumnWidths`,
+    `ColumnWidth(column)`, `OutlineSummaryAbove`, `RowOutlineLevels`) with `ColumnWidth`.
+  - Java: `XlsxReader.tables(name or index)` → `List<ExcelTable>` (which gains `equals`,
+    `hashCode` and `toString`); `Row.outlineLevel`, `hidden`, `collapsed`, `height`;
+    `SheetReader.columnWidths`, `columnWidth`, `outlineSummaryAbove`, `rowOutlineLevels`;
+    `ColumnWidth`.
+  - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table and
+    16,384 column ranges per sheet.
 - **Browser support for the Node.js package (WebAssembly).** The `hypaxel` npm package now runs in
   browsers and other runtimes without native modules on the Rust core compiled to WebAssembly
   (171 KB gzipped), with the same API as in Node.js. Bundlers pick the build through the `browser` export

@@ -175,7 +175,9 @@ Shared by all seven implementations (milestone 1: creating Excel files).
   (Open XML SDK, calamine, openpyxl, LibreOffice)
 
 Reading (.NET, Rust, Python, Node.js and browsers, Go, Java): streamed rows of strings, numbers, booleans, errors and dates, times and
-durations recognised from number formats, in both date systems; sheet list with visibility; files
+durations recognised from number formats, in both date systems; sheet list with visibility; Excel
+tables, row outline levels, hidden and collapsed rows, row heights, column widths and outline
+settings, so a file written with Hypaxel can be checked with Hypaxel alone; files
 from Excel, LibreOffice and other producers, including Strict Open XML; clear errors for legacy
 `.xls`, encrypted and damaged files; limits for untrusted input.
 
