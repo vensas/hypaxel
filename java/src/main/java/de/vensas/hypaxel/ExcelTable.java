@@ -35,6 +35,7 @@ public final class ExcelTable {
     private final boolean columnStripes;
     private final boolean highlightFirstColumn;
     private final boolean highlightLastColumn;
+    private final boolean totalsRow;
 
     private ExcelTable(Builder builder) {
         firstRow = builder.firstRow;
@@ -50,6 +51,7 @@ public final class ExcelTable {
         columnStripes = builder.columnStripes;
         highlightFirstColumn = builder.highlightFirstColumn;
         highlightLastColumn = builder.highlightLastColumn;
+        totalsRow = builder.totalsRow;
     }
 
     /** Returns a builder for a table over a range (1-based, inclusive) whose first row is the header. */
@@ -122,6 +124,14 @@ public final class ExcelTable {
         return highlightLastColumn;
     }
 
+    /**
+     * Returns whether the last row of the range is the table's totals row. Reported by
+     * {@link XlsxReader#tables(String)}; a table that has one cannot be written.
+     */
+    public boolean totalsRow() {
+        return totalsRow;
+    }
+
     @Override
     public boolean equals(Object other) {
         return other instanceof ExcelTable table
@@ -137,13 +147,14 @@ public final class ExcelTable {
                 && rowStripes == table.rowStripes
                 && columnStripes == table.columnStripes
                 && highlightFirstColumn == table.highlightFirstColumn
-                && highlightLastColumn == table.highlightLastColumn;
+                && highlightLastColumn == table.highlightLastColumn
+                && totalsRow == table.totalsRow;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(firstRow, firstColumn, lastRow, lastColumn, name, columns, style, headerRow, autoFilter,
-                rowStripes, columnStripes, highlightFirstColumn, highlightLastColumn);
+                rowStripes, columnStripes, highlightFirstColumn, highlightLastColumn, totalsRow);
     }
 
     /** Returns the name, range and options, e.g. {@code Orders A1:C10 [Product, Units] TableStyleMedium2}. */
@@ -153,7 +164,8 @@ public final class ExcelTable {
                 + " " + columns + " " + style
                 + " headerRow=" + headerRow + " autoFilter=" + autoFilter
                 + " rowStripes=" + rowStripes + " columnStripes=" + columnStripes
-                + " highlightFirstColumn=" + highlightFirstColumn + " highlightLastColumn=" + highlightLastColumn;
+                + " highlightFirstColumn=" + highlightFirstColumn + " highlightLastColumn=" + highlightLastColumn
+                + " totalsRow=" + totalsRow;
     }
 
     /** Builder for {@link ExcelTable}. */
@@ -171,6 +183,7 @@ public final class ExcelTable {
         private boolean columnStripes;
         private boolean highlightFirstColumn;
         private boolean highlightLastColumn;
+        private boolean totalsRow;
 
         private Builder(int firstRow, int firstColumn, int lastRow, int lastColumn) {
             this.firstRow = firstRow;
@@ -239,6 +252,16 @@ public final class ExcelTable {
         /** Sets whether the last column is highlighted. Default: false. */
         public Builder highlightLastColumn(boolean enabled) {
             highlightLastColumn = enabled;
+            return this;
+        }
+
+        /**
+         * Marks the last row of the range as the table's totals row. Default: false. The reader sets
+         * this for tables that have one; {@link Worksheet#addTable(ExcelTable)} rejects such a table,
+         * because totals rows cannot be written.
+         */
+        public Builder totalsRow(boolean enabled) {
+            totalsRow = enabled;
             return this;
         }
 

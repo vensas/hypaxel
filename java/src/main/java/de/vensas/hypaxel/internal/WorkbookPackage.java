@@ -8,6 +8,7 @@ import de.vensas.hypaxel.XlsxException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /** The structure of an XLSX package: its parts, sheets, date system and cell formats. */
@@ -141,7 +142,7 @@ public final class WorkbookPackage {
         return open(archive, part);
     }
 
-    /** Reads the tables of the sheet at {@code index} from their own parts, in relationship order. */
+    /** Reads the tables of the sheet at {@code index} from their own parts, from top to bottom, then left to right. */
     public List<ExcelTable> readTables(int index) throws IOException {
         String part = sheetParts.get(index);
         if (part == null) {
@@ -166,6 +167,7 @@ public final class WorkbookPackage {
                 xml.close();
             }
         }
+        tables.sort(Comparator.comparingInt(ExcelTable::firstRow).thenComparingInt(ExcelTable::firstColumn));
         return Collections.unmodifiableList(tables);
     }
 

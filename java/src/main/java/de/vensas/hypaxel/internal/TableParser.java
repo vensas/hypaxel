@@ -16,6 +16,7 @@ final class TableParser {
     private static final byte[] DISPLAY_NAME = Ascii.bytes("displayName");
     private static final byte[] NAME = Ascii.bytes("name");
     private static final byte[] HEADER_ROW_COUNT = Ascii.bytes("headerRowCount");
+    private static final byte[] TOTALS_ROW_COUNT = Ascii.bytes("totalsRowCount");
     private static final byte[] AUTO_FILTER = Ascii.bytes("autoFilter");
     private static final byte[] TABLE_COLUMNS = Ascii.bytes("tableColumns");
     private static final byte[] TABLE_COLUMN = Ascii.bytes("tableColumn");
@@ -32,6 +33,7 @@ final class TableParser {
         int[] range = null;
         String name = null;
         boolean headerRow = true;
+        boolean totalsRow = false;
         boolean autoFilter = false;
         List<String> columns = new ArrayList<>();
         TableStyle style = TableStyle.NONE;
@@ -63,6 +65,7 @@ final class TableParser {
                 }
                 String headerRows = xml.attribute(HEADER_ROW_COUNT);
                 headerRow = headerRows == null || !headerRows.strip().equals("0");
+                totalsRow = Ascii.parseUnsigned(xml.attribute(TOTALS_ROW_COUNT)) > 0;
                 descend = true;
             } else if (xml.nameIs(AUTO_FILTER)) {
                 autoFilter = true;
@@ -96,7 +99,8 @@ final class TableParser {
                 .rowStripes(rowStripes)
                 .columnStripes(columnStripes)
                 .highlightFirstColumn(firstColumn)
-                .highlightLastColumn(lastColumn);
+                .highlightLastColumn(lastColumn)
+                .totalsRow(totalsRow);
         if (name != null) {
             builder.name(name);
         }

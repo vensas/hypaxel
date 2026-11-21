@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalDouble;
 import org.junit.jupiter.api.Test;
@@ -113,10 +115,16 @@ class ReaderLayoutTest {
             List<ExcelTable> tables = reader.tables("S");
             assertEquals(3, tables.size());
             assertEquals(ExcelTable.builder(2, 2, 10, 4).name("Sales_2024").columns("Line\nbreak", "R&D", "Total").style(TableStyle.NONE)
-                    .highlightFirstColumn(true).build(), tables.get(0));
+                    .highlightFirstColumn(true).totalsRow(true).build(), tables.get(1));
+            assertTrue(tables.get(1).toString().endsWith(" totalsRow=true"), tables.get(1).toString());
             assertEquals(ExcelTable.builder(5, 6, 5, 6).name("OnlyName").columns("").style(TableStyle.NONE).headerRow(false)
-                    .autoFilter(false).rowStripes(false).build(), tables.get(1));
-            ExcelTable third = tables.get(2);
+                    .autoFilter(false).rowStripes(false).build(), tables.get(2));
+            assertFalse(tables.get(2).totalsRow());
+            XlsxException rejected = assertThrows(XlsxException.class,
+                    () -> Xlsx.write(writer -> writer.addWorksheet("S").addTable(tables.get(1))));
+            assertEquals(XlsxException.Kind.INVALID_ARGUMENT, rejected.kind());
+            assertTrue(rejected.getMessage().contains("totals row"), rejected.getMessage());
+            ExcelTable third = tables.get(0);
             assertNull(third.name());
             assertEquals(TableStyle.light(21), third.style());
             assertFalse(third.autoFilter());
@@ -203,7 +211,7 @@ class ReaderLayoutTest {
     void readsBackRowPropertiesAndSheetLayout() throws IOException {
         byte[] xlsx = Xlsx.write(writer -> {
             SheetOptions options = SheetOptions.builder().rowOutlineLevels(2).outlineSummaryAbove()
-                    .column(1, Column.ofWidth(30)).column(3, Column.ofWidth(12.5)).build();
+                    .column(1, Column.ofWidth(30)).column(3, Column.ofWidth(12.5).withHidden(true)).build();
             Worksheet s = writer.addWorksheet("Grouped", options);
             s.beginRow(RowOptions.builder().collapsed().height(24).build()).addRow("Total", 300);
             s.beginRow(RowOptions.builder().outlineLevel(1).hidden().build()).addRow("Store A", 120);
@@ -219,7 +227,10 @@ class ReaderLayoutTest {
             try (SheetReader rows = reader.worksheet("Grouped")) {
                 assertTrue(rows.outlineSummaryAbove());
                 assertEquals(2, rows.rowOutlineLevels());
-                assertEquals(List.of(new ColumnWidth(1, 1, 30), new ColumnWidth(3, 3, 12.5)), rows.columnWidths());
+                assertEquals(List.of(new ColumnWidth(1, 1, 30, false), new ColumnWidth(3, 3, 12.5, true)), rows.columnWidths());
+                assertFalse(rows.columnHidden(1));
+                assertFalse(rows.columnHidden(2));
+                assertTrue(rows.columnHidden(3));
                 assertEquals(OptionalDouble.of(30), rows.columnWidth(1));
                 assertEquals(OptionalDouble.empty(), rows.columnWidth(2));
                 assertEquals(OptionalDouble.of(12.5), rows.columnWidth(3));
@@ -271,6 +282,7 @@ class ReaderLayoutTest {
 
             try (SheetReader rows = reader.worksheet("Plain")) {
                 assertEquals(List.of(), rows.columnWidths());
+                assertFalse(rows.columnHidden(1));
                 assertEquals(OptionalDouble.empty(), rows.columnWidth(1));
                 assertFalse(rows.outlineSummaryAbove());
                 assertEquals(0, rows.rowOutlineLevels());
@@ -285,7 +297,7 @@ class ReaderLayoutTest {
                 + "<sheetPr codeName=\"S\"><tabColor rgb=\"FFFF0000\"/><outlinePr summaryBelow=\" false \" summaryRight=\"0\"/><pageSetUpPr fitToPage=\"1\"/></sheetPr>"
                 + "<dimension ref=\"A1:C9\"/><sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\"/></sheetView></sheetViews>"
                 + "<sheetFormatPr baseColWidth=\"10\" defaultRowHeight=\"16\" outlineLevelRow=\"9\" x14ac:dyDescent=\"0.2\"/>"
-                + "<cols><col min=\"1\" max=\"16384\" width=\"10.83203125\" style=\"1\"/><col min=\"2\" max=\"3\" width=\"7\" customWidth=\"1\"></col>"
+                + "<cols><col min=\"1\" max=\"16384\" width=\"10.83203125\" style=\"1\"/><col min=\"2\" max=\"3\" width=\"7\" customWidth=\"1\" hidden=\"true\"></col>"
                 + "<col min=\"5\" max=\"99999\" width=\"1e1\"/><col min=\"0\" max=\"2\" width=\"4\"/><col min=\"4\" max=\"3\" width=\"4\"/>"
                 + "<col min=\"x\" max=\"3\" width=\"4\"/><col min=\"6\" max=\"6\" width=\"-1\"/><col min=\"6\" max=\"6\" width=\"wide\"/>"
                 + "<col min=\"7\" max=\"7\" hidden=\"1\"/><col min=\"8\" width=\"3\"/><col min=\"16385\" max=\"16390\" width=\"3\"/></cols>"
@@ -298,8 +310,11 @@ class ReaderLayoutTest {
                 + "<row r=\"7\"><c r=\"A7\"><v>7</v></c></row>"
                 + "</sheetData></worksheet>";
         try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
-            assertEquals(List.of(new ColumnWidth(1, 16384, 10.83203125), new ColumnWidth(2, 3, 7), new ColumnWidth(5, 16384, 10)),
+            assertEquals(List.of(new ColumnWidth(1, 16384, 10.83203125, false), new ColumnWidth(2, 3, 7, true), new ColumnWidth(5, 16384, 10, false)),
                     rows.columnWidths());
+            assertFalse(rows.columnHidden(1));
+            assertFalse(rows.columnHidden(0));
+            assertTrue(rows.columnWidths().get(1).hidden());
             assertEquals(OptionalDouble.of(10.83203125), rows.columnWidth(2));
             assertEquals(OptionalDouble.empty(), rows.columnWidth(0));
             assertTrue(rows.outlineSummaryAbove());
@@ -422,5 +437,59 @@ class ReaderLayoutTest {
             assertEquals(OptionalDouble.of(30), empty.height());
             assertEquals(4, rows.stream().filter(r -> r.cellCount() > 0).findFirst().orElseThrow().number());
         }
+    }
+
+    static final List<ColumnWidth> SEED_WIDTHS =
+            List.of(new ColumnWidth(1, 1, 14, false), new ColumnWidth(2, 2, 22.5, false), new ColumnWidth(4, 4, 6, true));
+
+    static void assertSeedLayout(byte[] xlsx, ReadOptions options) throws IOException {
+        try (XlsxReader reader = XlsxReader.open(xlsx, options); SheetReader rows = reader.worksheet("Orders")) {
+            assertEquals(List.of("Orders", "Plain"), reader.sheetNames());
+            assertEquals(List.of(), reader.tables("Plain"));
+            assertTrue(rows.outlineSummaryAbove());
+            assertEquals(2, rows.rowOutlineLevels());
+            assertEquals(SEED_WIDTHS, rows.columnWidths());
+            assertFalse(rows.columnHidden(2));
+            assertFalse(rows.columnHidden(3));
+            assertTrue(rows.columnHidden(4));
+        }
+    }
+
+    /** {@code testdata/reader/excel.xlsx} is a workbook written by Hypaxel and saved again by Excel for Mac. */
+    @Test
+    void readsTablesRowsAndLayoutSavedByExcel() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "excel.xlsx"));
+        ReadOptions include = ReadOptions.builder().includeEmptyRows(true).build();
+        ExcelTable orders = ExcelTable.builder(1, 1, 4, 3).name("Orders").columns("Product", "Units & more", "Price")
+                .style(TableStyle.dark(3)).rowStripes(false).columnStripes(true)
+                .highlightFirstColumn(true).highlightLastColumn(true).build();
+        ExcelTable plain = ExcelTable.builder(7, 1, 8, 2).name("Table2").columns("Column1", "Column2")
+                .style(TableStyle.NONE).headerRow(false).autoFilter(false).build();
+        try (XlsxReader reader = XlsxReader.open(xlsx, include)) {
+            assertEquals(List.of(orders, plain), reader.tables("Orders"));
+        }
+        assertSeedLayout(xlsx, include);
+        assertEquals(List.of("1:3:0:false:false:-", "2:3:1:false:true:-", "3:3:2:true:false:-", "4:3:1:false:true:30.0",
+                "6:0:0:false:false:45.0", "7:2:0:false:false:-", "8:2:0:false:false:-"), rowSummaries(xlsx, include));
+    }
+
+    /**
+     * {@code testdata/reader/libreoffice.xlsx} is the same workbook saved by LibreOffice Calc, which
+     * drops table styles and stores a height on every row.
+     */
+    @Test
+    void readsTablesRowsAndLayoutSavedByLibreOffice() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "libreoffice.xlsx"));
+        ReadOptions include = ReadOptions.builder().includeEmptyRows(true).build();
+        ExcelTable orders = ExcelTable.builder(1, 1, 4, 3).name("Orders").columns("Product", "Units & more", "Price")
+                .style(TableStyle.NONE).rowStripes(false).build();
+        ExcelTable plain = ExcelTable.builder(7, 1, 8, 2).name("Table2").columns("Column1", "Column2")
+                .style(TableStyle.NONE).rowStripes(false).headerRow(false).autoFilter(false).build();
+        try (XlsxReader reader = XlsxReader.open(xlsx, include)) {
+            assertEquals(List.of(orders, plain), reader.tables("Orders"));
+        }
+        assertSeedLayout(xlsx, include);
+        assertEquals(List.of("1:3:0:false:false:15.0", "2:3:1:false:false:15.0", "3:3:2:true:false:15.0", "4:3:1:false:true:30.0",
+                "6:0:0:false:false:45.0", "7:2:0:false:false:15.0", "8:2:0:false:false:15.0"), rowSummaries(xlsx, include));
     }
 }

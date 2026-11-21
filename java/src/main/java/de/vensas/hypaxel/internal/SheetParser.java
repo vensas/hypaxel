@@ -249,6 +249,7 @@ public final class SheetParser {
         boolean hasFirst = false;
         boolean hasLast = false;
         boolean hasWidth = false;
+        boolean hidden = false;
         while (xml.nextAttribute()) {
             if (xml.attributeIs(MIN) && !hasFirst) {
                 hasFirst = true;
@@ -259,6 +260,8 @@ public final class SheetParser {
             } else if (xml.attributeIs(WIDTH) && !hasWidth) {
                 hasWidth = true;
                 width = attributeMeasure();
+            } else if (xml.attributeIs(HIDDEN)) {
+                hidden = attributeIsTrue();
             }
         }
         if (first < 0 || last < 0 || Double.isNaN(width)) {
@@ -271,7 +274,7 @@ public final class SheetParser {
         if (columnWidths.size() >= MAX_COLUMNS) {
             throw xml.malformed("the sheet defines more than 16384 column ranges");
         }
-        columnWidths.add(new ColumnWidth(first, last, width));
+        columnWidths.add(new ColumnWidth(first, last, width, hidden));
     }
 
     /** The current attribute as a non-negative integer; -1 if invalid. */

@@ -138,6 +138,7 @@ tables.get(0).name(); tables.get(0).columns(); tables.get(0).style();
 try (SheetReader rows = reader.worksheet("Orders")) {
     List<ColumnWidth> widths = rows.columnWidths();         // known before the first row is read
     OptionalDouble width = rows.columnWidth(2);             // empty: default width
+    boolean hidden = rows.columnHidden(4);
     boolean summaryAbove = rows.outlineSummaryAbove();
     for (Row row : rows) {
         row.outlineLevel(); row.hidden(); row.collapsed(); row.height();
@@ -146,8 +147,10 @@ try (SheetReader rows = reader.worksheet("Orders")) {
 ```
 
 Tables are stored in their own parts and are read only when `tables` is called; reading rows does
-not touch them. A table style that is not one of Excel's built-in styles reads as
-`TableStyle.NONE`. Row properties are reported for the rows that are returned, that is rows with at
+not touch them. They are returned from top to bottom, then left to right, whatever order the file
+lists them in. A table style that is not one of Excel's built-in styles reads as
+`TableStyle.NONE`. `totalsRow()` tells whether the last row of a table's range is a totals row;
+such a table can be read but not written, so `addTable` rejects it. Row properties are reported for the rows that are returned, that is rows with at
 least one value. To also get the rows that the file stores without a value (a spacer row with a
 height, an empty hidden row), open the workbook with
 `ReadOptions.builder().includeEmptyRows(true).build()`: they come back with `cellCount() == 0` and
@@ -163,15 +166,16 @@ their number and properties. Rows that the file does not store are never returne
 | `worksheet(index)` | Sheet by 0-based position |
 | `isDate1904()` | Whether the workbook uses the 1904 date system |
 | `sharedStringCount()` | Entries in the shared string table (loads it) |
-| `tables(name)`, `tables(index)` | The sheet's Excel tables as `ExcelTable`: name, range, columns, style and options; read on each call |
+| `tables(name)`, `tables(index)` | The sheet's Excel tables as `ExcelTable`: name, range, columns, style, options and `totalsRow()`; read on each call, ordered by position |
 
 **`SheetReader`**
 
 | Method | Purpose |
 | --- | --- |
 | `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back; with `includeEmptyRows`, every row the file stores |
-| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`) the sheet defines, explicit and auto-fitted, in file order |
+| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`, `hidden()`) the sheet defines, explicit and auto-fitted, in file order |
 | `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width |
+| `columnHidden(column)` | Whether a 1-based column is hidden |
 | `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
 
 **`Row`**

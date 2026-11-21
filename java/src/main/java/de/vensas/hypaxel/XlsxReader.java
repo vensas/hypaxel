@@ -192,8 +192,10 @@ public final class XlsxReader implements Closeable {
      * sheet has none.
      *
      * <p>Tables live in their own parts, which are read on each call; reading rows does not touch
-     * them. A table style that is not one of Excel's built-in styles is reported as
-     * {@link TableStyle#NONE}.
+     * them. They are returned from top to bottom, then left to right, whatever order the file lists
+     * them in. A table style that is not one of Excel's built-in styles is reported as
+     * {@link TableStyle#NONE}, and {@link ExcelTable#totalsRow()} tells whether the last row of the
+     * range is a totals row.
      *
      * @throws XlsxException if a table part is damaged ({@link XlsxException.Kind#MALFORMED})
      */

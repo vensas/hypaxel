@@ -71,6 +71,16 @@ public final class SheetReader implements Closeable, Iterable<Row> {
         return OptionalDouble.empty();
     }
 
+    /** Returns whether a 1-based column is hidden. */
+    public boolean columnHidden(int column) throws IOException {
+        for (ColumnWidth width : columnWidths()) {
+            if (column >= width.firstColumn() && column <= width.lastColumn()) {
+                return width.hidden();
+            }
+        }
+        return false;
+    }
+
     /** Returns whether summary rows sit above their groups, as set by {@link SheetOptions.Builder#outlineSummaryAbove()}. */
     public boolean outlineSummaryAbove() throws IOException {
         readLayout();
