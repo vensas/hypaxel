@@ -13,6 +13,9 @@ defaults:
   run:
     working-directory: dotnet
 
+permissions:
+  contents: read
+
 jobs:
   build:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository

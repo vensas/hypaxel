@@ -16,6 +16,9 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   test:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository

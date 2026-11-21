@@ -106,7 +106,7 @@ func TestDecodesEntitiesAndExcelEscapes(t *testing.T) {
 	if out, _ := decodeText(nil, []byte("&amp;_x0041_"), false, true); string(out) != "&amp;A" {
 		t.Errorf("CDATA: %q", out)
 	}
-	for _, bad := range []string{"&bogus;", "&#xD800;", "&#x110000;", "&#;", "& no end", "&#99999999999;", "\xff&amp;"} {
+	for _, bad := range []string{"&bogus;", "&#xD800;", "&#x110000;", "&#x200000;", "&#xFFFFFFFF;", "&#;", "& no end", "&#99999999999;", "\xff&amp;"} {
 		out, msg := decodeText([]byte("keep"), []byte(bad), true, false)
 		if msg == "" || string(out) != "keep" {
 			t.Errorf("%q: %q %q", bad, out, msg)
