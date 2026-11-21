@@ -1,6 +1,10 @@
 # Test data
 
-Workbooks saved by other applications, read by the reader tests of every implementation.
+Workbooks saved by other applications, read by the reader tests of every implementation. The tests find
+them relative to the repository root, so they need a checkout of the whole repository and do not
+run from a published package.
+
+The files contain generated data only and no author information. Keep it that way when adding one.
 
 | File | Origin |
 | --- | --- |

@@ -95,8 +95,14 @@ Python, Node.js, .NET, Java, Go and PHP).
     an Excel workbook whose table has a totals row (`testdata/reader/`), in every implementation.
   - Go: `TableStyleMedium(2)` is now the zero `TableStyle`, so a table written with it compares
     equal to the table read back.
-  - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table and
-    16,384 column ranges per sheet.
+  - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table, 64 MiB
+    of table and column names per sheet and 16,384 column ranges per sheet. A table part that a
+    sheet references several times is read once.
+  - Integer attributes (row numbers, outline levels, column ranges) are read as plain digits in
+    every implementation; the Rust core no longer accepts a leading `+`.
+  - Asking for the layout of a worksheet reader that was closed before the layout was read is an
+    error instead of an empty result (.NET `ObjectDisposedException`, Go `ErrRowsClosed`, Java
+    `INVALID_STATE`, Node.js `XlsxError`).
 - **Browser support for the Node.js package (WebAssembly).** The `hypaxel` npm package now runs in
   browsers and other runtimes without native modules on the Rust core compiled to WebAssembly
   (171 KB gzipped), with the same API as in Node.js. Bundlers pick the build through the `browser` export
