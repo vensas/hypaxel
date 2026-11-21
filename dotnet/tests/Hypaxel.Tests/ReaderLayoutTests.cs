@@ -631,6 +631,72 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void ReadsTableDownloadedFromGoogleSheets()
+    {
+        using var reader = XlsxReader.Open(TestData("google-sheets.xlsx"));
+        Assert.Equal(["Inventory"], reader.SheetNames);
+
+        var table = Assert.Single(reader.GetTables(0));
+        Assert.Equal(
+            [
+                "SKU", "Item", "Group", "Vendor", "Cost", "Price",
+                "Opening", "Sold", "Closing", "Reorder", "Status",
+            ],
+            table.Columns);
+        var expected = new ExcelTable(1, 1, 903, 11)
+        {
+            Name = "Table1",
+            Style = TableStyle.None,
+            ShowHeaderRow = true,
+            ShowAutoFilter = false,
+            ShowRowStripes = true,
+            ShowColumnStripes = false,
+            HighlightFirstColumn = true,
+            HighlightLastColumn = true,
+            HasTotalsRow = true,
+        };
+        Assert.Equal(expected, table with { Columns = null });
+
+        using var rows = reader.OpenWorksheet(0);
+        Assert.False(rows.OutlineSummaryAbove);
+        Assert.Equal(12, rows.ColumnWidths.Count);
+        Assert.Equal(new ColumnWidth(1, 1, 11.63), rows.ColumnWidths[0]);
+        Assert.Equal(new ColumnWidth(12, 26, 8.88), rows.ColumnWidths[11]);
+        Assert.Equal(8.88, rows.GetColumnWidth(20));
+
+        var count = 0;
+        var totals = new List<(int Column, ExcelValue Value)>();
+        while (rows.Read())
+        {
+            var row = rows.Row;
+            count++;
+            Assert.Equal((0, false), (row.OutlineLevel, row.Hidden));
+            Assert.Equal(row.Number == 1 ? null : 15.75, row.Height);
+            if (row.Number == 2)
+            {
+                Assert.Equal(ExcelValue.FromNumber(250), row[7]);
+            }
+
+            if (row.Number == 903)
+            {
+                totals.AddRange(row.Cells.Select(c => (c.Column, c.Value)));
+            }
+        }
+
+        Assert.Equal(903, count);
+        Assert.Equal(
+            [
+                (1, ExcelValue.FromString("Total")),
+                (5, ExcelValue.FromNumber(21.20421754)),
+                (6, ExcelValue.FromNumber(33.92674806)),
+                (8, ExcelValue.FromNumber(90058)),
+                (10, ExcelValue.FromNumber(31060)),
+                (11, ExcelValue.FromNumber(901)),
+            ],
+            totals);
+    }
+
+    [Fact]
     public void ReturnsTablesFromTopToBottomThenLeftToRight()
     {
         string Table(string range) => $"""<table xmlns="{Main}" ref="{range}"/>""";

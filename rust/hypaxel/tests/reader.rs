@@ -780,3 +780,47 @@ fn bounds_the_memory_of_a_sheets_tables() {
     assert_eq!((rows.layout().unwrap().row_outline_levels(), rows.layout().unwrap().column_widths().len()), (0, 0));
     assert_eq!(rows.next_row().unwrap().unwrap().outline_level(), 0);
 }
+
+/// `testdata/reader/google-sheets.xlsx` is a table downloaded from Google Sheets: a custom table
+/// style, no filter buttons, a totals row and a height on every row but the first.
+#[test]
+fn reads_a_table_downloaded_from_google_sheets() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/reader/google-sheets.xlsx");
+    let mut reader = XlsxReader::open(path).unwrap();
+    assert_eq!(reader.sheet_names().collect::<Vec<_>>(), ["Inventory"]);
+
+    let columns = ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"];
+    let expected = Table::new(1, 1, 903, 11)
+        .name("Table1")
+        .columns(columns)
+        .style(TableStyle::None)
+        .autofilter(false)
+        .highlight_first_column(true)
+        .highlight_last_column(true);
+    assert_eq!(reader.tables_at(0).unwrap(), [Table { totals_row: true, ..expected }]);
+
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    assert!(!layout.outline_summary_above());
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(widths.len(), 12);
+    assert_eq!((widths[0], widths[11]), ((1, 1, 11.63, false), (12, 26, 8.88, false)));
+    assert_eq!(layout.column_width(20), Some(8.88));
+
+    let mut count = 0;
+    let mut totals = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        count += 1;
+        assert_eq!((row.outline_level(), row.is_hidden()), (0, false));
+        assert_eq!(row.height(), if row.number() == 1 { None } else { Some(15.75) });
+        if row.number() == 2 {
+            assert_eq!(row.get(7), Value::Number(250.0));
+        }
+        if row.number() == 903 {
+            totals = row.cells().map(|c| (c.column(), c.value().to_string())).collect();
+        }
+    }
+    assert_eq!(count, 903);
+    let totals: Vec<_> = totals.iter().map(|(column, value)| (*column, value.as_str())).collect();
+    assert_eq!(totals, [(1, "Total"), (5, "21.20421754"), (6, "33.92674806"), (8, "90058"), (10, "31060"), (11, "901")]);
+}

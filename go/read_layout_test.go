@@ -555,6 +555,88 @@ func TestReadTableWithTotalsRowSavedByExcel(t *testing.T) {
 	}
 }
 
+// google-sheets.xlsx is a table downloaded from Google Sheets: a custom table style, no filter
+// buttons, a totals row and a height on every row but the first.
+func TestReadTableDownloadedFromGoogleSheets(t *testing.T) {
+	r, err := OpenReader("../testdata/reader/google-sheets.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if names := r.SheetNames(); !reflect.DeepEqual(names, []string{"Inventory"}) {
+		t.Errorf("sheets: %v", names)
+	}
+
+	tables, err := r.TablesAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTables := []Table{{
+		FirstRow: 1, FirstColumn: 1, LastRow: 903, LastColumn: 11, Name: "Table1",
+		Columns: []string{"SKU", "Item", "Group", "Vendor", "Cost", "Price",
+			"Opening", "Sold", "Closing", "Reorder", "Status"},
+		Style: TableStyleNone, NoFilterButtons: true,
+		HighlightFirstColumn: true, HighlightLastColumn: true, TotalsRow: true,
+	}}
+	if !reflect.DeepEqual(tables, wantTables) {
+		t.Errorf("tables:\n got %+v\nwant %+v", tables, wantTables)
+	}
+
+	rows, err := r.RowsAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	layout, err := rows.Layout()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.OutlineSummaryAbove || len(layout.ColumnWidths) != 12 {
+		t.Fatalf("layout: %+v", layout)
+	}
+	first, last := layout.ColumnWidths[0], layout.ColumnWidths[11]
+	if first != (ColumnWidth{FirstColumn: 1, LastColumn: 1, Width: 11.63}) || last != (ColumnWidth{FirstColumn: 12, LastColumn: 26, Width: 8.88}) {
+		t.Errorf("column widths: first %+v, last %+v", first, last)
+	}
+	if width, ok := layout.ColumnWidth(20); !ok || width != 8.88 {
+		t.Errorf("width of column 20: %v, %v", width, ok)
+	}
+
+	count := 0
+	var totals []string
+	for rows.Next() {
+		row := rows.Row()
+		count++
+		if row.OutlineLevel() != 0 || row.Hidden() {
+			t.Errorf("row %d is grouped or hidden", row.Index())
+		}
+		height, hasHeight := row.Height()
+		if row.Index() == 1 && hasHeight || row.Index() != 1 && (!hasHeight || height != 15.75) {
+			t.Errorf("row %d: height %v, %v", row.Index(), height, hasHeight)
+		}
+		if row.Index() == 2 {
+			if got, ok := row.Get(7).Float(); !ok || got != 250 {
+				t.Errorf("G2: got %v, %v, want the number 250", got, ok)
+			}
+		}
+		if row.Index() == 903 {
+			for column, v := range row.Cells() {
+				totals = append(totals, strconv.Itoa(column)+"="+v.String())
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if count != 903 {
+		t.Errorf("rows: got %d, want 903", count)
+	}
+	want := []string{"1=Total", "5=21.20421754", "6=33.92674806", "8=90058", "10=31060", "11=901"}
+	if !reflect.DeepEqual(totals, want) {
+		t.Errorf("totals row:\n got %v\nwant %v", totals, want)
+	}
+}
+
 func TestReadTablesBoundsMemory(t *testing.T) {
 	const sheet = `<worksheet><sheetData/></worksheet>`
 	const table = `<table displayName="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns></table>`

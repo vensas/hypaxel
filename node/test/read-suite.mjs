@@ -531,4 +531,46 @@ export function defineReadSuite(label, api) {
     assert.equal(data.length, 1002)
     assert.deepEqual(data.at(-1), ['Total', null, null, null, 21.085, 33.736, null, 99696, null, 34500, 1000])
   })
+
+  test('reads a table downloaded from google sheets', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/google-sheets.xlsx', import.meta.url))
+    const book = openWorkbookSync(bytes)
+    assert.deepEqual(book.sheetNames, ['Inventory'])
+    // The file uses a custom table style, which reads as 'none', and has no filter buttons.
+    assert.deepEqual(book.tables(), [
+      {
+        firstRow: 1,
+        firstColumn: 1,
+        lastRow: 903,
+        lastColumn: 11,
+        options: {
+          name: 'Table1',
+          columns: ['SKU', 'Item', 'Group', 'Vendor', 'Cost', 'Price', 'Opening', 'Sold', 'Closing', 'Reorder', 'Status'],
+          style: 'none',
+          headerRow: true,
+          autofilter: false,
+          rowStripes: true,
+          columnStripes: false,
+          firstColumn: true,
+          lastColumn: true,
+          totalsRow: true,
+        },
+      },
+    ])
+
+    const rows = book.rows()
+    const layout = rows.layout()
+    assert.equal(layout.columnWidths.length, 12)
+    assert.deepEqual(layout.columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.63, hidden: false })
+    assert.deepEqual(layout.columnWidths[11], { firstColumn: 12, lastColumn: 26, width: 8.88, hidden: false })
+    assert.deepEqual([layout.columnWidth(20), layout.outlineSummaryAbove], [8.88, false])
+    const data = []
+    for (const row of rows) {
+      assert.deepEqual([rows.outlineLevel, rows.hidden, rows.height], [0, false, rows.rowNumber === 1 ? undefined : 15.75])
+      data.push(row)
+    }
+    assert.equal(data.length, 903)
+    assert.equal(data[1][6], 250)
+    assert.deepEqual(data.at(-1), ['Total', null, null, null, 21.20421754, 33.92674806, null, 90058, null, 31060, 901])
+  })
 }

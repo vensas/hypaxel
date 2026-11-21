@@ -372,3 +372,30 @@ def test_reads_a_table_with_a_totals_row_saved_by_excel():
             data.append(row)
         assert len(data) == 1002
         assert data[-1] == ["Total", None, None, None, 21.085, 33.736, None, 99696, None, 34500, 1000]
+
+
+def test_reads_a_table_downloaded_from_google_sheets():
+    with hypaxel.open_workbook(os.path.join(TESTDATA, "google-sheets.xlsx")) as wb:
+        assert wb.sheet_names == ["Inventory"]
+        # The file uses a custom table style, which reads as no style, and has no filter buttons.
+        assert wb.tables() == [{
+            "name": "Table1", "first_row": 1, "first_col": 1, "last_row": 903, "last_col": 11,
+            "columns": ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"],
+            "style": None, "header_row": True, "autofilter": False, "row_stripes": True,
+            "column_stripes": False, "first_column": True, "last_column": True, "totals_row": True,
+        }]
+
+        rows = wb.rows()
+        widths = rows.column_widths
+        assert len(widths) == 12
+        assert (widths[0], widths[-1]) == ((1, 1, 11.63, False), (12, 26, 8.88, False))
+        assert rows.column_width(20) == 8.88
+        assert rows.outline_summary_above is False
+        data = []
+        for row in rows:
+            assert (rows.outline_level, rows.hidden) == (0, False)
+            assert rows.height == (None if rows.row_number == 1 else 15.75)
+            data.append(row)
+        assert len(data) == 903
+        assert data[1][6] == 250 and type(data[1][6]) is int
+        assert data[-1] == ["Total", None, None, None, 21.20421754, 33.92674806, None, 90058, None, 31060, 901]

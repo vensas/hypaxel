@@ -592,4 +592,60 @@ class ReaderLayoutTest {
             }
         }
     }
+
+    /**
+     * {@code testdata/reader/google-sheets.xlsx} is a table downloaded from Google Sheets: a custom
+     * table style, no filter buttons, a totals row and a height on every row but the first.
+     */
+    @Test
+    void readsATableDownloadedFromGoogleSheets() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "google-sheets.xlsx"));
+        ExcelTable expected = ExcelTable.builder(1, 1, 903, 11).name("Table1")
+                .columns("SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening",
+                        "Sold", "Closing", "Reorder", "Status")
+                .style(TableStyle.NONE).autoFilter(false)
+                .highlightFirstColumn(true).highlightLastColumn(true)
+                .totalsRow(true).build();
+        try (XlsxReader reader = XlsxReader.open(xlsx)) {
+            assertEquals(List.of("Inventory"), reader.sheetNames());
+            assertEquals(List.of(expected), reader.tables(0));
+            try (SheetReader sheet = reader.worksheet(0)) {
+                assertFalse(sheet.outlineSummaryAbove());
+                List<ColumnWidth> widths = sheet.columnWidths();
+                assertEquals(12, widths.size());
+                assertEquals(new ColumnWidth(1, 1, 11.63, false), widths.get(0));
+                assertEquals(new ColumnWidth(12, 26, 8.88, false), widths.get(11));
+                assertEquals(8.88, sheet.columnWidth(20).orElseThrow());
+
+                int count = 0;
+                Row totals = null;
+                for (Row row = sheet.nextRow(); row != null; row = sheet.nextRow()) {
+                    count++;
+                    assertEquals(0, row.outlineLevel());
+                    assertFalse(row.hidden());
+                    if (row.number() == 1) {
+                        assertTrue(row.height().isEmpty());
+                    } else {
+                        assertEquals(15.75, row.height().orElseThrow());
+                    }
+                    if (row.number() == 2) {
+                        assertEquals(250, row.getNumber(7));
+                    }
+                    if (row.number() == 903) {
+                        totals = row.copy();
+                    }
+                }
+                assertEquals(903, count);
+                assertEquals(6, totals.cellCount());
+                assertEquals(List.of(1, 5, 6, 8, 10, 11), List.of(totals.column(0), totals.column(1), totals.column(2),
+                        totals.column(3), totals.column(4), totals.column(5)));
+                assertEquals("Total", totals.getString(1));
+                assertEquals(21.20421754, totals.getNumber(5));
+                assertEquals(33.92674806, totals.getNumber(6));
+                assertEquals(90058, totals.getNumber(8));
+                assertEquals(31060, totals.getNumber(10));
+                assertEquals(901, totals.getNumber(11));
+            }
+        }
+    }
 }
