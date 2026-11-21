@@ -428,7 +428,11 @@ fn reads_back_tables_rows_and_layout_written_by_the_writer() {
         .highlight_last_column(true);
     let plain = Table::new(10, 1, 12, 2).header_row(false).autofilter(false).style(TableStyle::None);
     let bytes = write(|w| {
-        let options = SheetOptions::new().column_widths(&[12.5, 30.0]).row_outline_levels(2).outline_summary_above();
+        let options = SheetOptions::new()
+            .column_widths(&[12.5, 30.0])
+            .column(4, Column { hidden: true, ..Column::width(5.0) })
+            .row_outline_levels(2)
+            .outline_summary_above();
         let mut s = w.add_worksheet_with("Data", &options)?;
         s.add_row(("Product", "Units & more", "Line\nbreak"))?;
         s.begin_row_with(&RowOptions::new().outline_level(1))?.write("Widget").write(3).end_row()?;
@@ -455,9 +459,10 @@ fn reads_back_tables_rows_and_layout_written_by_the_writer() {
     let layout = rows.layout().unwrap().clone();
     assert!(layout.outline_summary_above());
     assert_eq!(layout.row_outline_levels(), 2);
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width())).collect();
-    assert_eq!(widths, [(1, 1, 12.5), (2, 2, 30.0)]);
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(widths, [(1, 1, 12.5, false), (2, 2, 30.0, false), (4, 4, 5.0, true)]);
     assert_eq!((layout.column_width(2), layout.column_width(3)), (Some(30.0), None));
+    assert_eq!((layout.is_column_hidden(2), layout.is_column_hidden(3), layout.is_column_hidden(4)), (false, false, true));
 
     let mut seen = Vec::new();
     while let Some(row) = rows.next_row().unwrap() {
@@ -508,7 +513,7 @@ fn reads_tables_and_layout_from_other_producers() {
         .columns(["Region & area", "Net\ntotal", "Σ"])
         .style(TableStyle::None)
         .highlight_first_column(true);
-    assert_eq!(tables, [expected]);
+    assert_eq!(tables, [Table { totals_row: true, ..expected }]);
 
     let bare = sheet_with_table(
         r#"<table name="OnlyName" ref="A1" headerRowCount="0"><tableColumns><tableColumn name="x"/></tableColumns></table>"#,
@@ -537,6 +542,7 @@ fn reads_tables_and_layout_from_other_producers() {
     let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width())).collect();
     assert_eq!(widths, [(1, 1, 8.5), (3, 16_384, 4.0)]);
     assert_eq!((layout.column_width(1), layout.column_width(2), layout.column_width(9_000)), (Some(8.5), None, Some(4.0)));
+    assert_eq!((layout.is_column_hidden(1), layout.is_column_hidden(9_000)), (false, true));
     let mut seen = Vec::new();
     while let Some(row) = rows.next_row().unwrap() {
         seen.push((row.number(), row.outline_level(), row.is_hidden(), row.is_collapsed(), row.height()));
@@ -630,4 +636,87 @@ fn returns_rows_without_values_on_request() {
         seen.push((row.number(), row.len(), row.is_hidden(), row.height()));
     }
     assert_eq!(seen, [(2, 0, false, Some(30.0)), (3, 0, true, None), (4, 1, false, None)]);
+}
+
+/// `testdata/reader/excel.xlsx` is a workbook written by Hypaxel and saved again by Excel for Mac.
+#[test]
+fn reads_tables_rows_and_layout_saved_by_excel() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/reader/excel.xlsx");
+    let mut reader = XlsxReader::open_with(path, &ReadOptions::new().include_empty_rows(true)).unwrap();
+    assert_eq!(reader.sheet_names().collect::<Vec<_>>(), ["Orders", "Plain"]);
+
+    let orders = Table::new(1, 1, 4, 3)
+        .name("Orders")
+        .columns(["Product", "Units & more", "Price"])
+        .style(TableStyle::Dark(3))
+        .row_stripes(false)
+        .column_stripes(true)
+        .highlight_first_column(true)
+        .highlight_last_column(true);
+    let plain =
+        Table::new(7, 1, 8, 2).name("Table2").columns(["Column1", "Column2"]).style(TableStyle::None).header_row(false).autofilter(false);
+    assert_eq!(reader.tables("Orders").unwrap(), [orders, plain]);
+    assert!(reader.tables("Plain").unwrap().is_empty());
+
+    let mut rows = reader.worksheet("Orders").unwrap();
+    let layout = rows.layout().unwrap();
+    assert!(layout.outline_summary_above());
+    assert_eq!(layout.row_outline_levels(), 2);
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(widths, [(1, 1, 14.0, false), (2, 2, 22.5, false), (4, 4, 6.0, true)]);
+
+    let mut seen = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        seen.push((row.number(), row.len(), row.outline_level(), row.is_hidden(), row.is_collapsed(), row.height()));
+    }
+    assert_eq!(
+        seen,
+        [
+            (1, 3, 0, false, false, None),
+            (2, 3, 1, false, true, None),
+            (3, 3, 2, true, false, None),
+            (4, 3, 1, false, true, Some(30.0)),
+            (6, 0, 0, false, false, Some(45.0)),
+            (7, 2, 0, false, false, None),
+            (8, 2, 0, false, false, None),
+        ]
+    );
+}
+
+/// `testdata/reader/libreoffice.xlsx` is the same workbook saved by LibreOffice Calc, which drops
+/// table styles and stores a height on every row.
+#[test]
+fn reads_tables_rows_and_layout_saved_by_libreoffice() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/reader/libreoffice.xlsx");
+    let mut reader = XlsxReader::open_with(path, &ReadOptions::new().include_empty_rows(true)).unwrap();
+
+    let unstyled = |t: Table| t.style(TableStyle::None).row_stripes(false);
+    let orders = unstyled(Table::new(1, 1, 4, 3).name("Orders").columns(["Product", "Units & more", "Price"]));
+    let plain = unstyled(Table::new(7, 1, 8, 2).name("Table2").columns(["Column1", "Column2"]).header_row(false).autofilter(false));
+    assert_eq!(reader.tables("Orders").unwrap(), [orders, plain]);
+    assert!(reader.tables("Plain").unwrap().is_empty());
+
+    let mut rows = reader.worksheet("Orders").unwrap();
+    let layout = rows.layout().unwrap();
+    assert!(layout.outline_summary_above());
+    assert_eq!(layout.row_outline_levels(), 2);
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(widths, [(1, 1, 14.0, false), (2, 2, 22.5, false), (4, 4, 6.0, true)]);
+
+    let mut seen = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        seen.push((row.number(), row.len(), row.outline_level(), row.is_hidden(), row.is_collapsed(), row.height()));
+    }
+    assert_eq!(
+        seen,
+        [
+            (1, 3, 0, false, false, Some(15.0)),
+            (2, 3, 1, false, false, Some(15.0)),
+            (3, 3, 2, true, false, Some(15.0)),
+            (4, 3, 1, false, true, Some(30.0)),
+            (6, 0, 0, false, false, Some(45.0)),
+            (7, 2, 0, false, false, Some(15.0)),
+            (8, 2, 0, false, false, Some(15.0)),
+        ]
+    );
 }

@@ -89,6 +89,9 @@ pub struct Table {
     pub first_column_highlight: bool,
     /// Highlight the last column. Default: false.
     pub last_column_highlight: bool,
+    /// The last row of the range is the table's totals row. Reported by the reader; the writer
+    /// cannot write totals rows and rejects a table that has one. Default: false.
+    pub totals_row: bool,
 }
 
 impl Table {
@@ -108,6 +111,7 @@ impl Table {
             column_stripes: false,
             first_column_highlight: false,
             last_column_highlight: false,
+            totals_row: false,
         }
     }
 
@@ -191,6 +195,9 @@ impl TableMeta {
         }
         if table.header_row && r2 == r1 {
             return Err(Error::InvalidArgument("a table with a header row needs at least one data row"));
+        }
+        if table.totals_row {
+            return Err(Error::InvalidArgument("tables with a totals row can be read but not written"));
         }
         if !table.style.is_valid() {
             return Err(Error::InvalidArgument("table style number out of range (Light 1–21, Medium 1–28, Dark 1–11)"));

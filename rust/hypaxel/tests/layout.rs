@@ -127,6 +127,8 @@ fn table_validation() {
     assert!(matches!(s.add_table(&t(3, 1).columns(["a"]).name("A1")), Err(Error::InvalidTableName(_))));
     assert!(matches!(s.add_table(&t(3, 1).columns(["a"]).name("my table")), Err(Error::InvalidTableName(_))));
     assert!(matches!(s.add_table(&t(3, 1).columns(["a"]).style(TableStyle::Medium(29))), Err(Error::InvalidArgument(_))));
+    let totals = Table { totals_row: true, ..t(3, 1).columns(["a"]) };
+    assert!(matches!(s.add_table(&totals), Err(Error::InvalidArgument(m)) if m.contains("totals row")));
 
     s.add_table(&t(3, 1).columns(["a"]).name("Data")).unwrap();
     assert!(matches!(s.add_table(&Table::new(3, 1, 5, 1).columns(["b"])), Err(Error::OverlappingRange(_))));

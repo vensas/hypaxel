@@ -306,7 +306,8 @@ impl<R: Read + Seek> XlsxReader<R> {
     /// [`Table`] values that [`Sheet::add_table`](crate::Sheet::add_table) accepts.
     ///
     /// Tables live in their own parts, which are read on each call; reading rows does not touch
-    /// them. A table style that is not one of Excel's built-in styles is reported as
+    /// them. They are returned from top to bottom, then left to right, whatever order the file
+    /// lists them in. A table style that is not one of Excel's built-in styles is reported as
     /// [`TableStyle::None`](crate::TableStyle::None).
     pub fn tables_at(&mut self, index: usize) -> Result<Vec<Table>> {
         self.check_index(index)?;
@@ -323,6 +324,7 @@ impl<R: Read + Seek> XlsxReader<R> {
             let mut xml = package.xml(&rel.target)?;
             tables.push(table::parse(&mut xml)?);
         }
+        tables.sort_by_key(|t| (t.first_row, t.first_column));
         Ok(tables)
     }
 

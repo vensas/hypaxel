@@ -56,6 +56,7 @@ pub struct ColumnWidth {
     first: u32,
     last: u32,
     width: f64,
+    hidden: bool,
 }
 
 impl ColumnWidth {
@@ -72,6 +73,10 @@ impl ColumnWidth {
     /// Width in characters of the default font, as in [`Column::width`](crate::Column).
     pub fn width(&self) -> f64 {
         self.width
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
     }
 }
 
@@ -93,6 +98,11 @@ impl SheetLayout {
     /// The width of a 1-based column; `None` if the sheet leaves it at the default.
     pub fn column_width(&self, column: u32) -> Option<f64> {
         self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).map(|c| c.width)
+    }
+
+    /// True if a 1-based column is hidden.
+    pub fn is_column_hidden(&self, column: u32) -> bool {
+        self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).is_some_and(|c| c.hidden)
     }
 
     /// True if summary rows sit above their groups ([`SheetOptions::outline_summary_above`](crate::SheetOptions::outline_summary_above)).
@@ -285,12 +295,13 @@ impl<R: Read> Rows<R> {
                     self.layout.row_outline_levels = tag.attr(b"outlineLevelRow").map_or(0, parse_outline_level);
                 }
                 b"col" => {
-                    let (mut first, mut last, mut width) = (None, None, None);
+                    let (mut first, mut last, mut width, mut hidden) = (None, None, None, false);
                     for (name, value) in tag.attrs() {
                         match name {
                             b"min" => first = parse_u32(value),
                             b"max" => last = parse_u32(value),
                             b"width" => width = parse_measure(value),
+                            b"hidden" => hidden = is_true(Some(value)),
                             _ => {}
                         }
                     }
@@ -300,7 +311,7 @@ impl<R: Read> Rows<R> {
                             if self.layout.columns.len() >= MAX_COLUMNS as usize {
                                 return Err(self.xml.malformed("the sheet defines more than 16384 column ranges"));
                             }
-                            self.layout.columns.push(ColumnWidth { first, last, width });
+                            self.layout.columns.push(ColumnWidth { first, last, width, hidden });
                         }
                     }
                 }

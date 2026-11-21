@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::io::Read;
 
+use super::styles::parse_u32;
 use super::xml::{Event, Tag, XmlReader, decode_into};
 use crate::engine::{MAX_COLUMNS, MAX_ROWS};
 use crate::error::Result;
@@ -25,6 +26,7 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>) -> Result<Table> {
                     let mut t = Table::new(r1, c1, r2, c2).style(TableStyle::None).autofilter(false).row_stripes(false);
                     t.name = text(&tag, b"displayName", false).or_else(|| text(&tag, b"name", false));
                     t.header_row = tag.attr(b"headerRowCount").is_none_or(|v| v.trim_ascii() != b"0");
+                    t.totals_row = tag.attr(b"totalsRowCount").and_then(parse_u32).is_some_and(|n| n > 0);
                     table = Some(t);
                     descend = true;
                 }

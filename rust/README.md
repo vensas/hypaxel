@@ -115,13 +115,16 @@ fn main() -> hypaxel::Result<()> {
   rows that own their source.
 - **Tables:** `reader.tables("Orders")?` (or `tables_at(0)`) returns the sheet's Excel tables as
   the same `Table` values that `add_table` accepts: name, range, column names, style and the
-  display options. Tables are stored in their own parts and are read only when you ask, so reading
-  values costs the same as before. `autofilter` tells whether the file has filter buttons, and a
-  custom (non-built-in) table style reads as `TableStyle::None`.
+  display options, from top to bottom, then left to right. Tables are stored in their own parts
+  and are read only when you ask, so reading values costs the same as before. `autofilter` tells
+  whether the file has filter buttons, and a custom (non-built-in) table style reads as
+  `TableStyle::None`. `totals_row` tells whether the last row of the range is a totals row; such
+  a table can be read but not written.
 - **Rows and columns:** each `Row` has `outline_level()`, `is_hidden()`, `is_collapsed()` and
   `height()` (`None` when the row stores no height). `rows.layout()?` gives the `SheetLayout`:
-  `column_widths()` (runs of columns with a first column, last column and width, explicit and
-  auto-fitted alike), `column_width(column)`, `outline_summary_above()` and
+  `column_widths()` (runs of columns with a first column, last column, width and hidden flag,
+  explicit and auto-fitted alike), `column_width(column)`, `is_column_hidden(column)`,
+  `outline_summary_above()` and
   `row_outline_levels()`. These precede the rows in the file, so they are available before the
   first `next_row()`.
 - **Rows without values** (a spacer row with a height, an empty hidden row) are skipped by
@@ -137,8 +140,8 @@ fn main() -> hypaxel::Result<()> {
   }
   ```
 
-Not read (yet): formulas' text, styles beyond date detection, hidden columns, merged ranges,
-comments and hyperlinks.
+Not read (yet): formulas' text, styles beyond date detection, merged ranges, comments and
+hyperlinks.
 
 ## Serde records
 
