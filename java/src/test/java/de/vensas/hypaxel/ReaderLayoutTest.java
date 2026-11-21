@@ -767,4 +767,55 @@ class ReaderLayoutTest {
             }
         }
     }
+
+    /**
+     * {@code testdata/reader/numbers.xlsx} is exported by Apple Numbers: its table is plain cells,
+     * not an Excel table, and an empty first row holds the chart.
+     */
+    @Test
+    void readsASheetExportedByNumbers() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "numbers.xlsx"));
+        ReadOptions include = ReadOptions.builder().includeEmptyRows(true).build();
+        try (XlsxReader reader = XlsxReader.open(xlsx, include)) {
+            assertEquals(List.of("Table and Chart"), reader.sheetNames());
+            assertTrue(reader.tables(0).isEmpty());
+            try (SheetReader sheet = reader.worksheet(0)) {
+                assertEquals(List.of(new ColumnWidth(1, 1, 24.6719, false), new ColumnWidth(2, 2, 18.3672, false),
+                        new ColumnWidth(3, 5, 18.7188, false), new ColumnWidth(6, 16384, 27.75, false)), sheet.columnWidths());
+                assertFalse(sheet.outlineSummaryAbove());
+                assertEquals(0, sheet.rowOutlineLevels());
+
+                double[] heights = {311.6, 27.65, 20.25, 20.25, 20.05, 20.05, 20.05, 20.05};
+                double[][] numbers = {{5, 7}, {10, 8}, {9, 15}, {7, 12}, {16, 21}};
+                int number = 0;
+                for (Row row = sheet.nextRow(); row != null; row = sheet.nextRow()) {
+                    number++;
+                    assertEquals(number, row.number());
+                    assertEquals(heights[number - 1], row.height().orElseThrow());
+                    if (number == 1) {
+                        assertEquals(0, row.cellCount());
+                    } else if (number == 2) {
+                        assertEquals(1, row.lastColumn());
+                        assertEquals("Table 1", row.getString(1));
+                    } else if (number == 3) {
+                        assertEquals(3, row.lastColumn());
+                        assertEquals(CellType.EMPTY, row.type(1));
+                        assertEquals("Category A", row.getString(2));
+                        assertEquals("Category B", row.getString(3));
+                    } else {
+                        assertEquals(3, row.lastColumn());
+                        assertEquals("Item " + (number - 3), row.getString(1));
+                        for (int column = 2; column <= 3; column++) {
+                            assertEquals(CellType.NUMBER, row.type(column));
+                            assertEquals(numbers[number - 4][column - 2], row.getNumber(column));
+                        }
+                    }
+                }
+                assertEquals(8, number);
+            }
+        }
+        try (XlsxReader reader = XlsxReader.open(xlsx); SheetReader sheet = reader.worksheet(0)) {
+            assertEquals(2, sheet.nextRow().number(), "without the option the chart row is skipped");
+        }
+    }
 }

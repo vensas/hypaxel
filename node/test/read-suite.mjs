@@ -594,4 +594,37 @@ export function defineReadSuite(label, api) {
     assert.equal((await later.layoutAsync()).columnWidth(2), 9.5)
     await assert.rejects(later.nextAsync(), /invalid number/)
   })
+
+  test('reads a sheet exported by numbers', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/numbers.xlsx', import.meta.url))
+    const book = openWorkbookSync(bytes, { includeEmptyRows: true })
+    assert.deepEqual(book.sheetNames, ['Table and Chart'])
+    // Numbers writes its table as plain cells, not as an Excel table.
+    assert.deepEqual(book.tables(), [])
+    const rows = book.rows()
+    const layout = rows.layout()
+    assert.deepEqual(
+      layout.columnWidths.map((c) => [c.firstColumn, c.lastColumn, c.width, c.hidden]),
+      [
+        [1, 1, 24.6719, false],
+        [2, 2, 18.3672, false],
+        [3, 5, 18.7188, false],
+        [6, 16384, 27.75, false],
+      ],
+    )
+    assert.deepEqual([layout.outlineSummaryAbove, layout.rowOutlineLevels], [false, 0])
+    const seen = []
+    for (const row of rows) seen.push([rows.rowNumber, rows.height, row])
+    assert.deepEqual(seen, [
+      [1, 311.6, []],
+      [2, 27.65, ['Table 1']],
+      [3, 20.25, [null, 'Category A', 'Category B']],
+      [4, 20.25, ['Item 1', 5, 7]],
+      [5, 20.05, ['Item 2', 10, 8]],
+      [6, 20.05, ['Item 3', 9, 15]],
+      [7, 20.05, ['Item 4', 7, 12]],
+      [8, 20.05, ['Item 5', 16, 21]],
+    ])
+    assert.deepEqual(openWorkbookSync(bytes).rows(0, { skipEmpty: true }).next().value, ['Table 1'])
+  })
 }

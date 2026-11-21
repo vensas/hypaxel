@@ -788,3 +788,96 @@ func TestReadMeasuresArePlainDecimals(t *testing.T) {
 		t.Errorf("heights: %v", heights)
 	}
 }
+
+// numbers.xlsx is exported by Apple Numbers: its table is plain cells, not an Excel table, and an
+// empty first row holds the chart.
+func TestReadSheetExportedByNumbers(t *testing.T) {
+	const path = "../testdata/reader/numbers.xlsx"
+	r, err := OpenReader(path, WithEmptyRows(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if names := r.SheetNames(); !reflect.DeepEqual(names, []string{"Table and Chart"}) {
+		t.Errorf("sheets: %v", names)
+	}
+	tables, err := r.TablesAt(0)
+	if err != nil || len(tables) != 0 {
+		t.Fatalf("tables: %+v, %v", tables, err)
+	}
+
+	rows, err := r.RowsAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	layout, err := rows.Layout()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWidths := []ColumnWidth{
+		{FirstColumn: 1, LastColumn: 1, Width: 24.6719},
+		{FirstColumn: 2, LastColumn: 2, Width: 18.3672},
+		{FirstColumn: 3, LastColumn: 5, Width: 18.7188},
+		{FirstColumn: 6, LastColumn: 16384, Width: 27.75},
+	}
+	if !reflect.DeepEqual(layout.ColumnWidths, wantWidths) || layout.OutlineSummaryAbove || layout.RowOutlineLevels != 0 {
+		t.Errorf("layout: %+v", layout)
+	}
+
+	type row struct {
+		index  int
+		height float64
+		cells  string
+	}
+	want := []row{
+		{1, 311.6, ""},
+		{2, 27.65, "1:s=Table 1"},
+		{3, 20.25, "2:s=Category A 3:s=Category B"},
+		{4, 20.25, "1:s=Item 1 2:n=5 3:n=7"},
+		{5, 20.05, "1:s=Item 2 2:n=10 3:n=8"},
+		{6, 20.05, "1:s=Item 3 2:n=9 3:n=15"},
+		{7, 20.05, "1:s=Item 4 2:n=7 3:n=12"},
+		{8, 20.05, "1:s=Item 5 2:n=16 3:n=21"},
+	}
+	var got []row
+	for rows.Next() {
+		r := rows.Row()
+		height, ok := r.Height()
+		if !ok {
+			height = -1
+		}
+		var cells []string
+		for column, v := range r.Cells() {
+			kind := "?"
+			switch v.Kind() {
+			case ValueString:
+				kind = "s"
+			case ValueNumber:
+				kind = "n"
+			}
+			cells = append(cells, strconv.Itoa(column)+":"+kind+"="+v.String())
+		}
+		got = append(got, row{r.Index(), height, strings.Join(cells, " ")})
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("rows:\n got %+v\nwant %+v", got, want)
+	}
+
+	plain, err := OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	first, err := plain.RowsAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	if !first.Next() || first.Row().Index() != 2 {
+		t.Errorf("without WithEmptyRows the first row read should be row 2 (err %v)", first.Err())
+	}
+}

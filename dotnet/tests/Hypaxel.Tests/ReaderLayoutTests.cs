@@ -720,6 +720,54 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void ReadsSheetExportedByNumbers()
+    {
+        var path = TestData("numbers.xlsx");
+        using (var reader = XlsxReader.Open(path, new XlsxReaderOptions { IncludeEmptyRows = true }))
+        {
+            Assert.Equal(["Table and Chart"], reader.SheetNames);
+            Assert.Empty(reader.GetTables(0));
+
+            using var rows = reader.OpenWorksheet(0);
+            Assert.Equal(
+                [
+                    new ColumnWidth(1, 1, 24.6719),
+                    new ColumnWidth(2, 2, 18.3672),
+                    new ColumnWidth(3, 5, 18.7188),
+                    new ColumnWidth(6, 16384, 27.75),
+                ],
+                rows.ColumnWidths);
+            Assert.False(rows.OutlineSummaryAbove);
+            Assert.Equal(0, rows.RowOutlineLevels);
+
+            var seen = new List<(int Number, double? Height, ExcelValue[] Values)>();
+            while (rows.Read())
+            {
+                seen.Add((rows.Row.Number, rows.Row.Height, rows.Row.GetValues()));
+            }
+
+            var n = ExcelValue.FromNumber;
+            var s = ExcelValue.FromString;
+            Assert.Equal([1, 2, 3, 4, 5, 6, 7, 8], seen.Select(r => r.Number));
+            Assert.Equal([311.6, 27.65, 20.25, 20.25, 20.05, 20.05, 20.05, 20.05], seen.Select(r => r.Height));
+            Assert.Empty(seen[0].Values);
+            Assert.Equal([s("Table 1")], seen[1].Values);
+            Assert.Equal([default, s("Category A"), s("Category B")], seen[2].Values);
+            Assert.Equal([s("Item 1"), n(5), n(7)], seen[3].Values);
+            Assert.Equal([s("Item 2"), n(10), n(8)], seen[4].Values);
+            Assert.Equal([s("Item 3"), n(9), n(15)], seen[5].Values);
+            Assert.Equal([s("Item 4"), n(7), n(12)], seen[6].Values);
+            Assert.Equal([s("Item 5"), n(16), n(21)], seen[7].Values);
+            Assert.All(seen.Skip(3), r => Assert.Equal(ExcelValueKind.Number, r.Values[1].Kind));
+        }
+
+        using var plain = XlsxReader.Open(path);
+        using var defaultRows = plain.OpenWorksheet(0);
+        Assert.True(defaultRows.Read());
+        Assert.Equal(2, defaultRows.Row.Number);
+    }
+
+    [Fact]
     public void ReturnsTablesFromTopToBottomThenLeftToRight()
     {
         string Table(string range) => $"""<table xmlns="{Main}" ref="{range}"/>""";

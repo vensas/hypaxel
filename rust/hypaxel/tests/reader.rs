@@ -923,3 +923,43 @@ fn verifies_the_whole_sheet_and_remembers_layout_failures() {
     }
     assert!(matches!(rows.next_row(), Err(Error::Malformed { .. })));
 }
+
+/// `testdata/reader/numbers.xlsx` is exported by Apple Numbers: its table is plain cells, not an
+/// Excel table, and an empty first row holds the chart.
+#[test]
+fn reads_a_sheet_exported_by_numbers() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/reader/numbers.xlsx");
+    let mut reader = XlsxReader::open_with(path, &ReadOptions::new().include_empty_rows(true)).unwrap();
+    assert_eq!(reader.sheet_names().collect::<Vec<_>>(), ["Table and Chart"]);
+    assert!(reader.tables_at(0).unwrap().is_empty());
+
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(widths, [(1, 1, 24.6719, false), (2, 2, 18.3672, false), (3, 5, 18.7188, false), (6, 16_384, 27.75, false)]);
+    assert_eq!((layout.outline_summary_above(), layout.row_outline_levels()), (false, 0));
+
+    let mut seen = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        let values: Vec<String> = row.values().map(|v| v.to_string()).collect();
+        seen.push((row.number(), row.height(), values));
+    }
+    let text = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        seen,
+        [
+            (1, Some(311.6), text(&[])),
+            (2, Some(27.65), text(&["Table 1"])),
+            (3, Some(20.25), text(&["", "Category A", "Category B"])),
+            (4, Some(20.25), text(&["Item 1", "5", "7"])),
+            (5, Some(20.05), text(&["Item 2", "10", "8"])),
+            (6, Some(20.05), text(&["Item 3", "9", "15"])),
+            (7, Some(20.05), text(&["Item 4", "7", "12"])),
+            (8, Some(20.05), text(&["Item 5", "16", "21"])),
+        ]
+    );
+
+    let mut reader = XlsxReader::open(path).unwrap();
+    let mut rows = reader.worksheet_at(0).unwrap();
+    assert_eq!(rows.next_row().unwrap().unwrap().number(), 2, "without the option the chart row is skipped");
+}

@@ -399,3 +399,26 @@ def test_reads_a_table_downloaded_from_google_sheets():
         assert len(data) == 903
         assert data[1][6] == 250 and type(data[1][6]) is int
         assert data[-1] == ["Total", None, None, None, 21.20421754, 33.92674806, None, 90058, None, 31060, 901]
+
+
+def test_reads_a_sheet_exported_by_numbers():
+    path = os.path.join(TESTDATA, "numbers.xlsx")
+    with hypaxel.open_workbook(path, include_empty_rows=True) as wb:
+        assert wb.sheet_names == ["Table and Chart"]
+        # Numbers writes its table as plain cells, not as an Excel table.
+        assert wb.tables() == []
+        rows = wb.rows()
+        assert rows.column_widths == [(1, 1, 24.6719, False), (2, 2, 18.3672, False), (3, 5, 18.7188, False), (6, 16384, 27.75, False)]
+        assert (rows.outline_summary_above, rows.row_outline_levels) == (False, 0)
+        seen = [(rows.row_number, rows.height, row) for row in rows]
+        assert seen == [
+            (1, 311.6, []),
+            (2, 27.65, ["Table 1"]),
+            (3, 20.25, [None, "Category A", "Category B"]),
+            (4, 20.25, ["Item 1", 5, 7]),
+            (5, 20.05, ["Item 2", 10, 8]),
+            (6, 20.05, ["Item 3", 9, 15]),
+            (7, 20.05, ["Item 4", 7, 12]),
+            (8, 20.05, ["Item 5", 16, 21]),
+        ]
+    assert hypaxel.read_rows(path, skip_empty=True)[0] == ["Table 1"]
