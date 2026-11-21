@@ -207,3 +207,228 @@ def test_1904_dates():
     with hypaxel.open_workbook(data) as wb:
         assert wb.date_1904
         assert list(wb.rows()) == [[dt.datetime(2024, 2, 29)]]
+
+
+def test_reads_back_tables_row_properties_and_layout():
+    def fill(wb):
+        ws = wb.add_worksheet("Data", column_widths=[12.5, 30], row_outline_levels=2, outline_summary_above=True)
+        ws.write_row(["Product", "Units & more", "Line\nbreak"])
+        ws.write_row(["Widget", 3], outline_level=1)
+        ws.write_row(["Gadget", 5], outline_level=2, hidden=True)
+        ws.write_row(["Gizmo"], outline_level=1, collapsed=True, height=20.5)
+        ws.skip_rows(2)
+        ws.write_rows([[1, 2], [3, 4], [5, 6]])
+        ws.add_table(1, 1, 4, 3, columns=["Product", "Units & more", "Line\nbreak"], name="Orders", style="TableStyleDark3",
+                     row_stripes=False, column_stripes=True, first_column=True, last_column=True)
+        ws.add_table(7, 1, 9, 2, header_row=False, style=None)
+        wb.add_worksheet("Plain").write_row(["x"])
+
+    data = build(fill)
+    with hypaxel.open_workbook(data) as wb:
+        assert wb.tables() == wb.tables("data") == [
+            {"name": "Orders", "first_row": 1, "first_col": 1, "last_row": 4, "last_col": 3,
+             "columns": ["Product", "Units & more", "Line\nbreak"], "style": "TableStyleDark3", "header_row": True,
+             "autofilter": True, "row_stripes": False, "column_stripes": True, "first_column": True, "last_column": True,
+             "totals_row": False},
+            {"name": "Table2", "first_row": 7, "first_col": 1, "last_row": 9, "last_col": 2,
+             "columns": ["Column1", "Column2"], "style": None, "header_row": False,
+             "autofilter": False, "row_stripes": True, "column_stripes": False, "first_column": False, "last_column": False,
+             "totals_row": False},
+        ]
+        assert wb.tables(1) == []
+        with pytest.raises(XlsxError, match="no worksheet"):
+            wb.tables("Missing")
+
+        rows = wb.rows("Data")
+        assert rows.column_widths == [(1, 1, 12.5, False), (2, 2, 30.0, False)]
+        assert (rows.column_width(2), rows.column_width(3)) == (30.0, None)
+        assert rows.column_hidden(2) is False and rows.column_hidden(3) is False
+        assert rows.outline_summary_above is True and rows.row_outline_levels == 2
+        assert (rows.row_number, rows.outline_level, rows.hidden, rows.collapsed, rows.height) == (0, 0, False, False, None)
+        seen = [(rows.row_number, len(row), rows.outline_level, rows.hidden, rows.collapsed, rows.height) for row in rows]
+        assert seen == [
+            (1, 3, 0, False, False, None),
+            (2, 2, 1, False, False, None),
+            (3, 2, 2, True, False, None),
+            (4, 1, 1, False, True, 20.5),
+            (5, 0, 0, False, False, None),
+            (6, 0, 0, False, False, None),
+            (7, 2, 0, False, False, None),
+            (8, 2, 0, False, False, None),
+            (9, 2, 0, False, False, None),
+        ]
+
+        compact = wb.rows("Data", skip_empty=True)
+        assert [compact.row_number for _ in compact] == [1, 2, 3, 4, 7, 8, 9]
+
+        plain = wb.rows("Plain")
+        assert plain.column_widths == [] and plain.outline_summary_above is False and plain.row_outline_levels == 0
+
+    # A table read from a workbook can be written again with the same keys.
+    table = hypaxel.open_workbook(data).tables()[0]
+    position = [table.pop(key) for key in ("first_row", "first_col", "last_row", "last_col")]
+
+    def copy(wb):
+        ws = wb.add_worksheet("Copy")
+        ws.write_rows([["Product", "Units & more", "Line\nbreak"], [1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        ws.add_table(*position, **table)
+
+    assert hypaxel.open_workbook(build(copy)).tables()[0] == {**table, **dict(zip(("first_row", "first_col", "last_row", "last_col"), position))}
+
+
+def test_reports_rows_without_values_on_request():
+    def fill(wb):
+        ws = wb.add_worksheet("Data", row_outline_levels=1)
+        ws.write_row(["first"])
+        ws.begin_row(height=40)
+        ws.end_row()
+        ws.skip_rows(2)
+        ws.write_row([5])
+        ws.begin_row(outline_level=1, hidden=True)
+        ws.end_row()
+
+    data = build(fill)
+
+    def scan(**options):
+        with hypaxel.open_workbook(data, include_empty_rows=options.pop("include", False)) as wb:
+            rows = wb.rows(**options)
+            return [(rows.row_number, row, rows.outline_level, rows.hidden, rows.height) for row in rows]
+
+    assert scan() == [(1, ["first"], 0, False, None), (2, [], 0, False, None), (3, [], 0, False, None),
+                      (4, [], 0, False, None), (5, [5], 0, False, None)]
+    assert scan(include=True) == [(1, ["first"], 0, False, None), (2, [], 0, False, 40.0), (3, [], 0, False, None),
+                                  (4, [], 0, False, None), (5, [5], 0, False, None), (6, [], 1, True, None)]
+    assert [number for number, *_ in scan(include=True, skip_empty=True)] == [1, 5]
+    assert hypaxel.read_rows(data, include_empty_rows=True)[-1] == []
+    assert hypaxel.read_records(data, header_row=5, include_empty_rows=True) == []
+    assert len(hypaxel.read_dataframe(data, header=False, include_empty_rows=True)) == 2
+
+
+TESTDATA = os.path.join(os.path.dirname(__file__), "..", "..", "testdata", "reader")
+
+
+@pytest.mark.parametrize("producer", ["excel", "libreoffice"])
+def test_reads_tables_rows_and_layout_saved_by_other_applications(producer):
+    styled = producer == "excel"
+    # LibreOffice drops table styles and stores a height on every row.
+    default_height = None if styled else 15.0
+    with hypaxel.open_workbook(os.path.join(TESTDATA, f"{producer}.xlsx"), include_empty_rows=True) as wb:
+        assert wb.sheet_names == ["Orders", "Plain"]
+        assert wb.tables("Orders") == [
+            {"name": "Orders", "first_row": 1, "first_col": 1, "last_row": 4, "last_col": 3,
+             "columns": ["Product", "Units & more", "Price"], "style": "TableStyleDark3" if styled else None,
+             "header_row": True, "autofilter": True, "row_stripes": False, "column_stripes": styled,
+             "first_column": styled, "last_column": styled, "totals_row": False},
+            {"name": "Table2", "first_row": 7, "first_col": 1, "last_row": 8, "last_col": 2,
+             "columns": ["Column1", "Column2"], "style": None, "header_row": False, "autofilter": False,
+             "row_stripes": styled, "column_stripes": False, "first_column": False, "last_column": False, "totals_row": False},
+        ]
+        assert wb.tables("Plain") == []
+
+        rows = wb.rows("Orders", skip_empty=False)
+        assert rows.column_widths == [(1, 1, 14.0, False), (2, 2, 22.5, False), (4, 4, 6.0, True)]
+        assert rows.column_hidden(4) is True
+        assert rows.outline_summary_above is True and rows.row_outline_levels == 2
+        seen = [(rows.row_number, len(row), rows.outline_level, rows.hidden, rows.collapsed, rows.height) for row in rows]
+        assert seen == [
+            (1, 3, 0, False, False, default_height),
+            (2, 3, 1, False, styled, default_height),
+            (3, 3, 2, True, False, default_height),
+            (4, 3, 1, False, True, 30.0),
+            (5, 0, 0, False, False, None),
+            (6, 0, 0, False, False, 45.0),
+            (7, 2, 0, False, False, default_height),
+            (8, 2, 0, False, False, default_height),
+        ]
+
+
+def test_tables_with_a_totals_row_cannot_be_written():
+    wb = Writer()
+    ws = wb.add_worksheet("Data")
+    ws.write_rows([["a"], [1], [2]])
+    with pytest.raises((XlsxError, ValueError), match="totals row"):
+        ws.add_table(1, 1, 3, 1, columns=["a"], totals_row=True)
+
+
+def test_reads_a_table_with_a_totals_row_saved_by_excel():
+    with hypaxel.open_workbook(os.path.join(TESTDATA, "excel-totals.xlsx")) as wb:
+        assert wb.sheet_names == ["Inventory"]
+        assert wb.tables() == [{
+            "name": "Table1", "first_row": 1, "first_col": 1, "last_row": 1002, "last_col": 11,
+            "columns": ["SKU", "Item", "Group", "Vendor", "Cost", "Price",
+                        "Opening", "Sold", "Closing", "Reorder", "Status"],
+            "style": "TableStyleMedium2", "header_row": True, "autofilter": True, "row_stripes": True,
+            "column_stripes": False, "first_column": False, "last_column": False, "totals_row": True,
+        }]
+
+        rows = wb.rows()
+        widths = rows.column_widths
+        assert len(widths) == 11
+        assert (widths[0], widths[-1]) == ((1, 1, 11.6640625, False), (11, 11, 13.1640625, False))
+        assert rows.outline_summary_above is False
+        data = []
+        for row in rows:
+            assert (rows.outline_level, rows.hidden, rows.height) == (0, False, None)
+            data.append(row)
+        assert len(data) == 1002
+        assert data[-1] == ["Total", None, None, None, 21.085, 33.736, None, 99696, None, 34500, 1000]
+
+
+def test_reads_a_table_downloaded_from_google_sheets():
+    with hypaxel.open_workbook(os.path.join(TESTDATA, "google-sheets.xlsx")) as wb:
+        assert wb.sheet_names == ["Inventory"]
+        # The file uses a custom table style, which reads as no style, and has no filter buttons.
+        assert wb.tables() == [{
+            "name": "Table1", "first_row": 1, "first_col": 1, "last_row": 903, "last_col": 11,
+            "columns": ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"],
+            "style": None, "header_row": True, "autofilter": False, "row_stripes": True,
+            "column_stripes": False, "first_column": True, "last_column": True, "totals_row": True,
+        }]
+
+        rows = wb.rows()
+        widths = rows.column_widths
+        assert len(widths) == 12
+        assert (widths[0], widths[-1]) == ((1, 1, 11.63, False), (12, 26, 8.88, False))
+        assert rows.column_width(20) == 8.88
+        assert rows.outline_summary_above is False
+        data = []
+        for row in rows:
+            assert (rows.outline_level, rows.hidden) == (0, False)
+            assert rows.height == (None if rows.row_number == 1 else 15.75)
+            data.append(row)
+        assert len(data) == 903
+        assert data[1][6] == 250 and type(data[1][6]) is int
+        assert data[-1] == ["Total", None, None, None, 21.20421754, 33.92674806, None, 90058, None, 31060, 901]
+
+
+def test_reads_a_sheet_exported_by_numbers():
+    path = os.path.join(TESTDATA, "numbers.xlsx")
+    with hypaxel.open_workbook(path, include_empty_rows=True) as wb:
+        assert wb.sheet_names == ["Table and Chart"]
+        # Numbers writes its table as plain cells, not as an Excel table.
+        assert wb.tables() == []
+        rows = wb.rows()
+        assert rows.column_widths == [(1, 1, 24.6719, False), (2, 2, 18.3672, False), (3, 5, 18.7188, False), (6, 16384, 27.75, False)]
+        assert (rows.outline_summary_above, rows.row_outline_levels) == (False, 0)
+        seen = [(rows.row_number, rows.height, row) for row in rows]
+        assert seen == [
+            (1, 311.6, []),
+            (2, 27.65, ["Table 1"]),
+            (3, 20.25, [None, "Category A", "Category B"]),
+            (4, 20.25, ["Item 1", 5, 7]),
+            (5, 20.05, ["Item 2", 10, 8]),
+            (6, 20.05, ["Item 3", 9, 15]),
+            (7, 20.05, ["Item 4", 7, 12]),
+            (8, 20.05, ["Item 5", 16, 21]),
+        ]
+    assert hypaxel.read_rows(path, skip_empty=True)[0] == ["Table 1"]
+
+
+def test_table_names_that_look_like_excel_escapes_round_trip():
+    def fill(wb):
+        ws = wb.add_worksheet("S")
+        ws.write_rows([["a_x0042_"], [1]])
+        ws.add_table(1, 1, 2, 1, name="T_x0041_", columns=["a_x0042_"])
+
+    table = hypaxel.open_workbook(build(fill)).tables()[0]
+    assert (table["name"], table["columns"]) == ("T_x0041_", ["a_x0042_"])

@@ -42,6 +42,84 @@ Python, Node.js, .NET, Java, Go and PHP).
   `[h]:mm` durations, error strings and `null`. Rows cross into JavaScript in binary batches, and
   repeated shared strings are decoded once. Same row and record semantics as Python. Read
   benchmark against ExcelJS's streaming reader and SheetJS (`node/benchmarks/read_bench.mjs`).
+- **Readers return tables, row properties and column widths (.NET, Rust, Python, Node.js and
+  browsers, Go, Java)** ([#1](https://github.com/vensas/hypaxel/issues/1)). A file written with
+  Hypaxel can now be checked with Hypaxel alone. Same semantics everywhere:
+  - Tables are returned as the writer's own table type, so a table that was read can be compared
+    with, or passed to, `add_table`: name, range, column names, style, header row, filter buttons,
+    banded rows and columns, first and last column highlight. Table parts are read only on
+    request; reading values does not touch them. They are returned from top to bottom, then left
+    to right, whatever order the file lists them in (Excel lists them in reverse). A custom
+    (non-built-in) style reads as "no style", and a table written without a header row reads
+    back without filter buttons.
+  - The table type gains a totals-row flag (Rust `Table::totals_row`, .NET
+    `ExcelTable.HasTotalsRow`, Go `Table.TotalsRow`, Java `ExcelTable.totalsRow()`, Python
+    `totals_row`, Node.js `totalsRow`), set by the reader when the last row of the range is a
+    totals row. Totals rows cannot be written yet: `add_table` rejects a table that has the flag
+    set, because Excel repairs a totals row whose columns do not declare their functions.
+  - Each row has its outline level (0–7), hidden and collapsed flags and its height (absent when
+    the row stores none).
+  - Rows that the file stores without any value (a spacer row with a height, an empty hidden
+    row) are still skipped by default. A new reader option returns them with their number and
+    properties and no cells: Rust `ReadOptions::include_empty_rows`, .NET
+    `XlsxReaderOptions.IncludeEmptyRows`, Go `WithEmptyRows`, Java
+    `ReadOptions.Builder.includeEmptyRows`. Python (`include_empty_rows=`) and Node.js
+    (`includeEmptyRows`) already return rows without values as empty lists; there the option
+    adds their properties and returns such rows after the last value too, and `skip_empty` /
+    `skipEmpty` still drops them.
+  - Each worksheet has its column widths (runs of columns with their hidden flag, explicit and
+    auto-fitted alike), lookups by column for the width and the hidden flag,
+    `outline_summary_above` and the declared row outline levels. They precede the rows in the
+    file and are available before the first row is read.
+  - Rust: `XlsxReader::tables(name)` / `tables_at(index)` → `Vec<Table>`; `Row::outline_level`,
+    `is_hidden`, `is_collapsed`, `height`; `Rows::layout()` → `SheetLayout` (`column_widths`,
+    `column_width`, `is_column_hidden`, `outline_summary_above`, `row_outline_levels`) with
+    `ColumnWidth`; `TableStyle::name()` is now public.
+  - Python: `Reader.tables(sheet)` → dicts with `add_table`'s keys; on the row iterator
+    `row_number`, `outline_level`, `hidden`, `collapsed`, `height`, `column_widths`,
+    `column_width(col)`, `column_hidden(col)`, `outline_summary_above`, `row_outline_levels`.
+  - Node.js and browsers: `Workbook.tables(sheet)` → `ReadTable` (`firstRow`, `firstColumn`,
+    `lastRow`, `lastColumn`, `options`); on `SheetRows` `rowNumber`, `outlineLevel`, `hidden`,
+    `collapsed`, `height`, `layout()` / `layoutAsync()` → `SheetLayout` (`columnWidths`,
+    `columnWidth`, `columnHidden`, `outlineSummaryAbove`, `rowOutlineLevels`) with
+    `ColumnWidth`. The layout and row properties travel in the row batches, identically on both
+    engines.
+  - .NET: `XlsxReader.GetTables(name or index)` → `IReadOnlyList<ExcelTable>`;
+    `XlsxRow.OutlineLevel`, `Hidden`, `Collapsed`, `Height`; `WorksheetReader.ColumnWidths`,
+    `GetColumnWidth`, `IsColumnHidden`, `OutlineSummaryAbove`, `RowOutlineLevels`;
+    `ColumnWidth`.
+  - Go: `Reader.Tables(name)` / `TablesAt(index)` → `[]Table`; `Row.OutlineLevel`, `Hidden`,
+    `Collapsed`, `Height`; `Rows.Layout()` → `*SheetLayout` (`ColumnWidths`,
+    `ColumnWidth(column)`, `ColumnHidden(column)`, `OutlineSummaryAbove`, `RowOutlineLevels`)
+    with `ColumnWidth`.
+  - Java: `XlsxReader.tables(name or index)` → `List<ExcelTable>` (which gains `equals`,
+    `hashCode` and `toString`); `Row.outlineLevel`, `hidden`, `collapsed`, `height`;
+    `SheetReader.columnWidths`, `columnWidth`, `columnHidden`, `outlineSummaryAbove`,
+    `rowOutlineLevels`; `ColumnWidth`.
+  - Checked against the same workbook saved by Excel for Mac and by LibreOffice Calc, and against
+    tables with a totals row saved by Excel and downloaded from Google Sheets, and a sheet
+    exported by Apple Numbers (`testdata/reader/`), in every implementation.
+  - Go: `TableStyleMedium(2)` is now the zero `TableStyle`, so a table written with it compares
+    equal to the table read back.
+  - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table, 64 MiB
+    of table and column names per sheet, 16,384 column ranges per sheet and 65,536
+    relationships per part (links to external targets do not count). A table part that a
+    sheet references several times is read once.
+  - Integer attributes (row numbers, outline levels, column ranges) are read as plain digits in
+    every implementation; the Rust core no longer accepts a leading `+`.
+  - When the rows of a worksheet end, the readers read the rest of its ZIP entry, so a damaged
+    entry is reported even when the damage lies after the rows or the sheet has none (Rust, .NET,
+    Java, and through the core Python and Node.js; Go already did). A failure while reading the
+    layout is reported again by every later layout call and by the next row call, in every
+    implementation; in Node.js this includes a sheet that cannot be opened, which used to end
+    silently after the first error.
+  - Table names are decoded like column names, so a name that looks like an Excel escape (such
+    as `T_x0041_`, which Excel stores as `T_x005f_x0041_`) reads back as written.
+  - .NET: `ExcelTable` compares `Columns` by their names, so a table read back equals the one
+    that was written.
+  - Asking for the layout of a worksheet reader that was closed before the layout was read is an
+    error instead of an empty result (.NET `ObjectDisposedException`, Go `ErrRowsClosed`, Java
+    `INVALID_STATE`, Node.js `XlsxError`).
 - **Browser support for the Node.js package (WebAssembly).** The `hypaxel` npm package now runs in
   browsers and other runtimes without native modules on the Rust core compiled to WebAssembly
   (171 KB gzipped), with the same API as in Node.js. Bundlers pick the build through the `browser` export

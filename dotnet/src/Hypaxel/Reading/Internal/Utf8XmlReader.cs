@@ -136,6 +136,27 @@ internal sealed class Utf8XmlReader : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Reads the rest of the input without parsing it, so that the source can verify what it delivers
+    /// (for a ZIP entry, its size and CRC-32).
+    /// </summary>
+    public void Drain()
+    {
+        _pos = _end;
+        if (_eof)
+        {
+            return;
+        }
+
+        var sink = _buffer.Length > 0 ? _buffer : new byte[8192];
+        while (_source.Read(sink, 0, sink.Length) > 0)
+        {
+        }
+
+        _pos = _end = 0;
+        _eof = true;
+    }
+
     /// <summary>Ensures that at least <paramref name="n"/> bytes are buffered after <c>_pos</c>.</summary>
     private bool Need(int n)
     {

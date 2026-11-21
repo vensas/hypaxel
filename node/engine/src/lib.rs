@@ -9,7 +9,7 @@ use std::fmt;
 
 mod read;
 
-pub use read::{BATCH_BYTES, ReadConfig, RowStream, SheetEntry, Workbook};
+pub use read::{BATCH_BYTES, ReadConfig, RowStream, SheetEntry, TableEntry, Workbook};
 
 use chrono::DateTime;
 use hypaxel::{
@@ -140,6 +140,8 @@ pub struct TableConfig {
     pub column_stripes: Option<bool>,
     pub first_column: Option<bool>,
     pub last_column: Option<bool>,
+    /// Set on tables that were read; totals rows cannot be written.
+    pub totals_row: Option<bool>,
 }
 
 fn parse_table_style(name: Option<&str>) -> Result<TableStyle> {
@@ -439,6 +441,7 @@ impl Engine {
         if let Some(name) = o.name {
             table = table.name(name);
         }
+        table.totals_row = o.totals_row.unwrap_or(false);
         self.sheet()?.add_table(&table).map_err(core)?;
         Ok(())
     }

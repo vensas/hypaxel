@@ -58,12 +58,15 @@ export {
   type WriterOptions,
 } from './core'
 export {
+  SheetLayout,
   SheetRecords,
   SheetRows,
   Workbook,
   type BytesSource,
+  type ColumnWidth,
   type ReadOptions,
   type ReadRecord,
+  type ReadTable,
   type ReadValue,
   type RecordsOptions,
   type RowsOptions,
@@ -147,7 +150,9 @@ export type SyncWorkbookSource = string | URL | Uint8Array | ArrayBuffer | Array
 
 function openPath(path: string | URL, options: ReadOptions): Workbook {
   const file = typeof path === 'string' ? path : fileURLToPath(path)
-  const native = guard(() => NativeWorkbook.openPath(file, { maxSharedStringsBytes: options.maxSharedStringsBytes }))
+  const native = guard(() =>
+    NativeWorkbook.openPath(file, { maxSharedStringsBytes: options.maxSharedStringsBytes, includeEmptyRows: options.includeEmptyRows }),
+  )
   return new Workbook(native, options)
 }
 

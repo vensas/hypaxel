@@ -596,9 +596,18 @@ func readEverything(data []byte, opts ...ReadOption) error {
 		return err
 	}
 	for i := range r.Sheets() {
+		if tables, err := r.TablesAt(i); err == nil {
+			for _, table := range tables {
+				_ = table.Style.String()
+			}
+		}
 		rows, err := r.RowsAt(i)
 		if err != nil {
 			continue
+		}
+		if layout, err := rows.Layout(); err == nil {
+			layout.ColumnWidth(1)
+			layout.ColumnHidden(MaxColumns)
 		}
 		for row, err := range rows.All() {
 			if err != nil {
@@ -748,6 +757,16 @@ func FuzzSheetXML(f *testing.F) {
 		sst := `<sst><si><t>shared</t></si></sst>`
 		rels := `<Relationship Id="rId2" Type="x/sharedStrings" Target="sharedStrings.xml"/>`
 		_ = readEverything(singleSheet(t, sheet, rels, "xl/sharedStrings.xml", sst))
+	})
+}
+
+func FuzzTableXML(f *testing.F) {
+	f.Add(`<table displayName="T" ref="A1:B3" totalsRowCount="1"><autoFilter ref="A1:B2"/><tableColumns><tableColumn name="a_x000A_b"/><tableColumn name="c"><f>1</f></tableColumn></tableColumns><tableStyleInfo name="TableStyleDark3" showRowStripes="1"/></table>`)
+	f.Add(`<x:table xmlns:x="a" name="T" ref="$B$2" headerRowCount="0"><x:tableStyleInfo name="Custom"/></x:table>`)
+	f.Fuzz(func(t *testing.T, table string) {
+		rels := `<Relationships><Relationship Id="rId1" Type="x/table" Target="../tables/t.xml"/></Relationships>`
+		sheet := `<worksheet><cols><col min="1" max="2" width="9" hidden="1"/></cols><sheetData><row ht="20" outlineLevel="1"><c><v>1</v></c></row></sheetData></worksheet>`
+		_ = readEverything(singleSheet(t, sheet, "", "xl/worksheets/_rels/sheet1.xml.rels", rels, "xl/tables/t.xml", table))
 	})
 }
 

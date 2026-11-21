@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalDouble;
 
 /**
  * One row of a worksheet that is being read. Columns are 1-based (A = 1).
@@ -32,7 +33,30 @@ public final class Row {
         return buffer.number;
     }
 
-    /** Returns the number of cells with a value; always at least one. */
+    /** Returns the outline (grouping) level of the row, 0 to 7. */
+    public int outlineLevel() {
+        return buffer.outlineLevel;
+    }
+
+    /** Returns whether the row is hidden. */
+    public boolean hidden() {
+        return buffer.hidden;
+    }
+
+    /** Returns whether the row is the summary row of a collapsed group. */
+    public boolean collapsed() {
+        return buffer.collapsed;
+    }
+
+    /** Returns the height of the row in points, if the row stores one. */
+    public OptionalDouble height() {
+        return Double.isNaN(buffer.height) ? OptionalDouble.empty() : OptionalDouble.of(buffer.height);
+    }
+
+    /**
+     * Returns the number of cells with a value. It is zero only for a row without values, which is
+     * returned with {@link ReadOptions.Builder#includeEmptyRows(boolean)}.
+     */
     public int cellCount() {
         return buffer.count;
     }

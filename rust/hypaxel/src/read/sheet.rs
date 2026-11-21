@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::sst::SharedStrings;
 use super::styles::{DateKind, Styles, parse_u32};
+use super::table::is_true;
 use super::value::{ExcelDateTime, Value, iso_to_serial};
 use super::xml::{self, CellShape, Event, XmlReader};
 use super::zip::EntryReader;
@@ -49,6 +50,100 @@ enum State {
     Done,
 }
 
+/// A run of adjacent columns that share one width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ColumnWidth {
+    first: u32,
+    last: u32,
+    width: f64,
+    hidden: bool,
+}
+
+impl ColumnWidth {
+    /// 1-based first column of the run.
+    pub fn first_column(&self) -> u32 {
+        self.first
+    }
+
+    /// 1-based last column of the run.
+    pub fn last_column(&self) -> u32 {
+        self.last
+    }
+
+    /// Width in characters of the default font, as in [`Column::width`](crate::Column).
+    pub fn width(&self) -> f64 {
+        self.width
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+}
+
+/// Worksheet settings stored ahead of the rows. Returned by [`Rows::layout`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SheetLayout {
+    columns: Vec<ColumnWidth>,
+    summary_above: bool,
+    row_outline_levels: u8,
+}
+
+impl SheetLayout {
+    /// The column widths the sheet defines, explicit and auto-fitted alike, in file order.
+    /// Columns that are not covered have the default width.
+    pub fn column_widths(&self) -> &[ColumnWidth] {
+        &self.columns
+    }
+
+    /// The width of a 1-based column; `None` if the sheet leaves it at the default.
+    pub fn column_width(&self, column: u32) -> Option<f64> {
+        self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).map(|c| c.width)
+    }
+
+    /// True if a 1-based column is hidden.
+    pub fn is_column_hidden(&self, column: u32) -> bool {
+        self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).is_some_and(|c| c.hidden)
+    }
+
+    /// True if summary rows sit above their groups ([`SheetOptions::outline_summary_above`](crate::SheetOptions::outline_summary_above)).
+    pub fn outline_summary_above(&self) -> bool {
+        self.summary_above
+    }
+
+    /// The deepest row outline level the sheet declares (0 without grouping).
+    pub fn row_outline_levels(&self) -> u8 {
+        self.row_outline_levels
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RowProps {
+    outline_level: u8,
+    hidden: bool,
+    collapsed: bool,
+    height: Option<f64>,
+}
+
+/// The errors reading can produce, duplicated so that a failure can be reported more than once.
+fn copy_error(e: &Error) -> Error {
+    match e {
+        Error::Io(io) => Error::Io(std::io::Error::new(io.kind(), io.to_string())),
+        Error::Malformed { part, message } => Error::Malformed { part: part.clone(), message: message.clone() },
+        Error::LimitExceeded(m) => Error::LimitExceeded(m.clone()),
+        Error::Unsupported(m) => Error::Unsupported(m.clone()),
+        Error::InvalidFile(m) => Error::InvalidFile(m.clone()),
+        other => Error::Custom(other.to_string()),
+    }
+}
+
+fn parse_outline_level(raw: &[u8]) -> u8 {
+    parse_u32(raw).map_or(0, |n| n.min(7) as u8)
+}
+
+fn parse_measure(raw: &[u8]) -> Option<f64> {
+    std::str::from_utf8(raw).ok()?.trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n >= 0.0)
+}
+
 /// Rows of one worksheet, read front to back. Created by [`XlsxReader::worksheet`](crate::XlsxReader::worksheet).
 ///
 /// ```no_run
@@ -66,9 +161,14 @@ pub struct Rows<R> {
     sst: Arc<SharedStrings>,
     styles: Arc<Styles>,
     is_1904: bool,
+    include_empty: bool,
     state: State,
     previous_row: u32,
     number: u32,
+    props: RowProps,
+    layout: SheetLayout,
+    /// Why reading the layout failed; returned again by every later call.
+    layout_error: Option<Error>,
     cells: Vec<RawCell>,
     text: String,
     scratch: String,
@@ -81,42 +181,90 @@ impl<R> fmt::Debug for Rows<R> {
 }
 
 impl<R: Read> Rows<R> {
-    pub(crate) fn new(xml: XmlReader<EntryReader<R>>, sst: Arc<SharedStrings>, styles: Arc<Styles>, is_1904: bool) -> Self {
+    pub(crate) fn new(
+        xml: XmlReader<EntryReader<R>>,
+        sst: Arc<SharedStrings>,
+        styles: Arc<Styles>,
+        is_1904: bool,
+        include_empty: bool,
+    ) -> Self {
         Self {
             xml,
             sst,
             styles,
             is_1904,
+            include_empty,
             state: State::BeforeData,
             previous_row: 0,
             number: 0,
+            props: RowProps::default(),
+            layout: SheetLayout::default(),
+            layout_error: None,
             cells: Vec::new(),
             text: String::new(),
             scratch: String::new(),
         }
     }
 
+    /// The column widths and outline settings of the sheet. They precede the rows in the file, so
+    /// this is available before the first row is read and costs nothing extra.
+    ///
+    /// If reading the layout fails, this and [`next_row`](Self::next_row) return that error from
+    /// then on.
+    pub fn layout(&mut self) -> Result<&SheetLayout> {
+        self.read_layout()?;
+        Ok(&self.layout)
+    }
+
+    fn read_layout(&mut self) -> Result<()> {
+        if let Some(e) = &self.layout_error {
+            return Err(copy_error(e));
+        }
+        if self.state != State::BeforeData {
+            return Ok(());
+        }
+        self.find_sheet_data().inspect_err(|e| {
+            self.state = State::Done;
+            self.layout_error = Some(copy_error(e));
+        })
+    }
+
     /// Reads the next row that contains at least one value. Rows that are missing from the file
-    /// or only carry formatting are skipped; [`Row::number`] tells where the row is.
+    /// or only carry formatting are skipped; [`Row::number`] tells where the row is. With
+    /// [`ReadOptions::include_empty_rows`](crate::ReadOptions::include_empty_rows), rows that the
+    /// file stores without values are returned as well.
     pub fn next_row(&mut self) -> Result<Option<Row<'_>>> {
         loop {
             match self.state {
-                State::Done => return Ok(None),
-                State::BeforeData => self.find_sheet_data()?,
+                State::Done => return self.layout_error.as_ref().map_or(Ok(None), |e| Err(copy_error(e))),
+                State::BeforeData => self.read_layout()?,
                 State::InData => {
-                    let (start, number) = match self.xml.next()? {
-                        Event::Start(t) if t.name == b"row" => (true, t.attr(b"r").map(parse_u32)),
-                        Event::Empty(t) if t.name == b"row" => (false, t.attr(b"r").map(parse_u32)),
+                    let (start, tag) = match self.xml.next()? {
+                        Event::Start(t) if t.name == b"row" => (true, t),
+                        Event::Empty(t) if t.name == b"row" => (false, t),
                         Event::Start(_) => {
                             self.xml.skip_element()?;
                             continue;
                         }
                         Event::End(_) | Event::Eof => {
                             self.state = State::Done;
+                            self.xml.drain()?;
                             continue;
                         }
                         _ => continue,
                     };
+                    let mut number = None;
+                    let mut props = RowProps::default();
+                    for (name, value) in tag.attrs() {
+                        match name {
+                            b"r" if number.is_none() => number = Some(parse_u32(value)),
+                            b"outlineLevel" => props.outline_level = parse_outline_level(value),
+                            b"hidden" => props.hidden = is_true(Some(value)),
+                            b"collapsed" => props.collapsed = is_true(Some(value)),
+                            b"ht" => props.height = parse_measure(value),
+                            _ => {}
+                        }
+                    }
                     let number = match number {
                         Some(Some(n)) => n,
                         Some(None) => return Err(self.xml.malformed("a row has an invalid row number")),
@@ -126,14 +274,21 @@ impl<R: Read> Rows<R> {
                         return Err(self.xml.malformed(format!("row number {number} is outside 1..=1048576")));
                     }
                     self.previous_row = number;
-                    if !start {
+                    if !start && !self.include_empty {
                         continue;
                     }
                     self.number = number;
-                    self.read_cells()?;
-                    if !self.cells.is_empty() {
+                    self.props = props;
+                    if start {
+                        self.read_cells()?;
+                    } else {
+                        self.cells.clear();
+                        self.text.clear();
+                    }
+                    if self.include_empty || !self.cells.is_empty() {
                         return Ok(Some(Row {
                             number: self.number,
+                            props: self.props,
                             cells: &self.cells,
                             text: &self.text,
                             sst: &self.sst,
@@ -147,19 +302,59 @@ impl<R: Read> Rows<R> {
 
     fn find_sheet_data(&mut self) -> Result<()> {
         loop {
-            let next = match self.xml.next()? {
-                Event::Start(t) if t.name == b"sheetData" => State::InData,
-                Event::Empty(t) if t.name == b"sheetData" => State::Done,
-                Event::Start(t) if t.name == b"worksheet" || t.name == b"dialogsheet" || t.name == b"macrosheet" => continue,
-                Event::Start(_) => {
-                    self.xml.skip_element()?;
-                    continue;
+            let (start, tag) = match self.xml.next()? {
+                Event::Start(t) => (true, t),
+                Event::Empty(t) => (false, t),
+                Event::Eof => {
+                    self.state = State::Done;
+                    return Ok(());
                 }
-                Event::Eof => State::Done,
                 _ => continue,
             };
-            self.state = next;
-            return Ok(());
+            let mut descend = false;
+            match tag.name {
+                b"sheetData" if start => {
+                    self.state = State::InData;
+                    return Ok(());
+                }
+                b"sheetData" => {
+                    self.xml.drain()?;
+                    self.state = State::Done;
+                    return Ok(());
+                }
+                b"worksheet" | b"dialogsheet" | b"macrosheet" | b"sheetPr" | b"cols" => descend = true,
+                b"outlinePr" => {
+                    self.layout.summary_above = tag.attr(b"summaryBelow").is_some_and(|v| matches!(v.trim_ascii(), b"0" | b"false"));
+                }
+                b"sheetFormatPr" => {
+                    self.layout.row_outline_levels = tag.attr(b"outlineLevelRow").map_or(0, parse_outline_level);
+                }
+                b"col" => {
+                    let (mut first, mut last, mut width, mut hidden) = (None, None, None, false);
+                    for (name, value) in tag.attrs() {
+                        match name {
+                            b"min" => first = parse_u32(value),
+                            b"max" => last = parse_u32(value),
+                            b"width" => width = parse_measure(value),
+                            b"hidden" => hidden = is_true(Some(value)),
+                            _ => {}
+                        }
+                    }
+                    if let (Some(first), Some(last), Some(width)) = (first, last, width) {
+                        let last = last.min(MAX_COLUMNS);
+                        if (1..=last).contains(&first) {
+                            if self.layout.columns.len() >= MAX_COLUMNS as usize {
+                                return Err(self.xml.malformed("the sheet defines more than 16384 column ranges"));
+                            }
+                            self.layout.columns.push(ColumnWidth { first, last, width, hidden });
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if start && !descend {
+                self.xml.skip_element()?;
+            }
         }
     }
 
@@ -487,6 +682,7 @@ fn parse_column(reference: &[u8]) -> Option<u32> {
 #[derive(Clone, Copy)]
 pub struct Row<'a> {
     number: u32,
+    props: RowProps,
     cells: &'a [RawCell],
     text: &'a str,
     sst: &'a SharedStrings,
@@ -530,12 +726,32 @@ impl<'a> Row<'a> {
         self.number
     }
 
+    /// Outline (grouping) level, 0–7.
+    pub fn outline_level(&self) -> u8 {
+        self.props.outline_level
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.props.hidden
+    }
+
+    /// True for the summary row of a collapsed group.
+    pub fn is_collapsed(&self) -> bool {
+        self.props.collapsed
+    }
+
+    /// Height in points, if the row stores one.
+    pub fn height(&self) -> Option<f64> {
+        self.props.height
+    }
+
     /// Number of cells with a value.
     pub fn len(&self) -> usize {
         self.cells.len()
     }
 
-    /// Always false: rows without values are skipped by [`Rows::next_row`].
+    /// True for a row without values. Such rows are only returned with
+    /// [`ReadOptions::include_empty_rows`](crate::ReadOptions::include_empty_rows).
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
     }

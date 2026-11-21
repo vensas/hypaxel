@@ -77,6 +77,19 @@ public final class XmlReader {
         return depth;
     }
 
+    /**
+     * Reads the rest of the input without parsing it, so that the input can verify what it
+     * delivers (for a ZIP entry, its size and CRC-32).
+     */
+    public void drain() throws IOException {
+        pos = end;
+        while (!eof) {
+            if (input.read(buf, 0, buf.length) <= 0) {
+                eof = true;
+            }
+        }
+    }
+
     /** Releases the underlying input. */
     public void close() {
         input.close();
@@ -423,13 +436,18 @@ public final class XmlReader {
      * Resets the attribute cursor of {@link #nextAttribute()}.
      */
     public String attribute(byte[] name) {
+        return attribute(name, false);
+    }
+
+    /** Like {@link #attribute(byte[])}; with {@code excelEscapes}, {@code _xHHHH_} escapes are decoded as well. */
+    public String attribute(byte[] name, boolean excelEscapes) {
         int saved = attrPos;
         attrPos = attrsStart;
         try {
             while (nextAttribute()) {
                 if (attributeIs(name)) {
                     ByteBuilder out = new ByteBuilder(valueEnd - valueStart);
-                    if (XmlText.decode(out, buf, valueStart, valueEnd, true, false) != null) {
+                    if (XmlText.decode(out, buf, valueStart, valueEnd, true, excelEscapes) != null) {
                         return null;
                     }
                     return out.toString();

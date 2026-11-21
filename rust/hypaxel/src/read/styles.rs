@@ -129,8 +129,13 @@ impl Styles {
     }
 }
 
+/// Parses a non-negative decimal integer that fits into a `u32`: digits only, without a sign.
 pub(crate) fn parse_u32(raw: &[u8]) -> Option<u32> {
-    std::str::from_utf8(raw).ok()?.trim().parse().ok()
+    let raw = raw.trim_ascii();
+    if raw.is_empty() || raw.len() > 10 || !raw.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    u32::try_from(raw.iter().fold(0u64, |n, &b| n * 10 + (b - b'0') as u64)).ok()
 }
 
 #[cfg(test)]

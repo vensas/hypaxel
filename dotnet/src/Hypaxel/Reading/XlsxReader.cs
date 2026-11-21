@@ -28,6 +28,13 @@ namespace Hypaxel;
 /// </example>
 public sealed class XlsxReader : IDisposable
 {
+    private const int MaxTables = 4096;
+
+    /// <summary>Most relationships to other parts that one part may have. Links to external targets are not kept and do not count.</summary>
+    private const int MaxRelationships = 65_536;
+
+    /// <summary>Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes per column on top of its name.</summary>
+    private const long MaxTableText = 64 * 1024 * 1024;
     private const string NotAWorkbook = "The package has no workbook part; it may be a Word or PowerPoint file.";
 
     private readonly Stream _stream;
@@ -140,6 +147,11 @@ public sealed class XlsxReader : IDisposable
     /// <exception cref="XlsxReadException">The sheet is a chart sheet, or its part is missing or damaged.</exception>
     public WorksheetReader OpenWorksheet(string name)
     {
+        return OpenWorksheet(IndexOf(name));
+    }
+
+    private int IndexOf(string name)
+    {
         ArgumentNullException.ThrowIfNull(name);
         var index = Array.FindIndex(_sheets, s => string.Equals(s.Name, name, StringComparison.Ordinal));
         if (index < 0)
@@ -152,7 +164,7 @@ public sealed class XlsxReader : IDisposable
             throw new KeyNotFoundException($"The workbook has no sheet named '{name}'. Sheets: {string.Join(", ", _sheets.Select(s => $"'{s.Name}'"))}.");
         }
 
-        return OpenWorksheet(index);
+        return index;
     }
 
     /// <summary>Streams the rows of the sheet at a 0-based position in <see cref="Sheets"/>.</summary>
@@ -183,7 +195,74 @@ public sealed class XlsxReader : IDisposable
         }
 
         var sharedStrings = LoadSharedStrings();
-        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem);
+        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem, _options.IncludeEmptyRows);
+    }
+
+    /// <summary>
+    /// The Excel tables of the sheet with this name, matched exactly first and then ignoring case.
+    /// </summary>
+    /// <inheritdoc cref="GetTables(int)" path="/remarks"/>
+    /// <exception cref="KeyNotFoundException">No sheet has this name.</exception>
+    /// <exception cref="XlsxReadException">A table part is missing or damaged.</exception>
+    public IReadOnlyList<ExcelTable> GetTables(string name) => GetTables(IndexOf(name));
+
+    /// <summary>
+    /// The Excel tables of the sheet at a 0-based position in <see cref="Sheets"/>, as the
+    /// <see cref="ExcelTable"/> values that <see cref="Worksheet.AddTable"/> accepts.
+    /// </summary>
+    /// <remarks>
+    /// Tables live in their own parts, which are read on each call; reading rows does not touch them.
+    /// They are returned from top to bottom, then left to right, whatever order the file lists them in.
+    /// A part that the sheet references more than once is read once. A sheet may have at most 4,096
+    /// tables holding 64 MiB of table and column names in total.
+    /// A table style that is not one of Excel's built-in styles is reported as <see cref="TableStyle.None"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">There is no sheet at this position.</exception>
+    /// <exception cref="XlsxReadException">A table part is missing or damaged, or the tables exceed a limit.</exception>
+    public IReadOnlyList<ExcelTable> GetTables(int index)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if ((uint)index >= (uint)_sheets.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index), index, $"The workbook has {_sheets.Length} sheet(s).");
+        }
+
+        var part = _sheets[index].Part;
+        var rels = part is null ? null : ReadRelationships(RelationshipsPath(part));
+        if (rels is null)
+        {
+            return [];
+        }
+
+        var targets = new List<string>();
+        foreach (var rel in rels)
+        {
+            if (rel.Is("table"))
+            {
+                targets.Add(rel.Target);
+            }
+        }
+
+        if (targets.Count > MaxTables)
+        {
+            throw XlsxReadException.LimitExceeded(part, $"The sheet has more than {MaxTables} tables.");
+        }
+
+        var tables = new List<ExcelTable>(targets.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        long budget = MaxTableText;
+        foreach (var target in targets)
+        {
+            if (!seen.Add(target))
+            {
+                continue;
+            }
+
+            using var xml = OpenXml(target);
+            tables.Add(TableReader.Parse(xml, ref budget));
+        }
+
+        return [.. tables.OrderBy(t => t.FirstRow).ThenBy(t => t.FirstColumn)];
     }
 
     /// <summary>Number of entries in the shared string table (loaded with the first worksheet).</summary>
@@ -261,6 +340,11 @@ public sealed class XlsxReader : IDisposable
 
             if (Attribute(attributes, "Id"u8) is { } id && Attribute(attributes, "Type"u8) is { } type && Attribute(attributes, "Target"u8) is { } target)
             {
+                if (rels.Count >= MaxRelationships)
+                {
+                    throw XlsxReadException.LimitExceeded(part, $"The part has more than {MaxRelationships} relationships.");
+                }
+
                 rels.Add(new Relationship(id, type, Resolve(baseDir, target)));
             }
         }

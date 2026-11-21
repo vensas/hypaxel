@@ -42,9 +42,13 @@ func TableStyleMedium(n int) TableStyle { return newTableStyle(tableMedium, n) }
 func TableStyleDark(n int) TableStyle { return newTableStyle(tableDark, n) }
 
 // newTableStyle returns an invalid style, which [Sheet.AddTable] rejects, for n out of range.
+// TableStyleMedium2 is always the zero value, so that equal styles compare equal.
 func newTableStyle(family, n int) TableStyle {
 	if n < 1 || n > tableStyleFamilies[family].count {
 		n = 0
+	}
+	if family == tableMedium && n == 2 {
+		return 0
 	}
 	return TableStyle(family<<8 | n)
 }
@@ -65,7 +69,7 @@ func (t TableStyle) valid() bool {
 // String returns the style name used in the file, such as "TableStyleMedium2", or "None".
 func (t TableStyle) String() string {
 	if t == 0 {
-		t = TableStyleMedium(2)
+		return "TableStyleMedium2"
 	}
 	if !t.valid() {
 		return "TableStyle(" + strconv.Itoa(int(t)) + ")"
@@ -101,6 +105,9 @@ type Table struct {
 	// HighlightFirstColumn and HighlightLastColumn emphasize those columns.
 	HighlightFirstColumn bool
 	HighlightLastColumn  bool
+	// TotalsRow reports that the last row of the range is the table's totals row. It is set by
+	// the reader; the writer cannot write totals rows and rejects a table that has one.
+	TotalsRow bool
 }
 
 // tableMeta is a validated table, kept until its worksheet completes.
@@ -177,6 +184,9 @@ func newTableMeta(t *Table, id int, taken []string) (tableMeta, error) {
 	if header && r.lastRow == r.firstRow {
 		return tableMeta{}, fmt.Errorf("%w: a table with a header row needs at least one data row", ErrInvalidArgument)
 	}
+	if t.TotalsRow {
+		return tableMeta{}, fmt.Errorf("%w: tables with a totals row can be read but not written", ErrInvalidArgument)
+	}
 	if !t.Style.valid() {
 		return tableMeta{}, fmt.Errorf("%w: table style number out of range (Light 1-21, Medium 1-28, Dark 1-11)", ErrInvalidArgument)
 	}
@@ -222,16 +232,12 @@ func newTableMeta(t *Table, id int, taken []string) (tableMeta, error) {
 		seen[key] = struct{}{}
 	}
 
-	style := t.Style
-	if style == 0 {
-		style = TableStyleMedium(2)
-	}
 	return tableMeta{
 		id:                id,
 		name:              name,
 		rng:               r,
 		columns:           columns,
-		style:             style,
+		style:             t.Style,
 		header:            header,
 		filter:            header && !t.NoFilterButtons,
 		rowStripes:        !t.NoRowStripes,

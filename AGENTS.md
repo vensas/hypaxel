@@ -34,6 +34,7 @@ Hypaxel writes `.xlsx` files as a forward-only stream: each cell is serialized t
 | `java/` | Maven project `de.vensas:hypaxel`: `src/`, `benchmarks/` (separate project) | native |
 | `php/` | Composer package `vensas/hypaxel`: `src/`, `tests/`, `benchmarks/`, `examples/` | native |
 | `.github/workflows/` | One workflow per implementation, triggered only by changes to its own code | |
+| `testdata/` | Workbooks saved by Excel and LibreOffice, read by every reader's tests (origin of each file in `testdata/README.md`); a change runs all reader workflows | |
 | `docs/assets/` | README banner and the script that generates it | |
 
 ## What Exists

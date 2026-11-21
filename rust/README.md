@@ -108,11 +108,38 @@ fn main() -> hypaxel::Result<()> {
   cells without references, rich text, inline strings and ISO 8601 dates.
 - **Safety:** DTDs are rejected (no entity expansion), every XML token and row is bounded, ZIP
   entries must match their declared size and CRC, and `ReadOptions::max_shared_strings_bytes`
-  (default 1 GiB) caps the shared string table. Legacy `.xls` files, encrypted workbooks, CSV
+  (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
+  64 MiB of names, and 16,384 column ranges; a part at most 65,536 relationships. Legacy `.xls` files, encrypted workbooks, CSV
   and Word files are reported as `Error::InvalidFile`; damaged parts as `Error::Malformed`.
 - **Several sheets at once:** `reader.with_source(File::open(path)?)` creates a second reader that
   shares the parsed workbook and string table, e.g. for another thread; `into_worksheet` gives
   rows that own their source.
+- **Tables:** `reader.tables("Orders")?` (or `tables_at(0)`) returns the sheet's Excel tables as
+  the same `Table` values that `add_table` accepts: name, range, column names, style and the
+  display options, from top to bottom, then left to right. Tables are stored in their own parts
+  and are read only when you ask, so reading values costs the same as before. `autofilter` tells
+  whether the file has filter buttons, and a custom (non-built-in) table style reads as
+  `TableStyle::None`. `totals_row` tells whether the last row of the range is a totals row; such
+  a table can be read but not written.
+- **Rows and columns:** each `Row` has `outline_level()`, `is_hidden()`, `is_collapsed()` and
+  `height()` (`None` when the row stores no height). `rows.layout()?` gives the `SheetLayout`:
+  `column_widths()` (runs of columns with a first column, last column, width and hidden flag,
+  explicit and auto-fitted alike), `column_width(column)`, `is_column_hidden(column)`,
+  `outline_summary_above()` and
+  `row_outline_levels()`. These precede the rows in the file, so they are available before the
+  first `next_row()`.
+- **Rows without values** (a spacer row with a height, an empty hidden row) are skipped by
+  default. Open the workbook with `ReadOptions::new().include_empty_rows(true)` to get every row
+  the file stores; such a row has no cells (`row.is_empty()`) but its number and properties.
+
+  ```rust
+  let table = &reader.tables("Orders")?[0];               // table.name, table.columns, table.style, ...
+  let mut rows = reader.worksheet("Orders")?;
+  let width = rows.layout()?.column_width(2);             // None = default width
+  while let Some(row) = rows.next_row()? {
+      let (level, hidden) = (row.outline_level(), row.is_hidden());
+  }
+  ```
 
 Not read (yet): formulas' text, styles beyond date detection, merged ranges, comments and
 hyperlinks.

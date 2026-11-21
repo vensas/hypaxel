@@ -3,7 +3,7 @@
  * Platform-neutral reading API, shared by the Node.js entry (native engine) and the browser entry
  * (WebAssembly engine). It uses no Node.js APIs.
  */
-import { type EngineRows, type EngineWorkbook, XlsxError, currentEngine, guard } from './core.js'
+import { type EngineRows, type EngineWorkbook, type TableOptions, XlsxError, currentEngine, guard } from './core.js'
 
 /**
  * A cell value as read: text, a number, a boolean, a `Date` for cells formatted as a date, date
@@ -29,6 +29,13 @@ export interface ReadOptions {
    */
   maxSharedStringsBytes?: number
   /**
+   * Rows that the file stores without any value (a spacer row with a height, an empty hidden row)
+   * read as `[]`, like missing rows. With this option {@link SheetRows} also reports their
+   * `outlineLevel`, `hidden`, `collapsed` and `height`, and such rows after the last value are
+   * returned too. `skipEmpty` still drops them.
+   */
+  includeEmptyRows?: boolean
+  /**
    * Excel stores dates without a time zone. `'local'` (default) returns a `Date` with that wall-clock
    * time in the local time zone, `'utc'` in UTC. Matches the writer's `dates` option.
    */
@@ -48,6 +55,51 @@ export interface RecordsOptions {
   headerRow?: number
 }
 
+/** An Excel table as read. Pass its fields to the writer's `addTable` to write the same table. */
+export interface ReadTable {
+  readonly firstRow: number
+  readonly firstColumn: number
+  readonly lastRow: number
+  readonly lastColumn: number
+  /**
+   * The table's settings, complete. `style` is `'none'` unless the table uses one of Excel's
+   * built-in styles.
+   */
+  readonly options: Readonly<Required<TableOptions>>
+}
+
+/** A run of adjacent columns (1-based, inclusive) that share one width. */
+export interface ColumnWidth {
+  readonly firstColumn: number
+  readonly lastColumn: number
+  /** Width in characters of the default font. */
+  readonly width: number
+  readonly hidden: boolean
+}
+
+/** Worksheet settings stored ahead of the rows. See {@link SheetRows.layout}. */
+export class SheetLayout {
+  /** @internal */
+  constructor(
+    /** The column widths the sheet defines, explicit and auto-fitted alike. */
+    readonly columnWidths: readonly ColumnWidth[],
+    /** True if summary rows sit above their groups. */
+    readonly outlineSummaryAbove: boolean,
+    /** The deepest row outline level the sheet declares (0 without grouping). */
+    readonly rowOutlineLevels: number,
+  ) {}
+
+  /** The width of a 1-based column, or `undefined` if the sheet leaves it at the default. */
+  columnWidth(column: number): number | undefined {
+    return this.columnWidths.find((c) => c.firstColumn <= column && column <= c.lastColumn)?.width
+  }
+
+  /** True if a 1-based column is hidden. */
+  columnHidden(column: number): boolean {
+    return this.columnWidths.find((c) => c.firstColumn <= column && column <= c.lastColumn)?.hidden ?? false
+  }
+}
+
 /** A sheet's rows as records, keyed by the header row. */
 export type ReadRecord = Record<string, ReadValue>
 
@@ -63,6 +115,13 @@ const TAG_ERROR = 9
 const TAG_SHARED_NEW = 10
 const TAG_SHARED = 11
 const TAG_COPY = 12
+const TAG_LAYOUT = 13
+const TAG_ROW_PROPS = 14
+
+const PROP_LEVEL = 0b111
+const PROP_HIDDEN = 1 << 3
+const PROP_COLLAPSED = 1 << 4
+const PROP_HEIGHT = 1 << 5
 
 /** Must equal `STRING_SLOTS` in `node/engine/src/read.rs`. */
 const STRING_SLOTS = 4096
@@ -85,6 +144,8 @@ function localDate(wallClock: number): Date {
  * The rows of one sheet, read lazily. Iterate it with `for...of` (synchronous) or `for await...of`
  * (on Node.js, batches are then read on the libuv thread pool and the event loop stays free). Each
  * row is an array whose element `i` is the value in column `i + 1`; it ends at the row's last value.
+ * {@link rowNumber}, {@link outlineLevel}, {@link hidden}, {@link collapsed} and {@link height}
+ * describe the row returned last.
  *
  * Memory stays bounded by the workbook's shared string table and one batch of rows, however long
  * the sheet. Stopping early (`break`) releases the sheet.
@@ -103,6 +164,13 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
   #emitted = 0
   #pending: ReadValue[] | undefined
   #pendingNumber = 0
+  #pendingProps = 0
+  #pendingHeight: number | undefined
+  #props = 0
+  #height: number | undefined
+  #layout: SheetLayout | undefined
+  /** Why the sheet could not be opened or its layout read; thrown again by every later call. */
+  #layoutError: XlsxError | undefined
   #reading = false
 
   /** @internal */
@@ -124,6 +192,52 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     }
   }
 
+  /** 1-based number of the row returned last (0 before the first row). */
+  get rowNumber(): number {
+    return this.#emitted
+  }
+
+  /** Outline (grouping) level of the row returned last, 0–7. */
+  get outlineLevel(): number {
+    return this.#props & PROP_LEVEL
+  }
+
+  /** True if the row returned last is hidden. */
+  get hidden(): boolean {
+    return (this.#props & PROP_HIDDEN) !== 0
+  }
+
+  /** True if the row returned last is the summary row of a collapsed group. */
+  get collapsed(): boolean {
+    return (this.#props & PROP_COLLAPSED) !== 0
+  }
+
+  /** Height in points of the row returned last, or `undefined` if the row stores none. */
+  get height(): number | undefined {
+    return this.#height
+  }
+
+  /**
+   * The sheet's column widths and outline settings. They precede the rows in the file, so this
+   * can be called before the first row is read; it then reads the first batch on the calling thread.
+   * If the sheet cannot be opened or its layout read, this, {@link layoutAsync}, {@link next} and
+   * {@link nextAsync} throw that error from then on.
+   */
+  layout(): SheetLayout {
+    this.#idle()
+    const rows = this.#rows
+    if (this.#layout === undefined && rows !== undefined) this.#load(rows, this.#fetch(() => rows.next()))
+    return this.#known()
+  }
+
+  /** Like {@link layout}, but reads off the main thread where the engine can. */
+  async layoutAsync(): Promise<SheetLayout> {
+    this.#idle()
+    const rows = this.#rows
+    if (this.#layout === undefined && rows !== undefined) this.#load(rows, await this.#fetchAsync(rows))
+    return this.#known()
+  }
+
   /** The next row, reading a batch on the calling thread when needed. */
   next(): IteratorResult<ReadValue[], undefined> {
     this.#idle()
@@ -131,7 +245,7 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
       const row = this.#take()
       if (row !== undefined) return { done: false, value: row }
       const rows = this.#rows
-      if (rows === undefined) return { done: true, value: undefined }
+      if (rows === undefined) return this.#ended()
       this.#load(rows, this.#fetch(() => rows.next()))
     }
   }
@@ -143,22 +257,8 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
       const row = this.#take()
       if (row !== undefined) return { done: false, value: row }
       const rows = this.#rows
-      if (rows === undefined) return { done: true, value: undefined }
-      if (rows.nextAsync === undefined) {
-        this.#load(rows, this.#fetch(() => rows.next()))
-        continue
-      }
-      this.#reading = true
-      let batch: Uint8Array | null | undefined
-      try {
-        batch = await rows.nextAsync()
-      } catch (error) {
-        this.#rows = undefined
-        throw error instanceof XlsxError ? error : new XlsxError(error instanceof Error ? error.message : String(error))
-      } finally {
-        this.#reading = false
-      }
-      this.#load(rows, batch)
+      if (rows === undefined) return this.#ended()
+      this.#load(rows, await this.#fetchAsync(rows))
     }
   }
 
@@ -193,9 +293,39 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     try {
       return guard(read)
     } catch (error) {
-      this.#rows = undefined
-      throw error
+      throw this.#failed(error)
     }
+  }
+
+  async #fetchAsync(rows: EngineRows): Promise<Uint8Array | null | undefined> {
+    if (rows.nextAsync === undefined) return this.#fetch(() => rows.next())
+    this.#reading = true
+    try {
+      return await rows.nextAsync()
+    } catch (error) {
+      throw this.#failed(error)
+    } finally {
+      this.#reading = false
+    }
+  }
+
+  /** Stops reading after a failure; a failure before the layout arrived is kept and thrown again. */
+  #failed(error: unknown): XlsxError {
+    this.#rows = undefined
+    const failure = error instanceof XlsxError ? error : new XlsxError(error instanceof Error ? error.message : String(error))
+    if (this.#layout === undefined) this.#layoutError = failure
+    return failure
+  }
+
+  #ended(): IteratorResult<ReadValue[], undefined> {
+    if (this.#layoutError !== undefined) throw this.#layoutError
+    return { done: true, value: undefined }
+  }
+
+  #known(): SheetLayout {
+    if (this.#layoutError !== undefined) throw this.#layoutError
+    if (this.#layout === undefined) throw new XlsxError('the rows were closed before the sheet layout was read')
+    return this.#layout
   }
 
   #load(rows: EngineRows, batch: Uint8Array | null | undefined): void {
@@ -209,22 +339,46 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     }
     this.#batch = batch
     this.#view = new DataView(batch.buffer, batch.byteOffset, batch.byteLength)
-    this.#position = 0
+    this.#position = batch[0] === TAG_LAYOUT ? this.#decodeLayout() : 0
+  }
+
+  #decodeLayout(): number {
+    const view = this.#view
+    const count = view.getUint32(3, true)
+    const widths: ColumnWidth[] = []
+    let p = 7
+    for (let i = 0; i < count; i++, p += 17) {
+      widths.push(
+        Object.freeze({
+          firstColumn: view.getUint32(p, true),
+          lastColumn: view.getUint32(p + 4, true),
+          width: view.getFloat64(p + 8, true),
+          hidden: view.getUint8(p + 16) === 1,
+        }),
+      )
+    }
+    this.#layout = new SheetLayout(Object.freeze(widths), view.getUint8(1) === 1, view.getUint8(2))
+    return p
   }
 
   #take(): ReadValue[] | undefined {
-    if (this.#pending === undefined) {
+    while (this.#pending === undefined) {
       if (this.#position >= this.#batch.length) return undefined
       this.#decodeRow()
+      if (this.#skipEmpty && this.#pending!.length === 0) this.#pending = undefined
     }
     const number = this.#pendingNumber
     if (this.#skipEmpty || this.#emitted + 1 >= number) {
       const row = this.#pending
       this.#pending = undefined
       this.#emitted = number
+      this.#props = this.#pendingProps
+      this.#height = this.#pendingHeight
       return row
     }
     this.#emitted++
+    this.#props = 0
+    this.#height = undefined
     return []
   }
 
@@ -232,6 +386,16 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     const buffer = this.#batch
     const view = this.#view
     let p = this.#position
+    let props = 0
+    let height: number | undefined
+    if (buffer[p] === TAG_ROW_PROPS) {
+      props = buffer[p + 1]!
+      p += 2
+      if ((props & PROP_HEIGHT) !== 0) {
+        height = view.getFloat64(p, true)
+        p += 8
+      }
+    }
     if (buffer[p] !== TAG_ROW) throw new XlsxError('the engine returned a corrupt row batch')
     const number = view.getUint32(p + 1, true)
     const width = view.getUint32(p + 5, true)
@@ -295,6 +459,8 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     this.#position = p
     this.#pending = row
     this.#pendingNumber = number
+    this.#pendingProps = props
+    this.#pendingHeight = height
   }
 
   #text(buffer: Uint8Array, start: number, length: number): string {
@@ -478,10 +644,43 @@ export class Workbook {
   rows(sheet: SheetRef = 0, options: RowsOptions = {}): SheetRows {
     const engine = this.#open()
     const index = this.#index(sheet)
+    if (this.sheets[index]!.kind === 'chartsheet') {
+      throw new XlsxError(`${JSON.stringify(this.sheets[index]!.name)} is a chart sheet and has no cells`)
+    }
     return new SheetRows(
       guard(() => engine.rows(index)),
       this.#utc,
       options.skipEmpty ?? false,
+    )
+  }
+
+  /**
+   * The Excel tables of a sheet (default: the first), from top to bottom, then left to right.
+   * Tables are stored apart from the rows and are read on each call; reading rows does not load
+   * them.
+   */
+  tables(sheet: SheetRef = 0): ReadTable[] {
+    const engine = this.#open()
+    const index = this.#index(sheet)
+    return guard(() => engine.tables(index)).map((t) =>
+      Object.freeze({
+        firstRow: t.firstRow,
+        firstColumn: t.firstColumn,
+        lastRow: t.lastRow,
+        lastColumn: t.lastColumn,
+        options: Object.freeze({
+          name: t.name,
+          columns: Object.freeze([...t.columns]),
+          style: t.style,
+          headerRow: t.headerRow,
+          autofilter: t.autofilter,
+          rowStripes: t.rowStripes,
+          columnStripes: t.columnStripes,
+          firstColumn: t.highlightFirstColumn,
+          lastColumn: t.highlightLastColumn,
+          totalsRow: t.totalsRow,
+        }),
+      }),
     )
   }
 
@@ -524,7 +723,6 @@ export class Workbook {
     } else {
       throw new XlsxError('sheet must be a name or a 0-based index')
     }
-    if (sheets[index]!.kind === 'chartsheet') throw new XlsxError(`${JSON.stringify(sheets[index]!.name)} is a chart sheet and has no cells`)
     return index
   }
 }
@@ -605,7 +803,9 @@ export async function collectBytes(source: BytesSource): Promise<Uint8Array> {
 /** @internal Opens a workbook held in memory on the current engine. */
 export function openBytes(bytes: Uint8Array, options: ReadOptions): Workbook {
   const engine = currentEngine()
-  const native = guard(() => engine.openWorkbook(bytes, { maxSharedStringsBytes: options.maxSharedStringsBytes }))
+  const native = guard(() =>
+    engine.openWorkbook(bytes, { maxSharedStringsBytes: options.maxSharedStringsBytes, includeEmptyRows: options.includeEmptyRows }),
+  )
   return new Workbook(native, options)
 }
 

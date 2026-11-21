@@ -1,9 +1,11 @@
 // Reader tests every engine must pass. `read.test.mjs` runs them on the native engine and
 // `wasm.test.mjs` on the WebAssembly engine.
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { test as nodeTest } from 'node:test'
 
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
 
 /** A workbook written by ExcelJS: shared strings, built-in date formats, errors and cached formula results. */
 export async function excelJsWorkbook({ date1904 = false } = {}) {
@@ -224,7 +226,7 @@ export function defineReadSuite(label, api) {
     const bytes = toBufferSync([['some shared text']], { sharedStrings: true })
     const rows = openWorkbookSync(bytes, { maxSharedStringsBytes: 4 }).rows()
     assert.throws(() => rows.next(), (e) => e instanceof XlsxError && /limit/.test(e.message))
-    assert.equal(rows.next().done, true)
+    assert.throws(() => rows.next(), /limit/, 'a sheet that cannot be opened keeps reporting why')
     assert.throws(() => openWorkbookSync(bytes, { maxSharedStringsBytes: -1 }), XlsxError)
   })
 
@@ -264,5 +266,408 @@ export function defineReadSuite(label, api) {
     })
     assert.deepEqual((await openWorkbook(web)).rows().toArray(), expected)
     await assert.rejects(openWorkbook(42), XlsxError)
+  })
+
+  test('reads back tables, row properties, column widths and outline settings', async () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('Data', { columnWidths: [12.5, 30], rowOutlineLevels: 2, outlineSummaryAbove: true })
+    sheet.writeRow(['Product', 'Units & more', 'Line\nbreak'])
+    sheet.beginRow({ outlineLevel: 1 })
+    sheet.writeRow(['Widget', 3])
+    sheet.beginRow({ outlineLevel: 2, hidden: true })
+    sheet.writeRow(['Gadget', 5])
+    sheet.beginRow({ outlineLevel: 1, collapsed: true, height: 20.5 })
+    sheet.writeRow(['Gizmo'])
+    sheet.skipRows(2)
+    sheet.writeRow([1, 2])
+    sheet.writeRow([3, 4])
+    const full = {
+      name: 'Orders',
+      columns: ['Product', 'Units & more', 'Line\nbreak'],
+      style: 'TableStyleDark3',
+      headerRow: true,
+      autofilter: true,
+      rowStripes: false,
+      columnStripes: true,
+      firstColumn: true,
+      lastColumn: true,
+      totalsRow: false,
+    }
+    sheet.addTable(1, 1, 4, 3, full)
+    sheet.addTable(7, 1, 8, 2, { headerRow: false, style: 'none' })
+    writer.addWorksheet('Plain').writeRow(['x'])
+    const bytes = writer.finish()
+
+    const book = openWorkbookSync(bytes)
+    const tables = book.tables('data')
+    assert.deepEqual(tables, book.tables())
+    assert.deepEqual(tables, [
+      { firstRow: 1, firstColumn: 1, lastRow: 4, lastColumn: 3, options: full },
+      {
+        firstRow: 7,
+        firstColumn: 1,
+        lastRow: 8,
+        lastColumn: 2,
+        options: {
+          name: 'Table2',
+          columns: ['Column1', 'Column2'],
+          style: 'none',
+          headerRow: false,
+          autofilter: false,
+          rowStripes: true,
+          columnStripes: false,
+          firstColumn: false,
+          lastColumn: false,
+          totalsRow: false,
+        },
+      },
+    ])
+    assert.deepEqual(book.tables(1), [])
+    assert.throws(() => book.tables('Missing'), /no worksheet/)
+
+    const rows = book.rows('Data')
+    assert.equal(rows.rowNumber, 0)
+    const layout = rows.layout()
+    assert.deepEqual(layout.columnWidths, [
+      { firstColumn: 1, lastColumn: 1, width: 12.5, hidden: false },
+      { firstColumn: 2, lastColumn: 2, width: 30, hidden: false },
+    ])
+    assert.equal(layout.columnHidden(2), false)
+    assert.deepEqual([layout.columnWidth(2), layout.columnWidth(3)], [30, undefined])
+    assert.deepEqual([layout.outlineSummaryAbove, layout.rowOutlineLevels], [true, 2])
+    const seen = []
+    for (const row of rows) seen.push([rows.rowNumber, row.length, rows.outlineLevel, rows.hidden, rows.collapsed, rows.height])
+    assert.deepEqual(seen, [
+      [1, 3, 0, false, false, undefined],
+      [2, 2, 1, false, false, undefined],
+      [3, 2, 2, true, false, undefined],
+      [4, 1, 1, false, true, 20.5],
+      [5, 0, 0, false, false, undefined],
+      [6, 0, 0, false, false, undefined],
+      [7, 2, 0, false, false, undefined],
+      [8, 2, 0, false, false, undefined],
+    ])
+    assert.equal(rows.layout(), layout)
+
+    const compact = book.rows('Data', { skipEmpty: true })
+    const numbers = []
+    for await (const row of compact) numbers.push([compact.rowNumber, compact.outlineLevel, row.length])
+    assert.deepEqual(numbers.map((n) => n[0]), [1, 2, 3, 4, 7, 8])
+    assert.equal(numbers[2][1], 2)
+
+    const plain = book.rows('Plain')
+    const plainLayout = await plain.layoutAsync()
+    assert.deepEqual([plainLayout.columnWidths, plainLayout.outlineSummaryAbove, plainLayout.rowOutlineLevels], [[], false, 0])
+    assert.deepEqual(plain.toArray(), [['x']])
+    assert.equal(plain.layout(), plainLayout)
+
+    const closed = book.rows('Data')
+    closed.close()
+    assert.throws(() => closed.layout(), /closed before the sheet layout was read/)
+
+    const copy = new Writer()
+    const target = copy.addWorksheet('Copy')
+    target.writeRow(['Product', 'Units & more', 'Line\nbreak'])
+    for (let i = 0; i < 3; i++) target.writeRow([i, i, i])
+    const [table] = tables
+    target.addTable(table.firstRow, table.firstColumn, table.lastRow, table.lastColumn, table.options)
+    assert.throws(() => target.addTable(6, 1, 8, 3, { ...table.options, name: 'Totals', totalsRow: true }), /totals row/)
+    assert.deepEqual(openWorkbookSync(copy.finish()).tables(), [table])
+  })
+
+  for (const producer of ['excel', 'libreoffice']) {
+    test(`reads tables, rows and layout saved by ${producer}`, async () => {
+      // LibreOffice drops table styles and stores a height on every row.
+      const styled = producer === 'excel'
+      const height = styled ? undefined : 15
+      const bytes = await readFile(new URL(`../../testdata/reader/${producer}.xlsx`, import.meta.url))
+      const book = openWorkbookSync(bytes, { includeEmptyRows: true })
+      assert.deepEqual(book.sheetNames, ['Orders', 'Plain'])
+      assert.deepEqual(book.tables('Orders'), [
+        {
+          firstRow: 1,
+          firstColumn: 1,
+          lastRow: 4,
+          lastColumn: 3,
+          options: {
+            name: 'Orders',
+            columns: ['Product', 'Units & more', 'Price'],
+            style: styled ? 'TableStyleDark3' : 'none',
+            headerRow: true,
+            autofilter: true,
+            rowStripes: false,
+            columnStripes: styled,
+            firstColumn: styled,
+            lastColumn: styled,
+            totalsRow: false,
+          },
+        },
+        {
+          firstRow: 7,
+          firstColumn: 1,
+          lastRow: 8,
+          lastColumn: 2,
+          options: {
+            name: 'Table2',
+            columns: ['Column1', 'Column2'],
+            style: 'none',
+            headerRow: false,
+            autofilter: false,
+            rowStripes: styled,
+            columnStripes: false,
+            firstColumn: false,
+            lastColumn: false,
+            totalsRow: false,
+          },
+        },
+      ])
+      assert.deepEqual(book.tables('Plain'), [])
+
+      const rows = book.rows('Orders')
+      const layout = rows.layout()
+      assert.deepEqual(layout.columnWidths, [
+        { firstColumn: 1, lastColumn: 1, width: 14, hidden: false },
+        { firstColumn: 2, lastColumn: 2, width: 22.5, hidden: false },
+        { firstColumn: 4, lastColumn: 4, width: 6, hidden: true },
+      ])
+      assert.deepEqual([layout.columnHidden(4), layout.outlineSummaryAbove, layout.rowOutlineLevels], [true, true, 2])
+      const seen = []
+      for (const row of rows) seen.push([rows.rowNumber, row.length, rows.outlineLevel, rows.hidden, rows.collapsed, rows.height])
+      assert.deepEqual(seen, [
+        [1, 3, 0, false, false, height],
+        [2, 3, 1, false, styled, height],
+        [3, 3, 2, true, false, height],
+        [4, 3, 1, false, true, 30],
+        [5, 0, 0, false, false, undefined],
+        [6, 0, 0, false, false, 45],
+        [7, 2, 0, false, false, height],
+        [8, 2, 0, false, false, height],
+      ])
+    })
+  }
+
+  test('reports rows without values on request', async () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('Data', { rowOutlineLevels: 1 })
+    sheet.writeRow(['first'])
+    sheet.beginRow({ height: 40 })
+    sheet.endRow()
+    sheet.skipRows(1)
+    sheet.writeRow([4])
+    sheet.beginRow({ outlineLevel: 1, hidden: true })
+    sheet.endRow()
+    const bytes = writer.finish()
+
+    const scan = (readOptions, rowsOptions) => {
+      const rows = openWorkbookSync(bytes, readOptions).rows(0, rowsOptions)
+      const seen = []
+      for (const row of rows) seen.push([rows.rowNumber, row, rows.outlineLevel, rows.hidden, rows.height])
+      return seen
+    }
+    assert.deepEqual(scan(), [
+      [1, ['first'], 0, false, undefined],
+      [2, [], 0, false, undefined],
+      [3, [], 0, false, undefined],
+      [4, [4], 0, false, undefined],
+    ])
+    assert.deepEqual(scan({ includeEmptyRows: true }), [
+      [1, ['first'], 0, false, undefined],
+      [2, [], 0, false, 40],
+      [3, [], 0, false, undefined],
+      [4, [4], 0, false, undefined],
+      [5, [], 1, true, undefined],
+    ])
+    assert.deepEqual(scan({ includeEmptyRows: true }, { skipEmpty: true }).map((r) => r[0]), [1, 4])
+    assert.deepEqual(await readRecords(bytes, 0, { includeEmptyRows: true }), [{ first: 4 }])
+  })
+
+  test('reads a table with a totals row saved by excel', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/excel-totals.xlsx', import.meta.url))
+    const book = openWorkbookSync(bytes)
+    assert.deepEqual(book.sheetNames, ['Inventory'])
+    assert.deepEqual(book.tables(), [
+      {
+        firstRow: 1,
+        firstColumn: 1,
+        lastRow: 1002,
+        lastColumn: 11,
+        options: {
+          name: 'Table1',
+          columns: [
+            'SKU',
+            'Item',
+            'Group',
+            'Vendor',
+            'Cost',
+            'Price',
+            'Opening',
+            'Sold',
+            'Closing',
+            'Reorder',
+            'Status',
+          ],
+          style: 'TableStyleMedium2',
+          headerRow: true,
+          autofilter: true,
+          rowStripes: true,
+          columnStripes: false,
+          firstColumn: false,
+          lastColumn: false,
+          totalsRow: true,
+        },
+      },
+    ])
+
+    const rows = book.rows()
+    const { columnWidths, outlineSummaryAbove } = rows.layout()
+    assert.equal(columnWidths.length, 11)
+    assert.deepEqual(columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.6640625, hidden: false })
+    assert.deepEqual(columnWidths[10], { firstColumn: 11, lastColumn: 11, width: 13.1640625, hidden: false })
+    assert.equal(outlineSummaryAbove, false)
+    const data = []
+    for (const row of rows) {
+      assert.deepEqual([rows.outlineLevel, rows.hidden, rows.height], [0, false, undefined])
+      data.push(row)
+    }
+    assert.equal(data.length, 1002)
+    assert.deepEqual(data.at(-1), ['Total', null, null, null, 21.085, 33.736, null, 99696, null, 34500, 1000])
+  })
+
+  test('reads a table downloaded from google sheets', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/google-sheets.xlsx', import.meta.url))
+    const book = openWorkbookSync(bytes)
+    assert.deepEqual(book.sheetNames, ['Inventory'])
+    // The file uses a custom table style, which reads as 'none', and has no filter buttons.
+    assert.deepEqual(book.tables(), [
+      {
+        firstRow: 1,
+        firstColumn: 1,
+        lastRow: 903,
+        lastColumn: 11,
+        options: {
+          name: 'Table1',
+          columns: ['SKU', 'Item', 'Group', 'Vendor', 'Cost', 'Price', 'Opening', 'Sold', 'Closing', 'Reorder', 'Status'],
+          style: 'none',
+          headerRow: true,
+          autofilter: false,
+          rowStripes: true,
+          columnStripes: false,
+          firstColumn: true,
+          lastColumn: true,
+          totalsRow: true,
+        },
+      },
+    ])
+
+    const rows = book.rows()
+    const layout = rows.layout()
+    assert.equal(layout.columnWidths.length, 12)
+    assert.deepEqual(layout.columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.63, hidden: false })
+    assert.deepEqual(layout.columnWidths[11], { firstColumn: 12, lastColumn: 26, width: 8.88, hidden: false })
+    assert.deepEqual([layout.columnWidth(20), layout.outlineSummaryAbove], [8.88, false])
+    const data = []
+    for (const row of rows) {
+      assert.deepEqual([rows.outlineLevel, rows.hidden, rows.height], [0, false, rows.rowNumber === 1 ? undefined : 15.75])
+      data.push(row)
+    }
+    assert.equal(data.length, 903)
+    assert.equal(data[1][6], 250)
+    assert.deepEqual(data.at(-1), ['Total', null, null, null, 21.20421754, 33.92674806, null, 90058, null, 31060, 901])
+  })
+
+  test('returns the layout of a sheet whose first row cannot be read', async () => {
+    const zip = new JSZip()
+    zip.file('_rels/.rels', '<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    zip.file('xl/workbook.xml', '<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>')
+    zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      '<worksheet><cols><col min="2" max="3" width="9.5"/></cols><sheetData><row r="1"><c><v>1,5</v></c></row></sheetData></worksheet>',
+    )
+    const bytes = await zip.generateAsync({ type: 'uint8array' })
+
+    const rows = openWorkbookSync(bytes).rows()
+    assert.equal(rows.layout().columnWidth(3), 9.5)
+    assert.throws(() => rows.next(), /invalid number/)
+
+    const later = openWorkbookSync(bytes).rows()
+    assert.equal((await later.layoutAsync()).columnWidth(2), 9.5)
+    await assert.rejects(later.nextAsync(), /invalid number/)
+  })
+
+  test('reads a sheet exported by numbers', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/numbers.xlsx', import.meta.url))
+    const book = openWorkbookSync(bytes, { includeEmptyRows: true })
+    assert.deepEqual(book.sheetNames, ['Table and Chart'])
+    // Numbers writes its table as plain cells, not as an Excel table.
+    assert.deepEqual(book.tables(), [])
+    const rows = book.rows()
+    const layout = rows.layout()
+    assert.deepEqual(
+      layout.columnWidths.map((c) => [c.firstColumn, c.lastColumn, c.width, c.hidden]),
+      [
+        [1, 1, 24.6719, false],
+        [2, 2, 18.3672, false],
+        [3, 5, 18.7188, false],
+        [6, 16384, 27.75, false],
+      ],
+    )
+    assert.deepEqual([layout.outlineSummaryAbove, layout.rowOutlineLevels], [false, 0])
+    const seen = []
+    for (const row of rows) seen.push([rows.rowNumber, rows.height, row])
+    assert.deepEqual(seen, [
+      [1, 311.6, []],
+      [2, 27.65, ['Table 1']],
+      [3, 20.25, [null, 'Category A', 'Category B']],
+      [4, 20.25, ['Item 1', 5, 7]],
+      [5, 20.05, ['Item 2', 10, 8]],
+      [6, 20.05, ['Item 3', 9, 15]],
+      [7, 20.05, ['Item 4', 7, 12]],
+      [8, 20.05, ['Item 5', 16, 21]],
+    ])
+    assert.deepEqual(openWorkbookSync(bytes).rows(0, { skipEmpty: true }).next().value, ['Table 1'])
+  })
+
+  test('reports a layout failure again on every later call', async () => {
+    const workbook = async (sheet) => {
+      const zip = new JSZip()
+      zip.file('_rels/.rels', '<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+      zip.file('xl/workbook.xml', '<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>')
+      zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+      if (sheet !== undefined) zip.file('xl/worksheets/sheet1.xml', sheet)
+      return zip.generateAsync({ type: 'uint8array' })
+    }
+    const cols = '<col min="1" max="1" width="1"/>'.repeat(16_385)
+    const cases = [
+      [await workbook(`<worksheet><cols>${cols}</cols><sheetData><row><c><v>1</v></c></row></sheetData></worksheet>`), /column ranges/],
+      [await workbook(undefined), /missing/],
+    ]
+    for (const [bytes, expected] of cases) {
+      const rows = openWorkbookSync(bytes).rows()
+      assert.throws(() => rows.layout(), expected)
+      assert.throws(() => rows.layout(), expected)
+      await assert.rejects(rows.layoutAsync(), expected)
+      assert.throws(() => rows.next(), expected)
+      await assert.rejects(rows.nextAsync(), expected)
+
+      const first = openWorkbookSync(bytes).rows()
+      assert.throws(() => first.next(), expected)
+      assert.throws(() => first.layout(), expected)
+      await assert.rejects(first.nextAsync(), expected)
+
+      const later = openWorkbookSync(bytes).rows()
+      await assert.rejects(later.layoutAsync(), expected)
+      assert.throws(() => later.toArray(), expected)
+    }
+  })
+
+  test('round-trips table names that look like excel escapes', () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('S')
+    sheet.writeRow(['a_x0042_'])
+    sheet.writeRow([1])
+    sheet.addTable(1, 1, 2, 1, { name: 'T_x0041_', columns: ['a_x0042_'] })
+    const [table] = openWorkbookSync(writer.finish()).tables()
+    assert.deepEqual([table.options.name, table.options.columns], ['T_x0041_', ['a_x0042_']])
   })
 }

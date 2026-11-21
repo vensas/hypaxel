@@ -5,9 +5,9 @@ name: .NET
 # limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    paths: ["dotnet/**", ".github/workflows/dotnet.yml"]
+    paths: ["dotnet/**", ".github/workflows/dotnet.yml", "testdata/**"]
   pull_request:
-    paths: ["dotnet/**", ".github/workflows/dotnet.yml"]
+    paths: ["dotnet/**", ".github/workflows/dotnet.yml", "testdata/**"]
 
 defaults:
   run:

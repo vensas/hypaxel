@@ -25,6 +25,16 @@ public sealed class XlsxReaderOptions
     /// </remarks>
     public bool BackgroundDecompression { get; set; }
 
+    /// <summary>
+    /// Also returns the rows that the file stores without any value, for example a spacer row with a height
+    /// or an empty hidden row. Default: false.
+    /// </summary>
+    /// <remarks>
+    /// Such a row has no cells (<see cref="XlsxRow.Count"/> is 0) but carries its number and properties.
+    /// Rows that the file does not store are never returned.
+    /// </remarks>
+    public bool IncludeEmptyRows { get; set; }
+
     /// <summary>When true the stream passed to the reader is disposed together with it. Default: false.</summary>
     public bool OwnsStream { get; set; }
 

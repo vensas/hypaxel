@@ -16,11 +16,12 @@ use crate::to_napi;
 #[derive(Default)]
 pub struct NativeReadOptions {
     pub max_shared_strings_bytes: Option<f64>,
+    pub include_empty_rows: Option<bool>,
 }
 
 impl From<NativeReadOptions> for ReadConfig {
     fn from(o: NativeReadOptions) -> Self {
-        ReadConfig { max_shared_strings_bytes: o.max_shared_strings_bytes }
+        ReadConfig { max_shared_strings_bytes: o.max_shared_strings_bytes, include_empty_rows: o.include_empty_rows }
     }
 }
 
@@ -29,6 +30,24 @@ pub struct NativeSheetInfo {
     pub name: String,
     pub visible: String,
     pub kind: String,
+}
+
+#[napi(object)]
+pub struct NativeTable {
+    pub name: String,
+    pub first_row: u32,
+    pub first_column: u32,
+    pub last_row: u32,
+    pub last_column: u32,
+    pub columns: Vec<String>,
+    pub style: String,
+    pub header_row: bool,
+    pub autofilter: bool,
+    pub row_stripes: bool,
+    pub column_stripes: bool,
+    pub highlight_first_column: bool,
+    pub highlight_last_column: bool,
+    pub totals_row: bool,
 }
 
 /// An open workbook. Created with `openPath` or `openBytes`.
@@ -69,6 +88,31 @@ impl NativeWorkbook {
     #[napi(getter)]
     pub fn date1904(&self) -> Result<bool> {
         Ok(self.inner()?.date1904())
+    }
+
+    /// The Excel tables of the sheet at a 0-based index.
+    #[napi]
+    pub fn tables(&self, index: u32) -> Result<Vec<NativeTable>> {
+        let tables = self.inner()?.tables(index).map_err(to_napi)?;
+        Ok(tables
+            .into_iter()
+            .map(|t| NativeTable {
+                name: t.name,
+                first_row: t.first_row,
+                first_column: t.first_column,
+                last_row: t.last_row,
+                last_column: t.last_column,
+                columns: t.columns,
+                style: t.style,
+                header_row: t.header_row,
+                autofilter: t.autofilter,
+                row_stripes: t.row_stripes,
+                column_stripes: t.column_stripes,
+                highlight_first_column: t.highlight_first_column,
+                highlight_last_column: t.highlight_last_column,
+                totals_row: t.totals_row,
+            })
+            .collect())
     }
 
     /// Rows of the sheet at a 0-based index.

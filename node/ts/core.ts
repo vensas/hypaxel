@@ -147,6 +147,11 @@ export interface TableOptions {
   columnStripes?: boolean
   firstColumn?: boolean
   lastColumn?: boolean
+  /**
+   * Whether the last row of the range is a totals row. Set on tables that were read; a table with
+   * a totals row cannot be written.
+   */
+  totalsRow?: boolean
 }
 
 /** @internal Options as the engines take them: no style objects, autofit flattened. */
@@ -202,6 +207,24 @@ export interface EngineSheetInfo {
   kind: string
 }
 
+/** @internal A table as the engines list it. */
+export interface EngineTable {
+  name: string
+  firstRow: number
+  firstColumn: number
+  lastRow: number
+  lastColumn: number
+  columns: string[]
+  style: string
+  headerRow: boolean
+  autofilter: boolean
+  rowStripes: boolean
+  columnStripes: boolean
+  highlightFirstColumn: boolean
+  highlightLastColumn: boolean
+  totalsRow: boolean
+}
+
 /** @internal The rows of one sheet, in batches decoded by `SheetRows` in `read.ts`. */
 export interface EngineRows {
   /** The next batch, or null or undefined at the end of the sheet. */
@@ -215,6 +238,7 @@ export interface EngineRows {
 export interface EngineWorkbook {
   sheets(): EngineSheetInfo[]
   readonly date1904: boolean
+  tables(index: number): EngineTable[]
   rows(index: number): EngineRows
   close(): void
 }
@@ -223,7 +247,7 @@ export interface EngineWorkbook {
 export interface Engine {
   createWriter(options: Omit<WriterOptions, 'dates'>): EngineWriter
   /** Opens a workbook from bytes. */
-  openWorkbook(bytes: Uint8Array, options: { maxSharedStringsBytes?: number }): EngineWorkbook
+  openWorkbook(bytes: Uint8Array, options: { maxSharedStringsBytes?: number; includeEmptyRows?: boolean }): EngineWorkbook
   /** Decodes UTF-8 from a batch returned by {@link EngineRows.next}. */
   decodeUtf8(buffer: Uint8Array, start: number, end: number): string
   columnName(column: number): string

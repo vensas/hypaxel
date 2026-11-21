@@ -5,7 +5,7 @@ use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use hypaxel::{DateKind, ExcelDateTime, ReadOptions, Rows, SheetKind, Value, Visibility, XlsxReader};
+use hypaxel::{DateKind, ExcelDateTime, ReadOptions, Rows, SheetKind, SheetLayout, Value, Visibility, XlsxReader};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDateTime, PyDelta, PyDict, PyList, PyString, PyTime};
@@ -146,6 +146,13 @@ impl Reader {
         self.reader.as_mut().ok_or_else(|| PyValueError::new_err("the reader is closed"))
     }
 
+    fn sheet_or_first(&mut self, sheet: Option<&Bound<'_, PyAny>>) -> PyResult<usize> {
+        match sheet {
+            Some(s) if !s.is_none() => self.sheet_index(s),
+            _ => Ok(0),
+        }
+    }
+
     fn sheet_index(&mut self, sheet: &Bound<'_, PyAny>) -> PyResult<usize> {
         let reader = self.reader()?;
         if let Ok(index) = sheet.extract::<isize>() {
@@ -172,10 +179,10 @@ impl Reader {
 #[pymethods]
 impl Reader {
     #[new]
-    #[pyo3(signature = (source, *, max_shared_strings_bytes = 1 << 30))]
-    fn new(py: Python<'_>, source: &Bound<'_, PyAny>, max_shared_strings_bytes: u64) -> PyResult<Self> {
+    #[pyo3(signature = (source, *, max_shared_strings_bytes = 1 << 30, include_empty_rows = false))]
+    fn new(py: Python<'_>, source: &Bound<'_, PyAny>, max_shared_strings_bytes: u64, include_empty_rows: bool) -> PyResult<Self> {
         let origin = origin_from(py, source)?;
-        let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes);
+        let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes).include_empty_rows(include_empty_rows);
         let handle = origin.open();
         let reader = py.detach(|| XlsxReader::with_options(handle, &options)).map_err(read_err)?;
         Ok(Reader { origin: Some(origin), reader: Some(reader) })
@@ -223,13 +230,40 @@ impl Reader {
         Ok(self.reader()?.is_1904())
     }
 
+    /// The Excel tables of a sheet (name or 0-based index), one dict per table with the keys that
+    /// :meth:`Worksheet.add_table` takes. Tables are read on each call; reading rows does not load them.
+    #[pyo3(signature = (sheet = None))]
+    fn tables<'py>(&mut self, py: Python<'py>, sheet: Option<&Bound<'py, PyAny>>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let index = self.sheet_or_first(sheet)?;
+        let reader = self.reader()?;
+        let tables = py.detach(|| reader.tables_at(index)).map_err(read_err)?;
+        tables
+            .iter()
+            .map(|t| {
+                let d = PyDict::new(py);
+                d.set_item("name", t.name.as_deref())?;
+                d.set_item("first_row", t.first_row)?;
+                d.set_item("first_col", t.first_column)?;
+                d.set_item("last_row", t.last_row)?;
+                d.set_item("last_col", t.last_column)?;
+                d.set_item("columns", t.columns.iter().map(|c| c.as_ref()).collect::<Vec<&str>>())?;
+                d.set_item("style", t.style.name())?;
+                d.set_item("header_row", t.header_row)?;
+                d.set_item("autofilter", t.autofilter)?;
+                d.set_item("row_stripes", t.row_stripes)?;
+                d.set_item("column_stripes", t.column_stripes)?;
+                d.set_item("first_column", t.first_column_highlight)?;
+                d.set_item("last_column", t.last_column_highlight)?;
+                d.set_item("totals_row", t.totals_row)?;
+                Ok(d)
+            })
+            .collect()
+    }
+
     /// Iterates over the rows of a sheet (name or 0-based index) as lists.
     #[pyo3(signature = (sheet = None, *, skip_empty = false))]
     fn rows(&mut self, py: Python<'_>, sheet: Option<&Bound<'_, PyAny>>, skip_empty: bool) -> PyResult<RowIterator> {
-        let index = match sheet {
-            Some(s) if !s.is_none() => self.sheet_index(s)?,
-            _ => 0,
-        };
+        let index = self.sheet_or_first(sheet)?;
         let handle = self.origin.as_ref().ok_or_else(|| PyValueError::new_err("the reader is closed"))?.open();
         let reader = self.reader()?;
         let rows = py.detach(|| reader.with_source(handle)?.into_worksheet_at(index)).map_err(read_err)?;
@@ -238,6 +272,7 @@ impl Reader {
             skip_empty,
             emitted: 0,
             pending: None,
+            current: RowProps::default(),
             strings: (0..STRING_CACHE_SLOTS).map(|_| None).collect(),
             done: false,
         })
@@ -265,13 +300,25 @@ impl Reader {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct RowProps {
+    outline_level: u8,
+    hidden: bool,
+    collapsed: bool,
+    height: Option<f64>,
+}
+
 /// Rows of one sheet as lists. Created by :meth:`Reader.rows`.
+///
+/// ``row_number``, ``outline_level``, ``hidden``, ``collapsed`` and ``height`` describe the row
+/// returned last.
 #[pyclass(module = "hypaxel")]
 pub(crate) struct RowIterator {
     rows: Rows<Source>,
     skip_empty: bool,
     emitted: u32,
-    pending: Option<(u32, Py<PyList>)>,
+    pending: Option<(u32, Py<PyList>, RowProps)>,
+    current: RowProps,
     /// Recently converted shared strings, by table index modulo the slot count.
     strings: Vec<Option<(usize, Py<PyString>)>>,
     done: bool,
@@ -364,25 +411,99 @@ impl RowIterator {
     }
 
     fn __next__(&mut self, py: Python<'_>) -> PyResult<Option<Py<PyList>>> {
-        if let Some((number, _)) = &self.pending {
-            let number = *number;
+        if let Some((number, _, props)) = &self.pending {
+            let (number, props) = (*number, *props);
             if self.skip_empty || self.emitted + 1 >= number {
                 self.emitted = number;
-                return Ok(self.pending.take().map(|(_, list)| list));
+                self.current = props;
+                return Ok(self.pending.take().map(|(_, list, _)| list));
             }
             self.emitted += 1;
+            self.current = RowProps::default();
             return Ok(Some(PyList::empty(py).unbind()));
         }
         if self.done {
             return Ok(None);
         }
-        let Some(row) = self.rows.next_row().map_err(read_err)? else {
-            self.done = true;
-            return Ok(None);
+        let row = loop {
+            match self.rows.next_row().map_err(read_err)? {
+                Some(row) if self.skip_empty && row.is_empty() => {}
+                Some(row) => break row,
+                None => {
+                    self.done = true;
+                    return Ok(None);
+                }
+            }
         };
         let number = row.number();
+        let props =
+            RowProps { outline_level: row.outline_level(), hidden: row.is_hidden(), collapsed: row.is_collapsed(), height: row.height() };
         let list = convert_row(py, &row, &mut self.strings)?.unbind();
-        self.pending = Some((number, list));
+        self.pending = Some((number, list, props));
         self.__next__(py)
+    }
+
+    /// 1-based number of the row returned last (0 before the first row).
+    #[getter]
+    fn row_number(&self) -> u32 {
+        self.emitted
+    }
+
+    /// Outline (grouping) level of the row returned last, 0-7.
+    #[getter]
+    fn outline_level(&self) -> u8 {
+        self.current.outline_level
+    }
+
+    #[getter]
+    fn hidden(&self) -> bool {
+        self.current.hidden
+    }
+
+    /// True if the row returned last is the summary row of a collapsed group.
+    #[getter]
+    fn collapsed(&self) -> bool {
+        self.current.collapsed
+    }
+
+    /// Height in points of the row returned last, or None if the row stores none.
+    #[getter]
+    fn height(&self) -> Option<f64> {
+        self.current.height
+    }
+
+    /// The column widths the sheet defines as ``(first_col, last_col, width, hidden)`` tuples
+    /// (1-based, inclusive). Available before the first row is read.
+    #[getter]
+    fn column_widths(&mut self) -> PyResult<Vec<(u32, u32, f64, bool)>> {
+        Ok(self.layout()?.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect())
+    }
+
+    /// True if a 1-based column is hidden.
+    fn column_hidden(&mut self, column: u32) -> PyResult<bool> {
+        Ok(self.layout()?.is_column_hidden(column))
+    }
+
+    /// The width of a 1-based column, or None if the sheet leaves it at the default.
+    fn column_width(&mut self, column: u32) -> PyResult<Option<f64>> {
+        Ok(self.layout()?.column_width(column))
+    }
+
+    /// True if summary rows sit above their groups.
+    #[getter]
+    fn outline_summary_above(&mut self) -> PyResult<bool> {
+        Ok(self.layout()?.outline_summary_above())
+    }
+
+    /// The deepest row outline level the sheet declares (0 without grouping).
+    #[getter]
+    fn row_outline_levels(&mut self) -> PyResult<u8> {
+        Ok(self.layout()?.row_outline_levels())
+    }
+}
+
+impl RowIterator {
+    fn layout(&mut self) -> PyResult<&SheetLayout> {
+        self.rows.layout().map_err(read_err)
     }
 }

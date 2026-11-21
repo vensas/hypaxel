@@ -476,7 +476,7 @@ def _rebind(recs: _Records, batch: list[Any]) -> _Records:
 # Reading
 
 
-def open_workbook(source: Source, *, max_shared_strings_bytes: int = 1 << 30) -> Reader:
+def open_workbook(source: Source, *, max_shared_strings_bytes: int = 1 << 30, include_empty_rows: bool = False) -> Reader:
     """Opens an XLSX workbook for reading.
 
     ``source`` is a path, ``bytes`` or a binary file object (which is read into memory). Rows are
@@ -487,8 +487,13 @@ def open_workbook(source: Source, *, max_shared_strings_bytes: int = 1 << 30) ->
             print(wb.sheet_names)
             for row in wb.rows("Data"):
                 ...
+
+    Rows that the file stores without any value (a spacer row with a height, an empty hidden row)
+    read as ``[]`` like missing rows. With ``include_empty_rows`` the row iterator also reports
+    their ``outline_level``, ``hidden``, ``collapsed`` and ``height``, and such rows after the last
+    value are returned too.
     """
-    return Reader(source, max_shared_strings_bytes=max_shared_strings_bytes)
+    return Reader(source, max_shared_strings_bytes=max_shared_strings_bytes, include_empty_rows=include_empty_rows)
 
 
 def iter_rows(source: Source, sheet: SheetRef = 0, *, skip_empty: bool = False, **options: Any) -> Iterator[list[Any]]:

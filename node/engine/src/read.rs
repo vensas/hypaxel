@@ -2,8 +2,13 @@
 //! compact binary batch, decoded by `RowDecoder` in `node/ts/core.ts`. As with writing, a whole
 //! batch of rows crosses the JavaScript boundary in one call.
 //!
-//! Batch format (little-endian), one row after another:
+//! Batch format (little-endian). The first batch of a sheet holds its layout; in the batches after
+//! it one row follows another:
 //!
+//! - `LAYOUT` `u8` flags (bit 0: summary rows above their groups), `u8` row outline levels, `u32`
+//!   count, then per column width `u32` first column, `u32` last column, `f64` width, `u8` hidden
+//! - `ROW_PROPS`, only before a row that is grouped, hidden, collapsed or has a height: `u8` flags
+//!   (bits 0–2 outline level, bit 3 hidden, bit 4 collapsed, bit 5 a height follows), `f64` height
 //! - `ROW` `u32` row number, `u32` width (the 1-based column of the last cell with a value),
 //!   followed by cells until `width` columns are covered:
 //! - `SKIP` `u32` count of empty columns
@@ -28,7 +33,7 @@ use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use hypaxel::{DateKind, ExcelDateTime, ReadOptions, Rows, SheetKind, Value, Visibility, XlsxReader};
+use hypaxel::{DateKind, ExcelDateTime, ReadOptions, Row, Rows, SheetKind, SheetLayout, Table, Value, Visibility, XlsxReader};
 
 use crate::{Error, Result, failed, invalid};
 
@@ -44,6 +49,12 @@ const TAG_ERROR: u8 = 9;
 const TAG_SHARED_NEW: u8 = 10;
 const TAG_SHARED: u8 = 11;
 const TAG_COPY: u8 = 12;
+const TAG_LAYOUT: u8 = 13;
+const TAG_ROW_PROPS: u8 = 14;
+
+const PROP_HIDDEN: u8 = 1 << 3;
+const PROP_COLLAPSED: u8 = 1 << 4;
+const PROP_HEIGHT: u8 = 1 << 5;
 
 /// Slots in the shared string cache. Must equal `STRING_SLOTS` in `node/ts/core.ts`.
 pub const STRING_SLOTS: usize = 4096;
@@ -163,11 +174,12 @@ impl Seek for Source {
 #[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(rename_all = "camelCase", default))]
 pub struct ReadConfig {
     pub max_shared_strings_bytes: Option<f64>,
+    pub include_empty_rows: Option<bool>,
 }
 
 impl ReadConfig {
     fn options(&self) -> Result<ReadOptions> {
-        let mut options = ReadOptions::new();
+        let mut options = ReadOptions::new().include_empty_rows(self.include_empty_rows.unwrap_or(false));
         if let Some(bytes) = self.max_shared_strings_bytes {
             if !(bytes.is_finite() && bytes >= 0.0) {
                 return Err(invalid("maxSharedStringsBytes must be a non-negative number"));
@@ -187,6 +199,48 @@ pub struct SheetEntry {
     pub visible: &'static str,
     /// `worksheet`, `chartsheet` or `other`.
     pub kind: &'static str,
+}
+
+/// An Excel table of a worksheet, with the fields that `Engine::add_table` takes.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize), serde(rename_all = "camelCase"))]
+pub struct TableEntry {
+    pub name: String,
+    pub first_row: u32,
+    pub first_column: u32,
+    pub last_row: u32,
+    pub last_column: u32,
+    pub columns: Vec<String>,
+    /// `TableStyleMedium2` etc.; `none` for no built-in table style.
+    pub style: String,
+    pub header_row: bool,
+    pub autofilter: bool,
+    pub row_stripes: bool,
+    pub column_stripes: bool,
+    pub highlight_first_column: bool,
+    pub highlight_last_column: bool,
+    pub totals_row: bool,
+}
+
+impl From<Table> for TableEntry {
+    fn from(t: Table) -> Self {
+        TableEntry {
+            name: t.name.unwrap_or_default(),
+            first_row: t.first_row,
+            first_column: t.first_column,
+            last_row: t.last_row,
+            last_column: t.last_column,
+            columns: t.columns.into_iter().map(|c| c.into_owned()).collect(),
+            style: t.style.name().unwrap_or_else(|| "none".to_string()),
+            header_row: t.header_row,
+            autofilter: t.autofilter,
+            row_stripes: t.row_stripes,
+            column_stripes: t.column_stripes,
+            highlight_first_column: t.first_column_highlight,
+            highlight_last_column: t.last_column_highlight,
+            totals_row: t.totals_row,
+        }
+    }
 }
 
 /// An open workbook: its structure, and a shared handle from which row streams are opened.
@@ -241,13 +295,26 @@ impl Workbook {
         self.date1904
     }
 
-    /// A stream over the rows of the sheet at a 0-based index. The sheet is opened, and the shared
-    /// string table loaded, on the first call to [`RowStream::next_batch`].
-    pub fn rows(&self, index: u32) -> Result<RowStream> {
+    fn check_index(&self, index: u32) -> Result<()> {
         let count = self.sheets.len();
         if index as usize >= count {
             return Err(invalid(format!("no worksheet at index {index}; the workbook has {count}")));
         }
+        Ok(())
+    }
+
+    /// The Excel tables of the sheet at a 0-based index. Their parts are read on each call.
+    pub fn tables(&self, index: u32) -> Result<Vec<TableEntry>> {
+        self.check_index(index)?;
+        let mut reader = self.reader.lock().map_err(|_| failed("the workbook is unusable after an earlier failure"))?;
+        let tables = reader.tables_at(index as usize).map_err(read_error)?;
+        Ok(tables.into_iter().map(TableEntry::from).collect())
+    }
+
+    /// A stream over the rows of the sheet at a 0-based index. The sheet is opened, and the shared
+    /// string table loaded, on the first call to [`RowStream::next_batch`].
+    pub fn rows(&self, index: u32) -> Result<RowStream> {
+        self.check_index(index)?;
         Ok(RowStream {
             state: StreamState::Pending { origin: self.origin.clone(), reader: self.reader.clone(), index: index as usize },
             slots: vec![u32::MAX; STRING_SLOTS].into_boxed_slice(),
@@ -303,25 +370,65 @@ fn put_datetime(out: &mut Vec<u8>, d: ExcelDateTime) {
     }
 }
 
+fn put_layout(out: &mut Vec<u8>, layout: &SheetLayout) {
+    out.push(TAG_LAYOUT);
+    out.push(layout.outline_summary_above() as u8);
+    out.push(layout.row_outline_levels());
+    put_u32(out, layout.column_widths().len() as u32);
+    for column in layout.column_widths() {
+        put_u32(out, column.first_column());
+        put_u32(out, column.last_column());
+        out.extend_from_slice(&column.width().to_le_bytes());
+        out.push(column.is_hidden() as u8);
+    }
+}
+
+fn put_row_props(out: &mut Vec<u8>, row: &Row<'_>) {
+    let mut flags = row.outline_level();
+    if row.is_hidden() {
+        flags |= PROP_HIDDEN;
+    }
+    if row.is_collapsed() {
+        flags |= PROP_COLLAPSED;
+    }
+    if row.height().is_some() {
+        flags |= PROP_HEIGHT;
+    }
+    if flags == 0 {
+        return;
+    }
+    out.push(TAG_ROW_PROPS);
+    out.push(flags);
+    if let Some(height) = row.height() {
+        out.extend_from_slice(&height.to_le_bytes());
+    }
+}
+
 impl RowStream {
-    fn open(&mut self) -> Result<()> {
+    /// Opens the sheet and writes its layout to `out`.
+    fn open(&mut self, out: &mut Vec<u8>) -> Result<()> {
         let StreamState::Pending { origin, reader, index } = &self.state else { return Ok(()) };
         let handle = origin.open();
-        let rows = {
+        let mut rows = {
             let mut reader = reader.lock().map_err(|_| failed("the workbook is unusable after an earlier failure"))?;
             reader.with_source(handle).and_then(|r| r.into_worksheet_at(*index)).map_err(read_error)?
         };
+        put_layout(out, rows.layout().map_err(read_error)?);
         self.state = StreamState::Open(Box::new(rows));
         Ok(())
     }
 
     /// Appends rows to `out` until it holds at least [`BATCH_BYTES`] or the sheet ends. Returns
-    /// false once the sheet has ended and nothing was appended.
+    /// false once the sheet has ended and nothing was appended. The first batch holds only the
+    /// layout, so that it arrives even if the first row cannot be read.
     pub fn next_batch(&mut self, out: &mut Vec<u8>) -> Result<bool> {
         let start = out.len();
-        if let Err(e) = self.open() {
-            self.state = StreamState::Done;
-            return Err(e);
+        if matches!(self.state, StreamState::Pending { .. }) {
+            if let Err(e) = self.open(out) {
+                self.state = StreamState::Done;
+                return Err(e);
+            }
+            return Ok(true);
         }
         let StreamState::Open(rows) = &mut self.state else { return Ok(false) };
         while out.len() - start < BATCH_BYTES {
@@ -336,6 +443,7 @@ impl RowStream {
                     return Err(read_error(e));
                 }
             };
+            put_row_props(out, &row);
             out.push(TAG_ROW);
             put_u32(out, row.number());
             put_u32(out, row.last_column());
@@ -438,6 +546,9 @@ mod tests {
         writer.finish().unwrap()
     }
 
+    /// Bytes of the layout record of a sheet without column widths.
+    const EMPTY_LAYOUT: usize = 7;
+
     struct Cursor<'a> {
         data: &'a [u8],
         pos: usize,
@@ -466,11 +577,17 @@ mod tests {
     fn batch(bytes: Vec<u8>) -> Vec<u8> {
         let book = Workbook::open_bytes(bytes, &ReadConfig::default()).unwrap();
         let mut rows = book.rows(0).unwrap();
-        let mut out = Vec::new();
-        assert!(rows.next_batch(&mut out).unwrap());
+        let out = read_all(&mut rows).unwrap();
         assert!(rows.done());
         assert!(!rows.next_batch(&mut out.clone()).unwrap());
         out
+    }
+
+    /// The layout batch and every row batch of a sheet.
+    fn read_all(rows: &mut RowStream) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        while rows.next_batch(&mut out)? {}
+        Ok(out)
     }
 
     #[test]
@@ -480,24 +597,18 @@ mod tests {
         let path = dir.join("book.xlsx");
         std::fs::write(&path, workbook(true)).unwrap();
         let book = Workbook::open_path(&path, &ReadConfig::default()).unwrap();
-        let mut early = book.rows(0).unwrap();
-        let mut out = Vec::new();
-        assert!(early.next_batch(&mut out).unwrap());
+        let out = read_all(&mut book.rows(0).unwrap()).unwrap();
+        assert!(out.len() > EMPTY_LAYOUT);
 
         let replacement = dir.join("other.xlsx");
         std::fs::write(&replacement, b"not a workbook").unwrap();
         std::fs::rename(&replacement, &path).unwrap();
-        let mut late = book.rows(0).unwrap();
-        let mut again = Vec::new();
-        let replaced = late.next_batch(&mut again);
+        let replaced = read_all(&mut book.rows(0).unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
-        let mut last = Vec::new();
-        let deleted = book.rows(0).unwrap().next_batch(&mut last);
+        let deleted = read_all(&mut book.rows(0).unwrap());
 
-        assert!(replaced.unwrap());
-        assert_eq!(again, out);
-        assert!(deleted.unwrap());
-        assert_eq!(last, out);
+        assert_eq!(replaced.unwrap(), out);
+        assert_eq!(deleted.unwrap(), out);
     }
 
     #[test]
@@ -540,6 +651,7 @@ mod tests {
     fn encodes_every_value_with_inline_strings() {
         let out = batch(workbook(false));
         let mut c = Cursor { data: &out, pos: 0 };
+        assert_eq!((c.u8(), c.u8(), c.u8(), c.u32()), (TAG_LAYOUT, 0, 0, 0));
         assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 5));
         assert_eq!((c.u8(), c.str()), (TAG_STRING, "text".to_string()));
         assert_eq!((c.u8(), c.f64()), (TAG_NUMBER, 1.5));
@@ -555,7 +667,7 @@ mod tests {
     #[test]
     fn sends_each_shared_string_once() {
         let out = batch(workbook(true));
-        let mut c = Cursor { data: &out, pos: 0 };
+        let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
         assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 5));
         assert_eq!((c.u8(), c.u32(), c.str()), (TAG_SHARED_NEW, 0, "text".to_string()));
         c.pos = out.len() - 1 - 4 - 1 - 8;
@@ -573,9 +685,113 @@ mod tests {
         sheet.write_styled(60.0, date);
         sheet.end_row().unwrap();
         let out = batch(writer.finish().unwrap());
-        let mut c = Cursor { data: &out, pos: 9 };
+        let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT + 9 };
         assert_eq!((c.u8(), c.f64()), (TAG_DURATION, 36.0 * 3_600_000.0));
         assert_eq!((c.u8(), c.f64()), (TAG_NUMBER, 60.0), "1900-02-29 does not exist");
+    }
+
+    #[test]
+    fn encodes_the_layout_and_row_properties_and_lists_tables() {
+        use hypaxel::{RowOptions, SheetOptions, TableStyle};
+
+        let mut writer = XlsxWriter::new(Vec::new());
+        let options = SheetOptions::new().column_widths(&[12.5]).row_outline_levels(2).outline_summary_above();
+        let mut sheet = writer.add_worksheet_with("Data", &options).unwrap();
+        sheet.add_row(("Name",)).unwrap();
+        sheet.begin_row_with(&RowOptions::new().outline_level(2).hidden().collapsed().height(20.5)).unwrap().write(1).end_row().unwrap();
+        sheet.begin_row_with(&RowOptions::new().outline_level(1)).unwrap().write(2).end_row().unwrap();
+        sheet.add_table(&Table::new(1, 1, 3, 1).name("People").columns(["Name"]).style(TableStyle::Light(4))).unwrap();
+        sheet.add_table(&Table::new(5, 1, 6, 1).header_row(false).style(TableStyle::None)).unwrap();
+        let bytes = writer.finish().unwrap();
+
+        let book = Workbook::open_bytes(bytes.clone(), &ReadConfig::default()).unwrap();
+        let tables = book.tables(0).unwrap();
+        assert_eq!(tables.len(), 2);
+        assert_eq!(
+            tables[0],
+            TableEntry {
+                name: "People".into(),
+                first_row: 1,
+                first_column: 1,
+                last_row: 3,
+                last_column: 1,
+                columns: vec!["Name".into()],
+                style: "TableStyleLight4".into(),
+                header_row: true,
+                autofilter: true,
+                row_stripes: true,
+                column_stripes: false,
+                highlight_first_column: false,
+                highlight_last_column: false,
+                totals_row: false,
+            }
+        );
+        assert_eq!((tables[1].name.as_str(), tables[1].style.as_str(), tables[1].header_row), ("Table2", "none", false));
+        assert!(matches!(book.tables(1), Err(Error::Invalid(_))));
+
+        let out = batch(bytes);
+        let mut c = Cursor { data: &out, pos: 0 };
+        assert_eq!((c.u8(), c.u8(), c.u8(), c.u32()), (TAG_LAYOUT, 1, 2, 1));
+        assert_eq!((c.u32(), c.u32(), c.f64(), c.u8()), (1, 1, 12.5, 0));
+        assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 1));
+        assert_eq!((c.u8(), c.str()), (TAG_STRING, "Name".to_string()));
+        assert_eq!((c.u8(), c.u8(), c.f64()), (TAG_ROW_PROPS, 2 | PROP_HIDDEN | PROP_COLLAPSED | PROP_HEIGHT, 20.5));
+        assert_eq!((c.u8(), c.u32(), c.u32(), c.u8(), c.f64()), (TAG_ROW, 2, 1, TAG_NUMBER, 1.0));
+        assert_eq!((c.u8(), c.u8()), (TAG_ROW_PROPS, 1));
+        assert_eq!((c.u8(), c.u32(), c.u32(), c.u8(), c.f64()), (TAG_ROW, 3, 1, TAG_NUMBER, 2.0));
+        assert_eq!(c.pos, out.len());
+    }
+
+    #[test]
+    fn encodes_rows_without_values_on_request() {
+        use hypaxel::RowOptions;
+
+        let mut writer = XlsxWriter::new(Vec::new());
+        let mut sheet = writer.add_worksheet("Data").unwrap();
+        sheet.begin_row_with(&RowOptions::new().height(40.0)).unwrap().end_row().unwrap();
+        sheet.add_row((1,)).unwrap();
+        let bytes = writer.finish().unwrap();
+
+        let config = ReadConfig { include_empty_rows: Some(true), ..Default::default() };
+        let out = read_all(&mut Workbook::open_bytes(bytes.clone(), &config).unwrap().rows(0).unwrap()).unwrap();
+        let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
+        assert_eq!((c.u8(), c.u8(), c.f64()), (TAG_ROW_PROPS, PROP_HEIGHT, 40.0));
+        assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 0));
+        assert_eq!((c.u8(), c.u32(), c.u32(), c.u8(), c.f64()), (TAG_ROW, 2, 1, TAG_NUMBER, 1.0));
+        assert_eq!(c.pos, out.len());
+
+        let out = batch(bytes);
+        let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
+        assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 2, 1));
+    }
+
+    #[test]
+    fn sends_the_layout_before_a_row_that_cannot_be_read() {
+        use std::io::Write;
+
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, content) in [
+            ("_rels/.rels", r#"<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>"#),
+            ("xl/workbook.xml", r#"<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>"#),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<worksheet><cols><col min="1" max="1" width="9"/></cols><sheetData><row r="1"><c><v>1,5</v></c></row></sheetData></worksheet>"#,
+            ),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(content.as_bytes()).unwrap();
+        }
+        let book = Workbook::open_bytes(zip.finish().unwrap().into_inner(), &ReadConfig::default()).unwrap();
+        let mut rows = book.rows(0).unwrap();
+        let mut out = Vec::new();
+        assert!(rows.next_batch(&mut out).unwrap());
+        let mut c = Cursor { data: &out, pos: 0 };
+        assert_eq!((c.u8(), c.u8(), c.u8(), c.u32()), (TAG_LAYOUT, 0, 0, 1));
+        assert!(rows.next_batch(&mut out).unwrap_err().to_string().contains("invalid number"));
     }
 
     #[test]
@@ -583,10 +799,10 @@ mod tests {
         let err = |r: Result<Workbook>| r.err().unwrap().to_string();
         assert!(!err(Workbook::open_bytes(vec![1, 2, 3], &ReadConfig::default())).is_empty());
         assert!(err(Workbook::open_path("/no/such/file.xlsx", &ReadConfig::default())).starts_with("file not found"));
-        let config = ReadConfig { max_shared_strings_bytes: Some(-1.0) };
+        let config = ReadConfig { max_shared_strings_bytes: Some(-1.0), ..Default::default() };
         assert!(matches!(Workbook::open_bytes(workbook(true), &config), Err(Error::Invalid(_))));
 
-        let tight = ReadConfig { max_shared_strings_bytes: Some(1.0) };
+        let tight = ReadConfig { max_shared_strings_bytes: Some(1.0), ..Default::default() };
         let book = Workbook::open_bytes(workbook(true), &tight).unwrap();
         let mut rows = book.rows(0).unwrap();
         assert!(rows.next_batch(&mut Vec::new()).unwrap_err().to_string().contains("limit"));

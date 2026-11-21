@@ -5,9 +5,9 @@ name: Go
 # limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    paths: ["go/**", ".github/workflows/go.yml"]
+    paths: ["go/**", ".github/workflows/go.yml", "testdata/**"]
   pull_request:
-    paths: ["go/**", ".github/workflows/go.yml"]
+    paths: ["go/**", ".github/workflows/go.yml", "testdata/**"]
 
 defaults:
   run:

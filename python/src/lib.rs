@@ -728,9 +728,11 @@ impl Worksheet {
     }
 
     /// Turns a range (1-based, inclusive) into an Excel table. With a header row, ``columns`` must
-    /// list the header texts exactly as written in the range's first row.
+    /// list the header texts exactly as written in the range's first row. ``totals_row`` exists so
+    /// that a table from :meth:`Reader.tables` can be passed back; totals rows cannot be written.
     #[pyo3(signature = (first_row, first_col, last_row, last_col, *, columns=None, name=None, style=Some("TableStyleMedium2"),
-        header_row=true, autofilter=true, row_stripes=true, column_stripes=false, first_column=false, last_column=false))]
+        header_row=true, autofilter=true, row_stripes=true, column_stripes=false, first_column=false, last_column=false,
+        totals_row=false))]
     #[allow(clippy::too_many_arguments)]
     fn add_table(
         &self,
@@ -748,6 +750,7 @@ impl Worksheet {
         column_stripes: bool,
         first_column: bool,
         last_column: bool,
+        totals_row: bool,
     ) -> PyResult<()> {
         let mut table = Table::new(first_row, first_col, last_row, last_col)
             .columns(columns.unwrap_or_default())
@@ -761,6 +764,7 @@ impl Worksheet {
         if let Some(name) = name {
             table = table.name(name);
         }
+        table.totals_row = totals_row;
         self.with_sheet(py, |s| s.add_table(&table).map(drop).map_err(to_py))
     }
 

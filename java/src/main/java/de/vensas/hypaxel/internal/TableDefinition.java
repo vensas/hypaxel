@@ -35,6 +35,9 @@ final class TableDefinition {
         if (table.headerRow() && firstRow == lastRow) {
             throw new XlsxException(Kind.INVALID_ARGUMENT, "a table with a header row needs at least one data row");
         }
+        if (table.totalsRow()) {
+            throw new XlsxException(Kind.INVALID_ARGUMENT, "tables with a totals row can be read but not written");
+        }
 
         String name = table.name();
         if (name == null) {

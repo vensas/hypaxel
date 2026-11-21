@@ -80,19 +80,24 @@ const (
 // returns false or Close is called, and is stopped by the garbage collector for a Rows that
 // is dropped without either. Call Close when stopping early.
 type Rows struct {
-	x        *xmlReader
-	rc       io.ReadCloser
-	styles   []DateKind
-	row      Row
-	scratch  []byte
-	state    uint8
-	previous uint32
-	err      error
+	x          *xmlReader
+	rc         io.ReadCloser
+	styles     []DateKind
+	row        Row
+	layout     SheetLayout
+	scratch    []byte
+	state      uint8
+	emptyRows  bool
+	layoutRead bool
+	previous   uint32
+	layoutErr  error
+	err        error
 }
 
 // Next advances to the next row that holds at least one value; rows that are missing from the
-// file or only carry formatting are skipped. It returns false at the end of the sheet or on an
-// error, and closes the Rows then.
+// file or only carry formatting are skipped. With [WithEmptyRows], rows that the file stores
+// without values are returned as well. It returns false at the end of the sheet or on an error,
+// and closes the Rows then.
 func (r *Rows) Next() bool {
 	if r.state == rowsDone {
 		return false
@@ -107,6 +112,41 @@ func (r *Rows) Next() bool {
 		r.finish()
 	}
 	return ok
+}
+
+// Layout returns the column widths and outline settings of the sheet. They precede the rows in
+// the file, so Layout can be called before the first Next and reads nothing extra. An error
+// while reading them stops the Rows, and Err reports it as well. On a sheet without rows that
+// includes a damaged worksheet entry, which is verified at its end. Once read, the layout stays
+// available, also after the last row, after Close and after an error in a later row. Layout
+// returns [ErrRowsClosed] if the Rows was closed before the layout was read.
+func (r *Rows) Layout() (*SheetLayout, error) {
+	if r.state == rowsBeforeData {
+		if err := r.readHeader(); err != nil {
+			r.err = err
+			r.finish()
+		}
+	}
+	switch {
+	case r.layoutRead:
+		return &r.layout, nil
+	case r.layoutErr != nil:
+		return &r.layout, r.layoutErr
+	}
+	return &r.layout, ErrRowsClosed
+}
+
+// readHeader reads the worksheet up to its rows and records whether the layout is complete. On a
+// sheet without rows it also verifies the rest of the entry, so that Layout and Next report a
+// damaged entry alike, whichever is called first.
+func (r *Rows) readHeader() error {
+	err := r.findSheetData()
+	if err == nil && r.state == rowsDone {
+		r.finish()
+		err = r.err
+	}
+	r.layoutRead, r.layoutErr = err == nil, err
+	return err
 }
 
 // Row returns the current row. It is overwritten by the next call to Next; the strings and
@@ -168,7 +208,7 @@ func (r *Rows) advance() (bool, error) {
 		case rowsDone:
 			return false, nil
 		case rowsBeforeData:
-			if err := r.findSheetData(); err != nil {
+			if err := r.readHeader(); err != nil {
 				return false, err
 			}
 			continue
@@ -194,23 +234,48 @@ func (r *Rows) advance() (bool, error) {
 			continue
 		}
 		number := r.previous + 1
-		if raw, ok := attr(x.attrs, "r"); ok {
-			if number, ok = parseUint32(raw); !ok {
-				return false, x.malformed("a row has an invalid row number")
+		var props rowProps
+		hasNumber := false
+		for it := (attrIter{x.attrs}); ; {
+			name, value, ok := it.next()
+			if !ok {
+				break
+			}
+			switch string(name) {
+			case "r":
+				if hasNumber {
+					continue
+				}
+				hasNumber = true
+				if number, ok = parseUint32(value); !ok {
+					return false, x.malformed("a row has an invalid row number")
+				}
+			case "outlineLevel":
+				props.outlineLevel = parseOutlineLevel(value)
+			case "hidden":
+				props.hidden = isTrue(value)
+			case "collapsed":
+				props.collapsed = isTrue(value)
+			case "ht":
+				props.height, props.hasHeight = parseMeasure(value)
 			}
 		}
 		if number < 1 || number > MaxRows {
 			return false, x.malformed("row number %d is outside 1..1048576", number)
 		}
 		r.previous = number
-		if ev == xmlEmpty {
+		if ev == xmlEmpty && !r.emptyRows {
 			continue
 		}
 		r.row.index = int(number)
-		if err := r.readCells(); err != nil {
+		r.row.props = props
+		if ev == xmlEmpty {
+			r.row.cells = r.row.cells[:0]
+			r.row.text = r.row.text[:0]
+		} else if err := r.readCells(); err != nil {
 			return false, err
 		}
-		if len(r.row.cells) > 0 {
+		if r.emptyRows || len(r.row.cells) > 0 {
 			return true, nil
 		}
 	}
@@ -223,28 +288,75 @@ func (r *Rows) findSheetData() error {
 		if err != nil {
 			return err
 		}
-		switch ev {
-		case xmlEOF:
+		if ev == xmlEOF {
 			r.state = rowsDone
 			return nil
-		case xmlEmpty:
-			if string(x.name) == "sheetData" {
+		}
+		if ev != xmlStart && ev != xmlEmpty {
+			continue
+		}
+		descend := false
+		switch string(x.name) {
+		case "sheetData":
+			r.state = rowsInData
+			if ev == xmlEmpty {
 				r.state = rowsDone
-				return nil
 			}
-		case xmlStart:
-			switch string(x.name) {
-			case "sheetData":
-				r.state = rowsInData
-				return nil
-			case "worksheet", "dialogsheet", "macrosheet":
-			default:
-				if err := x.skipElement(); err != nil {
-					return err
-				}
+			return nil
+		case "worksheet", "dialogsheet", "macrosheet", "sheetPr", "cols":
+			descend = true
+		case "outlinePr":
+			raw, _ := attr(x.attrs, "summaryBelow")
+			below := string(trimSpace(raw))
+			r.layout.OutlineSummaryAbove = below == "0" || below == "false"
+		case "sheetFormatPr":
+			raw, _ := attr(x.attrs, "outlineLevelRow")
+			r.layout.RowOutlineLevels = int(parseOutlineLevel(raw))
+		case "col":
+			if err := r.readColumn(); err != nil {
+				return err
+			}
+		}
+		if ev == xmlStart && !descend {
+			if err := x.skipElement(); err != nil {
+				return err
 			}
 		}
 	}
+}
+
+func (r *Rows) readColumn() error {
+	var first, last uint32
+	var width float64
+	var hasFirst, hasLast, hasWidth, hidden bool
+	for it := (attrIter{r.x.attrs}); ; {
+		name, value, ok := it.next()
+		if !ok {
+			break
+		}
+		switch string(name) {
+		case "min":
+			first, hasFirst = parseUint32(value)
+		case "max":
+			last, hasLast = parseUint32(value)
+		case "width":
+			width, hasWidth = parseMeasure(value)
+		case "hidden":
+			hidden = isTrue(value)
+		}
+	}
+	if !hasFirst || !hasLast || !hasWidth {
+		return nil
+	}
+	last = min(last, MaxColumns)
+	if first < 1 || first > last {
+		return nil
+	}
+	if len(r.layout.ColumnWidths) >= MaxColumns {
+		return r.x.malformed("the sheet defines more than 16384 column ranges")
+	}
+	r.layout.ColumnWidths = append(r.layout.ColumnWidths, ColumnWidth{FirstColumn: int(first), LastColumn: int(last), Width: width, Hidden: hidden})
+	return nil
 }
 
 func (r *Rows) readCells() error {
@@ -639,6 +751,7 @@ func parseColumn(reference []byte) uint32 {
 // next call to Next.
 type Row struct {
 	index    int
+	props    rowProps
 	cells    []rawCell
 	text     []byte
 	str      string
@@ -646,6 +759,26 @@ type Row struct {
 	sst      *stringTable
 	date1904 bool
 }
+
+type rowProps struct {
+	height       float64
+	outlineLevel uint8
+	hidden       bool
+	collapsed    bool
+	hasHeight    bool
+}
+
+// OutlineLevel returns the outline (grouping) level of the row, 0 to 7.
+func (r *Row) OutlineLevel() int { return int(r.props.outlineLevel) }
+
+// Hidden reports whether the row is hidden.
+func (r *Row) Hidden() bool { return r.props.hidden }
+
+// Collapsed reports whether the row is the summary row of a collapsed group.
+func (r *Row) Collapsed() bool { return r.props.collapsed }
+
+// Height returns the height of the row in points, and false if the row stores none.
+func (r *Row) Height() (float64, bool) { return r.props.height, r.props.hasHeight }
 
 // Index returns the 1-based row number as shown in Excel.
 func (r *Row) Index() int { return r.index }

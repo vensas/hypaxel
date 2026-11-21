@@ -137,6 +137,12 @@ impl WasmWorkbook {
         Ok(self.inner()?.date1904())
     }
 
+    /// The Excel tables of the sheet at a 0-based index, as an array of objects.
+    pub fn tables(&self, index: u32) -> Result<JsValue, JsError> {
+        let tables = self.inner()?.tables(index).map_err(to_js)?;
+        serde_wasm_bindgen::to_value(&tables).map_err(|e| JsError::new(&e.to_string()))
+    }
+
     /// Rows of the sheet at a 0-based index.
     pub fn rows(&self, index: u32) -> Result<WasmRows, JsError> {
         Ok(WasmRows { inner: self.inner()?.rows(index).map_err(to_js)? })

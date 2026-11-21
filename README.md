@@ -175,7 +175,9 @@ Shared by all seven implementations (milestone 1: creating Excel files).
   (Open XML SDK, calamine, openpyxl, LibreOffice)
 
 Reading (.NET, Rust, Python, Node.js and browsers, Go, Java): streamed rows of strings, numbers, booleans, errors and dates, times and
-durations recognised from number formats, in both date systems; sheet list with visibility; files
+durations recognised from number formats, in both date systems; sheet list with visibility; Excel
+tables, row outline levels, hidden and collapsed rows, row heights, column widths and outline
+settings, so a file written with Hypaxel can be checked with Hypaxel alone; files
 from Excel, LibreOffice and other producers, including Strict Open XML; clear errors for legacy
 `.xls`, encrypted and damaged files; limits for untrusted input.
 
@@ -191,6 +193,7 @@ java/      Maven project: src/, benchmarks/ (separate project)
 php/       Composer package: src/, tests/, benchmarks/, examples/
 benchmarks/ highlights.json and the format of each implementation's benchmarks/results/*.json
 scripts/   check_benchmarks.py: checks the benchmark JSON against the README tables
+testdata/  workbooks saved by Excel and LibreOffice, read by every reader's tests
 .github/   CI: one workflow per implementation, each triggered only by changes to its own code
 ```
 

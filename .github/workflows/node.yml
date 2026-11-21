@@ -5,9 +5,9 @@ name: Node
 # limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    paths: ["node/**", "rust/hypaxel/**", ".github/workflows/node.yml"]
+    paths: ["node/**", "rust/hypaxel/**", ".github/workflows/node.yml", "testdata/**"]
   pull_request:
-    paths: ["node/**", "rust/hypaxel/**", ".github/workflows/node.yml"]
+    paths: ["node/**", "rust/hypaxel/**", ".github/workflows/node.yml", "testdata/**"]
 
 defaults:
   run:

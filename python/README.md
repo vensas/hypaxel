@@ -86,6 +86,31 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   `[h]:mm` durations, error strings such as `"#N/A"`, and `None`. Formulas yield their cached
   result. Dates are recognised from the cell's number format, in both date systems; times are
   rounded to the millisecond.
+- **Tables:** `wb.tables("Orders")` returns the sheet's Excel tables, one dict per table with the
+  keys that `add_table` takes (`first_row`, `first_col`, `last_row`, `last_col`, `name`, `columns`,
+  `style`, `header_row`, `autofilter`, `row_stripes`, `column_stripes`, `first_column`,
+  `last_column`, `totals_row`), from top to bottom, then left to right. Tables are stored apart
+  from the rows and are read only when you ask. A custom (non-built-in) table style reads as
+  `None`. `totals_row` tells whether the last row of the range is a totals row; such a table can
+  be read but not written.
+- **Rows and columns:** the iterator returned by `wb.rows()` describes the row it returned last:
+  `row_number`, `outline_level`, `hidden`, `collapsed` and `height` (`None` when the row stores no
+  height). Rows that the file stores without values (a spacer row with a height, an empty hidden
+  row) come back as `[]` with default properties; open the workbook with
+  `include_empty_rows=True` to get their properties as well (such rows after the last value are
+  then returned too, and `skip_empty=True` still drops them). Before the first row it already has the sheet's `column_widths` (a list of
+  `(first_col, last_col, width, hidden)`, explicit and auto-fitted alike), `column_width(col)`,
+  `column_hidden(col)`,
+  `outline_summary_above` and `row_outline_levels`.
+
+  ```python
+  with hypaxel.open_workbook("orders.xlsx") as wb:
+      table = wb.tables("Orders")[0]                       # table["name"], table["columns"], ...
+      rows = wb.rows("Orders")
+      width = rows.column_width(2)                         # None = default width
+      for row in rows:
+          level, hidden = rows.outline_level, rows.hidden
+  ```
 - **Records:** `iter_records` / `read_records` use a header row (`header_row=1`). Empty header
   cells become `column_<n>`, repeated names get the first free suffix of `_2`, `_3`, ... and rows without values are
   skipped.
@@ -189,8 +214,11 @@ def export():
 | `Worksheet.merge_cells(r1, c1, r2, c2)`, `autofilter(r1, c1, r2, c2)` | ranges (1-based, inclusive) |
 | `Worksheet.add_table(r1, c1, r2, c2, *, columns=, name=, style="TableStyleMedium2", header_row=, autofilter=, row_stripes=, column_stripes=, first_column=, last_column=)` | Excel table; `columns` must equal the header texts |
 | `Formula("SUM(A1:A9)")`, `Styled(value, style)` | special cell values |
-| `open_workbook(source, *, max_shared_strings_bytes=1 GiB)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
+| `open_workbook(source, *, max_shared_strings_bytes=1 GiB, include_empty_rows=False)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
 | `Reader.sheet_names`, `Reader.sheets`, `Reader.date_1904`, `Reader.rows(sheet=0, *, skip_empty=False)`, `Reader.close()` | `rows` iterates lists; several iterators can be open at once |
+| `Reader.tables(sheet=0)` | the sheet's Excel tables as dicts with `add_table`'s keys |
+| `RowIterator.row_number`, `outline_level`, `hidden`, `collapsed`, `height` | properties of the row returned last |
+| `RowIterator.column_widths`, `column_width(col)`, `column_hidden(col)`, `outline_summary_above`, `row_outline_levels` | sheet layout, available before the first row |
 | `iter_rows` / `read_rows`, `iter_records` / `read_records`, `read_dataframe` | one-call readers; see [Reading](#reading) |
 
 ### Tables, row grouping and auto-fit

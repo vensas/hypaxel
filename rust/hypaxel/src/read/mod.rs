@@ -3,16 +3,18 @@
 mod sheet;
 mod sst;
 mod styles;
+mod table;
 mod value;
 mod xml;
 mod zip;
 
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
 
-pub use sheet::{Cell, Row, Rows};
+pub use sheet::{Cell, ColumnWidth, Row, Rows, SheetLayout};
 pub use value::{DateKind, ExcelDateTime, Value};
 
 use self::sst::SharedStrings;
@@ -20,16 +22,27 @@ use self::styles::Styles;
 use self::xml::{Event, XmlReader, decode_into};
 use self::zip::{Directory, EntryReader};
 use crate::error::{Error, Result};
+use crate::table::Table;
+
+/// Most relationships to other parts that one part may have. Links to external targets are not
+/// kept and do not count.
+const MAX_RELATIONSHIPS: usize = 65_536;
+/// Most tables read from one worksheet.
+const MAX_TABLES: usize = 4096;
+/// Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes
+/// per column on top of its name.
+const MAX_TABLE_TEXT: usize = 64 * 1024 * 1024;
 
 /// Limits that protect against oversized or malicious workbooks.
 #[derive(Debug, Clone)]
 pub struct ReadOptions {
     max_shared_strings_bytes: u64,
+    include_empty_rows: bool,
 }
 
 impl Default for ReadOptions {
     fn default() -> Self {
-        Self { max_shared_strings_bytes: 1 << 30 }
+        Self { max_shared_strings_bytes: 1 << 30, include_empty_rows: false }
     }
 }
 
@@ -44,6 +57,14 @@ impl ReadOptions {
     /// rows; everything else is streamed. Lower this when reading untrusted uploads.
     pub fn max_shared_strings_bytes(mut self, bytes: u64) -> Self {
         self.max_shared_strings_bytes = bytes;
+        self
+    }
+
+    /// Also return the rows that the file stores without any value (default false), for example
+    /// a spacer row with a height or an empty hidden row. They have no cells but carry their
+    /// number and properties. Rows that the file does not store are never returned.
+    pub fn include_empty_rows(mut self, include: bool) -> Self {
+        self.include_empty_rows = include;
         self
     }
 }
@@ -282,6 +303,42 @@ impl<R: Read + Seek> XlsxReader<R> {
         open_rows(&meta, sst, index, self.source)
     }
 
+    /// The Excel tables of the sheet with this name (matched exactly, then ignoring case).
+    pub fn tables(&mut self, name: &str) -> Result<Vec<Table>> {
+        let index = self.sheet_index(name)?;
+        self.tables_at(index)
+    }
+
+    /// The Excel tables of the sheet at a 0-based position in [`sheets`](Self::sheets), as the
+    /// [`Table`] values that [`Sheet::add_table`](crate::Sheet::add_table) accepts.
+    ///
+    /// Tables live in their own parts, which are read on each call; reading rows does not touch
+    /// them. They are returned from top to bottom, then left to right, whatever order the file
+    /// lists them in. A part that the sheet references more than once is read once. A table style that is not one of Excel's built-in styles is reported as
+    /// [`TableStyle::None`](crate::TableStyle::None).
+    pub fn tables_at(&mut self, index: usize) -> Result<Vec<Table>> {
+        self.check_index(index)?;
+        let Some(part) = self.meta.sheets[index].part.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let mut package = Package { dir: &self.meta.dir, source: &mut self.source };
+        let rels = package.relationships(&rels_path(part))?.unwrap_or_default();
+        let mut targets: Vec<&str> = rels.iter().filter(|r| r.is("table")).map(|r| r.target.as_str()).collect();
+        if targets.len() > MAX_TABLES {
+            return Err(Error::LimitExceeded(format!("{part} has more than {MAX_TABLES} tables")));
+        }
+        let mut seen = HashSet::new();
+        targets.retain(|target| seen.insert(*target));
+        let mut tables = Vec::with_capacity(targets.len());
+        let mut budget = MAX_TABLE_TEXT;
+        for target in targets {
+            let mut xml = package.xml(target)?;
+            tables.push(table::parse(&mut xml, &mut budget)?);
+        }
+        tables.sort_by_key(|t| (t.first_row, t.first_column));
+        Ok(tables)
+    }
+
     /// A reader for another handle to the same workbook (e.g. a second `File`), sharing the
     /// parsed structure and the shared string table. Use it to read several sheets at once, for
     /// example from different threads.
@@ -305,7 +362,7 @@ fn open_rows<S: Read + Seek>(meta: &Meta, sst: Arc<SharedStrings>, index: usize,
         message: format!("the worksheet part of sheet {:?} is missing", info.name),
     })?;
     let xml = XmlReader::new(Directory::open(entry, source)?, part);
-    Ok(Rows::new(xml, sst, meta.styles.clone(), meta.is_1904))
+    Ok(Rows::new(xml, sst, meta.styles.clone(), meta.is_1904, meta.options.include_empty_rows))
 }
 
 struct Relationship {
@@ -354,6 +411,9 @@ impl<R: Read + Seek> Package<'_, R> {
                 continue;
             }
             if let (Some(id), Some(kind), Some(target)) = (attr(b"Id"), attr(b"Type"), attr(b"Target")) {
+                if rels.len() >= MAX_RELATIONSHIPS {
+                    return Err(Error::LimitExceeded(format!("{part} has more than {MAX_RELATIONSHIPS} relationships")));
+                }
                 rels.push(Relationship { id, kind, target: resolve(&base, &target) });
             }
         }

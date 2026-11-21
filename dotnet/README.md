@@ -252,19 +252,46 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
   for untrusted uploads. Damaged or malicious input throws `XlsxReadException` (or an `IOException`
   from your stream), never another exception type. Its `Kind` is `InvalidFile` (not an `.xlsx`:
   CSV, legacy `.xls`, a password-protected workbook, a Word file), `Malformed` (with the `Part`, and the
-  row in the message), `LimitExceeded` or `Unsupported`.
+  row in the message), `LimitExceeded` or `Unsupported`. Besides `MaxSharedStringsBytes`, fixed limits
+  apply: a sheet may have 4,096 tables holding 64 MiB of table and column names in total, a table 16,384
+  columns, a sheet 16,384 column ranges, and a part 65,536 relationships to other parts (links to
+  external targets do not count).
 - **Sheets:** `reader.Sheets` lists every sheet with its `Visibility` (`Visible`, `Hidden`,
   `VeryHidden`) and `Kind` (`Worksheet`, `Chartsheet`, `Other`). `OpenWorksheet(name)` matches exactly,
   then ignoring case. Several worksheets of one reader can be open at once on one thread; use one reader
   per thread to read in parallel.
+- **Tables:** `reader.GetTables("Orders")` (or `GetTables(0)`) returns the sheet's Excel tables as the
+  same `ExcelTable` records that `AddTable` accepts: name, range, column names, style and the display
+  options. Tables are stored in their own parts and are read only when you ask, so reading values costs
+  the same as before. They come back from top to bottom, then left to right, whatever order the file
+  lists them in. `ShowAutoFilter` tells whether the file has filter buttons, and a custom
+  (non-built-in) table style reads as `TableStyle.None`. `HasTotalsRow` tells whether the last row of
+  the range is a totals row; such tables can be read but not written, so `AddTable` rejects them.
+- **Rows and columns:** each `XlsxRow` carries `OutlineLevel`, `Hidden`, `Collapsed` and `Height`
+  (null when the row stores no height). `WorksheetReader` has `ColumnWidths` (runs of columns with
+  `FirstColumn`, `LastColumn`, `Width` and `Hidden`, explicit and auto-fitted alike),
+  `GetColumnWidth(column)`, `IsColumnHidden(column)`, `OutlineSummaryAbove` and `RowOutlineLevels`; they precede the rows in the file, so they are
+  available before the first `Read()`. Rows without values are skipped by default, whatever their
+  properties; set `new XlsxReaderOptions { IncludeEmptyRows = true }` to also get the rows the file
+  stores without values (a spacer row with a height, an empty hidden row), with `Count == 0`.
+
+  ```csharp
+  var table = reader.GetTables("Orders")[0];              // table.Name, table.Columns, table.Style, ...
+  using var rows = reader.OpenWorksheet("Orders");
+  double? width = rows.GetColumnWidth(2);                 // null = default width
+  while (rows.Read())
+  {
+      var (level, hidden) = (rows.Row.OutlineLevel, rows.Row.Hidden);
+  }
+  ```
 - **Large single files:** `new XlsxReaderOptions { BackgroundDecompression = true }` inflates on a
   second thread and reads about 30% faster when cores are idle (see [Reading performance](#reading-1)).
   Leave it off for many concurrent reads.
 - **Streams:** the input must be seekable, because the ZIP directory is at the end of the file. Copy a
   non-seekable stream such as a raw request body into a `MemoryStream` or temporary file first. Reading is synchronous.
 
-Not read (yet): formula text, styles beyond date detection, merged ranges, comments, hyperlinks
-and data validation.
+Not read (yet): formula text, styles beyond date detection, merged ranges, comments, hyperlinks and
+data validation.
 
 ## Features (milestone 1)
 

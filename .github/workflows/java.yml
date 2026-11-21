@@ -5,9 +5,9 @@ name: Java
 # limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    paths: ["java/**", ".github/workflows/java.yml"]
+    paths: ["java/**", ".github/workflows/java.yml", "testdata/**"]
   pull_request:
-    paths: ["java/**", ".github/workflows/java.yml"]
+    paths: ["java/**", ".github/workflows/java.yml", "testdata/**"]
 
 defaults:
   run:

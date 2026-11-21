@@ -91,7 +91,7 @@ try (XlsxReader reader = XlsxReader.open(Path.of("orders.xlsx"))) {
 
     try (SheetReader rows = reader.worksheet("Orders")) {          // or worksheet(0)
         for (Row row = rows.nextRow(); row != null; row = rows.nextRow()) {
-            // row.number() is the 1-based Excel row; rows without values are skipped.
+            // row.number() is the 1-based Excel row; rows without values are skipped by default.
             String customer = row.getString(1);                     // 1-based columns
             double amount = row.getNumber(3);                       // NaN if not a number
             LocalDateTime created = row.getLocalDateTime(4);        // null if not a date
@@ -128,22 +128,66 @@ try (Stream<Row> rows = reader.worksheet("Orders").stream()) {   // independent 
 Keep `row.copy()`, `row.toList()` or the values you need. `stream()` yields copies, so they may be
 collected.
 
+Tables, row properties and column widths that the writer can add are read back as well, so a
+workbook written with Hypaxel can be checked with Hypaxel alone:
+
+```java
+List<ExcelTable> tables = reader.tables("Orders");          // or tables(0); the same class addTable takes
+tables.get(0).name(); tables.get(0).columns(); tables.get(0).style();
+
+try (SheetReader rows = reader.worksheet("Orders")) {
+    List<ColumnWidth> widths = rows.columnWidths();         // known before the first row is read
+    OptionalDouble width = rows.columnWidth(2);             // empty: default width
+    boolean hidden = rows.columnHidden(4);
+    boolean summaryAbove = rows.outlineSummaryAbove();
+    for (Row row : rows) {
+        row.outlineLevel(); row.hidden(); row.collapsed(); row.height();
+    }
+}
+```
+
+Tables are stored in their own parts and are read only when `tables` is called; reading rows does
+not touch them. They are returned from top to bottom, then left to right, whatever order the file
+lists them in. A table style that is not one of Excel's built-in styles reads as
+`TableStyle.NONE`. `totalsRow()` tells whether the last row of a table's range is a totals row;
+such a table can be read but not written, so `addTable` rejects it. Row properties are reported for the rows that are returned, that is rows with at
+least one value. To also get the rows that the file stores without a value (a spacer row with a
+height, an empty hidden row), open the workbook with
+`ReadOptions.builder().includeEmptyRows(true).build()`: they come back with `cellCount() == 0` and
+their number and properties. Rows that the file does not store are never returned.
+
 **`XlsxReader`**
 
 | Method | Purpose |
 | --- | --- |
-| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats |
+| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats. `ReadOptions`: `maxSharedStringsBytes` (default 1 GiB), `includeEmptyRows` (default false) |
 | `sheets()`, `sheetNames()` | Sheets in workbook order: name, `SheetVisibility` (`VISIBLE`, `HIDDEN`, `VERY_HIDDEN`), `SheetKind` (`WORKSHEET`, `CHARTSHEET`, `OTHER`) |
 | `worksheet(name)` | Sheet by name: exact match first, then ignoring case |
 | `worksheet(index)` | Sheet by 0-based position |
 | `isDate1904()` | Whether the workbook uses the 1904 date system |
 | `sharedStringCount()` | Entries in the shared string table (loads it) |
+| `tables(name)`, `tables(index)` | The sheet's Excel tables as `ExcelTable`: name, range, columns, style, options and `totalsRow()`; read on each call, ordered by position |
+
+**`SheetReader`**
+
+| Method | Purpose |
+| --- | --- |
+| `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back; with `includeEmptyRows`, every row the file stores |
+| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`, `hidden()`) the sheet defines, explicit and auto-fitted, in file order |
+| `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width |
+| `columnHidden(column)` | Whether a 1-based column is hidden |
+| `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
+
+The layout getters work before the first row, after the rows were read and after `close()` once the
+layout has been read. They throw `INVALID_STATE` if the reader was closed before the layout was read,
+and repeat the error if reading the layout failed.
 
 **`Row`**
 
 | Method | Purpose |
 | --- | --- |
 | `number()`, `cellCount()`, `lastColumn()`, `column(i)` | Row number, cells with a value and their columns |
+| `outlineLevel()`, `hidden()`, `collapsed()`, `height()` | Grouping level 0 to 7, hidden and collapsed state, height in points (`OptionalDouble`) |
 | `type(column)` | `CellType`: `EMPTY`, `STRING`, `NUMBER`, `BOOLEAN`, `DATE_TIME`, `ERROR` |
 | `getString`, `getNumber`, `getBoolean`, `getError` | Typed values without allocation (except the `String` of inline text) |
 | `getDateTime(column)` | `ExcelDateTime`: `serial()`, `kind()`, `toLocalDateTime()`, `toLocalDate()`, `toLocalTime()`, `toDuration()`, `toObject()` |
@@ -170,7 +214,10 @@ collected.
 - **Safety:** document type declarations are rejected (no entity expansion or external entities),
   every XML token (16 MiB) and row (16,384 cells, 256 MiB of text) is bounded, ZIP entries must
   match their declared size and CRC-32, and `ReadOptions.builder().maxSharedStringsBytes(...)`
-  (default 1 GiB) caps the shared string table. Legacy `.xls` files, encrypted workbooks, CSV and
+  (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
+  64 MiB of table and column names between them, and a table part that is referenced more than
+  once is read once. A part may have at most 65,536 relationships to other parts (external links
+  do not count). Legacy `.xls` files, encrypted workbooks, CSV and
   Word files fail with `XlsxException` of kind `INVALID_FILE`, damaged parts with `MALFORMED` and
   a `part()` such as `xl/worksheets/sheet1.xml`; messages name the part and row. Invalid UTF-8 in
   text is replaced with U+FFFD.
