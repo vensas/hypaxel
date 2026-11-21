@@ -266,7 +266,9 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
   (null when the row stores no height). `WorksheetReader` has `ColumnWidths` (runs of columns with
   `FirstColumn`, `LastColumn`, `Width`, explicit and auto-fitted alike), `GetColumnWidth(column)`,
   `OutlineSummaryAbove` and `RowOutlineLevels`; they precede the rows in the file, so they are
-  available before the first `Read()`. Rows without values are still skipped, whatever their properties.
+  available before the first `Read()`. Rows without values are skipped by default, whatever their
+  properties; set `new XlsxReaderOptions { IncludeEmptyRows = true }` to also get the rows the file
+  stores without values (a spacer row with a height, an empty hidden row), with `Count == 0`.
 
   ```csharp
   var table = reader.GetTables("Orders")[0];              // table.Name, table.Columns, table.Style, ...

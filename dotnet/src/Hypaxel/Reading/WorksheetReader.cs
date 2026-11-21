@@ -10,7 +10,8 @@ namespace Hypaxel;
 /// </summary>
 /// <remarks>
 /// Rows that are missing from the file or only carry formatting are skipped; <see cref="XlsxRow.Number"/>
-/// tells where a row is. The reader is forward-only: enumerating it a second time continues where the
+/// tells where a row is. With <see cref="XlsxReaderOptions.IncludeEmptyRows"/>, rows that the file stores
+/// without values are returned as well. The reader is forward-only: enumerating it a second time continues where the
 /// previous enumeration stopped.
 /// </remarks>
 /// <example>
@@ -33,6 +34,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     private readonly string[] _sharedStrings;
     private readonly StyleTable _styles;
     private readonly bool _is1904;
+    private readonly bool _includeEmptyRows;
     private readonly XlsxRow _row;
     private byte[] _scratch = new byte[64];
     private int _scratchLength;
@@ -42,8 +44,9 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     private bool _outlineSummaryAbove;
     private int _rowOutlineLevels;
 
-    internal WorksheetReader(string name, Utf8XmlReader xml, string[] sharedStrings, StyleTable styles, bool is1904)
+    internal WorksheetReader(string name, Utf8XmlReader xml, string[] sharedStrings, StyleTable styles, bool is1904, bool includeEmptyRows)
     {
+        _includeEmptyRows = includeEmptyRows;
         Name = name;
         _xml = xml;
         _sharedStrings = sharedStrings;
@@ -128,7 +131,10 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         return null;
     }
 
-    /// <summary>Advances to the next row that has at least one value.</summary>
+    /// <summary>
+    /// Advances to the next row that has at least one value, or, with
+    /// <see cref="XlsxReaderOptions.IncludeEmptyRows"/>, to the next row the file stores.
+    /// </summary>
     /// <returns>False at the end of the sheet.</returns>
     /// <exception cref="XlsxReadException">The worksheet part is damaged; the message names the part and row.</exception>
     public bool Read()
@@ -194,14 +200,18 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
                         }
 
                         _previousRow = number;
-                        if (token == XmlToken.Empty)
+                        if (token == XmlToken.Empty && !_includeEmptyRows)
                         {
                             continue;
                         }
 
                         _row.Reset(number, outlineLevel, hidden, collapsed, height);
-                        ReadCells();
-                        if (_row.Count > 0)
+                        if (token == XmlToken.Start)
+                        {
+                            ReadCells();
+                        }
+
+                        if (_includeEmptyRows || _row.Count > 0)
                         {
                             return true;
                         }

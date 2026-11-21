@@ -189,7 +189,7 @@ public sealed class XlsxReader : IDisposable
         }
 
         var sharedStrings = LoadSharedStrings();
-        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem);
+        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem, _options.IncludeEmptyRows);
     }
 
     /// <summary>

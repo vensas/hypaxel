@@ -395,4 +395,56 @@ public class ReaderLayoutTests
         disposed.Dispose();
         Assert.Throws<ObjectDisposedException>(() => disposed.GetTables(0));
     }
+
+    private static List<(int Number, int Count, int LastColumn, int Level, bool Hidden, bool Collapsed, double? Height)> RowsOf(byte[] bytes, bool includeEmptyRows)
+    {
+        using var reader = new XlsxReader(new MemoryStream(bytes), new XlsxReaderOptions { IncludeEmptyRows = includeEmptyRows });
+        using var rows = reader.OpenWorksheet(0);
+        var seen = new List<(int, int, int, int, bool, bool, double?)>();
+        foreach (var row in rows)
+        {
+            Assert.Equal(row.LastColumn, row.GetValues().Length);
+            seen.Add((row.Number, row.Count, row.LastColumn, row.OutlineLevel, row.Hidden, row.Collapsed, row.Height));
+        }
+
+        return seen;
+    }
+
+    [Fact]
+    public void ReturnsRowsWithoutValuesOnRequest()
+    {
+        var bytes = Write(w =>
+        {
+            var sheet = w.AddWorksheet("Data", new WorksheetOptions { RowOutlineLevels = 1 });
+            sheet.AddRow("first");
+            sheet.BeginRow(new RowOptions { Height = 40 });
+            sheet.EndRow();
+            sheet.BeginRow(5);
+            sheet.AddRow(5);
+            sheet.BeginRow(new RowOptions { OutlineLevel = 1, Hidden = true });
+            sheet.EndRow();
+        });
+
+        Assert.Equal(
+            [(1, 1, 1, 0, false, false, null), (5, 1, 1, 0, false, false, null)],
+            RowsOf(bytes, includeEmptyRows: false));
+        Assert.Equal(
+            [(1, 1, 1, 0, false, false, null), (2, 0, 0, 0, false, false, 40.0), (5, 1, 1, 0, false, false, null), (6, 0, 0, 1, true, false, null)],
+            RowsOf(bytes, includeEmptyRows: true));
+    }
+
+    [Fact]
+    public void ReturnsStoredEmptyRowsFromOtherProducers()
+    {
+        var bytes = SheetWithTables(
+            """<sheetData><row r="2" ht="30"/><row r="3" hidden="1" collapsed="1"><c r="A3" s="1"/></row><row></row><row><c><v>1</v></c></row></sheetData>""");
+
+        Assert.Equal([(5, 1, 1, 0, false, false, null)], RowsOf(bytes, includeEmptyRows: false));
+        Assert.Equal(
+            [(2, 0, 0, 0, false, false, 30.0), (3, 0, 0, 0, true, true, null), (4, 0, 0, 0, false, false, null), (5, 1, 1, 0, false, false, null)],
+            RowsOf(bytes, includeEmptyRows: true));
+
+        var empty = SheetWithTables("<sheetData/>");
+        Assert.Empty(RowsOf(empty, includeEmptyRows: true));
+    }
 }
