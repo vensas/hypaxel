@@ -193,6 +193,7 @@ java/      Maven project: src/, benchmarks/ (separate project)
 php/       Composer package: src/, tests/, benchmarks/, examples/
 benchmarks/ highlights.json and the format of each implementation's benchmarks/results/*.json
 scripts/   check_benchmarks.py: checks the benchmark JSON against the README tables
+testdata/  workbooks saved by Excel and LibreOffice, read by every reader's tests
 .github/   CI: one workflow per implementation, each triggered only by changes to its own code
 ```
 

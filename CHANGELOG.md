@@ -48,8 +48,15 @@ Python, Node.js, .NET, Java, Go and PHP).
   - Tables are returned as the writer's own table type, so a table that was read can be compared
     with, or passed to, `add_table`: name, range, column names, style, header row, filter buttons,
     banded rows and columns, first and last column highlight. Table parts are read only on
-    request; reading values does not touch them. A custom (non-built-in) style reads as "no
-    style", and a table written without a header row reads back without filter buttons.
+    request; reading values does not touch them. They are returned from top to bottom, then left
+    to right, whatever order the file lists them in (Excel lists them in reverse). A custom
+    (non-built-in) style reads as "no style", and a table written without a header row reads
+    back without filter buttons.
+  - The table type gains a totals-row flag (Rust `Table::totals_row`, .NET
+    `ExcelTable.HasTotalsRow`, Go `Table.TotalsRow`, Java `ExcelTable.totalsRow()`, Python
+    `totals_row`, Node.js `totalsRow`), set by the reader when the last row of the range is a
+    totals row. Totals rows cannot be written yet: `add_table` rejects a table that has the flag
+    set, because Excel repairs a totals row whose columns do not declare their functions.
   - Each row has its outline level (0–7), hidden and collapsed flags and its height (absent when
     the row stores none).
   - Rows that the file stores without any value (a spacer row with a height, an empty hidden
@@ -60,8 +67,8 @@ Python, Node.js, .NET, Java, Go and PHP).
     (`includeEmptyRows`) already return rows without values as empty lists; there the option
     adds their properties and returns such rows after the last value too, and `skip_empty` /
     `skipEmpty` still drops them.
-  - Each worksheet has its column widths (runs of columns, explicit and auto-fitted alike), a
-    lookup by column, `outline_summary_above` and the declared row outline levels. They precede
+  - Each worksheet has its column widths (runs of columns with their hidden flag, explicit and
+    auto-fitted alike), lookups by column for the width and the hidden flag, `outline_summary_above` and the declared row outline levels. They precede
     the rows in the file and are available before the first row is read.
   - Rust: `XlsxReader::tables(name)` / `tables_at(index)` → `Vec<Table>`; `Row::outline_level`,
     `is_hidden`, `is_collapsed`, `height`; `Rows::layout()` → `SheetLayout` (`column_widths`,
@@ -84,6 +91,10 @@ Python, Node.js, .NET, Java, Go and PHP).
     `hashCode` and `toString`); `Row.outlineLevel`, `hidden`, `collapsed`, `height`;
     `SheetReader.columnWidths`, `columnWidth`, `outlineSummaryAbove`, `rowOutlineLevels`;
     `ColumnWidth`.
+  - Checked against the same workbook saved by Excel for Mac and by LibreOffice Calc
+    (`testdata/reader/`), in every implementation.
+  - Go: `TableStyleMedium(2)` is now the zero `TableStyle`, so a table written with it compares
+    equal to the table read back.
   - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table and
     16,384 column ranges per sheet.
 - **Browser support for the Node.js package (WebAssembly).** The `hypaxel` npm package now runs in
