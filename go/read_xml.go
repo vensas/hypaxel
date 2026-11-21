@@ -651,7 +651,8 @@ func parseRadix(digits []byte, base int) (uint64, bool) {
 			return 0, false
 		}
 	}
-	n, err := strconv.ParseUint(string(digits), base, 32)
+	// 21 bits hold utf8.MaxRune, so the result always converts to a rune.
+	n, err := strconv.ParseUint(string(digits), base, 21)
 	return n, err == nil
 }
 
