@@ -24,6 +24,9 @@ use self::zip::{Directory, EntryReader};
 use crate::error::{Error, Result};
 use crate::table::Table;
 
+/// Most relationships to other parts that one part may have. Links to external targets are not
+/// kept and do not count.
+const MAX_RELATIONSHIPS: usize = 65_536;
 /// Most tables read from one worksheet.
 const MAX_TABLES: usize = 4096;
 /// Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes
@@ -408,6 +411,9 @@ impl<R: Read + Seek> Package<'_, R> {
                 continue;
             }
             if let (Some(id), Some(kind), Some(target)) = (attr(b"Id"), attr(b"Type"), attr(b"Target")) {
+                if rels.len() >= MAX_RELATIONSHIPS {
+                    return Err(Error::LimitExceeded(format!("{part} has more than {MAX_RELATIONSHIPS} relationships")));
+                }
                 rels.push(Relationship { id, kind, target: resolve(&base, &target) });
             }
         }

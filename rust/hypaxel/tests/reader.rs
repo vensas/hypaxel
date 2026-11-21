@@ -770,6 +770,19 @@ fn bounds_the_memory_of_a_sheets_tables() {
     let err = reader(&heavy).tables_at(0).unwrap_err();
     assert!(matches!(err, Error::LimitExceeded(_)), "{err}");
 
+    let external = r#"<Relationship Id="x" Type="t/hyperlink" Target="https://example.com" TargetMode="External"/>"#;
+    let rels = format!("<Relationships>{}{}</Relationships>", external.repeat(70_000), TABLE_REL);
+    let links = single_sheet(
+        "<worksheet><sheetData/></worksheet>",
+        "",
+        &[("xl/worksheets/_rels/sheet1.xml.rels", rels.as_str()), ("xl/tables/table1.xml", table)],
+    );
+    assert_eq!(reader(&links).tables_at(0).unwrap().len(), 1, "external links do not count");
+    let internal = r#"<Relationship Id="x" Type="t/other" Target="other.xml"/>"#;
+    let rels = format!("<Relationships>{}</Relationships>", internal.repeat(65_537));
+    let flood = single_sheet("<worksheet><sheetData/></worksheet>", "", &[("xl/worksheets/_rels/sheet1.xml.rels", rels.as_str())]);
+    assert!(matches!(reader(&flood).tables_at(0), Err(Error::LimitExceeded(_))));
+
     let signed = single_sheet(
         r#"<worksheet><sheetFormatPr outlineLevelRow="+2"/><cols><col min="+1" max="2" width="5"/></cols><sheetData><row r="1" outlineLevel="+3"><c><v>1</v></c></row></sheetData></worksheet>"#,
         "",
