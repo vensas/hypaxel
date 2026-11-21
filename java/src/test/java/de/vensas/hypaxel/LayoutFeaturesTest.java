@@ -502,4 +502,11 @@ class LayoutFeaturesTest {
         assertFalse(xml.contains("<cols>"));
         assertFalse(xml.contains("tableParts"));
     }
+
+    @Test
+    void describesTablesOutsideTheWorksheetWithoutThrowing() {
+        assertTrue(ExcelTable.builder(0, 1, 2, 2).build().toString().startsWith("(unnamed) R0C1:R2C2 "));
+        assertTrue(ExcelTable.builder(1, 1, 1_048_577, 16_385).name("T").build().toString().startsWith("T R1C1:R1048577C16385 "));
+        assertTrue(ExcelTable.builder(1, 1, 3, 2).name("T").build().toString().startsWith("T A1:B3 "));
+    }
 }

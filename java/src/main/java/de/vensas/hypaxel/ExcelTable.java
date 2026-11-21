@@ -157,15 +157,29 @@ public final class ExcelTable {
                 rowStripes, columnStripes, highlightFirstColumn, highlightLastColumn, totalsRow);
     }
 
-    /** Returns the name, range and options, e.g. {@code Orders A1:C10 [Product, Units] TableStyleMedium2}. */
+    /**
+     * Returns the name, range and options, e.g. {@code Orders A1:C10 [Product, Units] TableStyleMedium2}. A range
+     * outside the worksheet, which {@link Worksheet#addTable} would reject, is shown as {@code R0C1:R2C2}.
+     */
     @Override
     public String toString() {
-        return (name == null ? "(unnamed)" : name) + " " + CellReference.range(firstRow, firstColumn, lastRow, lastColumn)
+        return (name == null ? "(unnamed)" : name) + " " + rangeText()
                 + " " + columns + " " + style
                 + " headerRow=" + headerRow + " autoFilter=" + autoFilter
                 + " rowStripes=" + rowStripes + " columnStripes=" + columnStripes
                 + " highlightFirstColumn=" + highlightFirstColumn + " highlightLastColumn=" + highlightLastColumn
                 + " totalsRow=" + totalsRow;
+    }
+
+    private String rangeText() {
+        if (inSheet(firstRow, firstColumn) && inSheet(lastRow, lastColumn)) {
+            return CellReference.range(firstRow, firstColumn, lastRow, lastColumn);
+        }
+        return "R" + firstRow + "C" + firstColumn + ":R" + lastRow + "C" + lastColumn;
+    }
+
+    private static boolean inSheet(int row, int column) {
+        return row >= 1 && row <= XlsxWriter.MAX_ROWS && column >= 1 && column <= XlsxWriter.MAX_COLUMNS;
     }
 
     /** Builder for {@link ExcelTable}. */
