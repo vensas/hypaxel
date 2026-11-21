@@ -67,9 +67,10 @@ final class TableParser {
                 if (range == null) {
                     throw xml.malformed("the table has no valid cell range");
                 }
-                name = xml.attribute(DISPLAY_NAME);
+                // Excel escapes table names like other text: T_x0041_ is stored as T_x005f_x0041_.
+                name = xml.attribute(DISPLAY_NAME, true);
                 if (name == null) {
-                    name = xml.attribute(NAME);
+                    name = xml.attribute(NAME, true);
                 }
                 String headerRows = xml.attribute(HEADER_ROW_COUNT);
                 headerRow = headerRows == null || !headerRows.strip().equals("0");

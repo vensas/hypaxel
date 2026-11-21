@@ -40,6 +40,27 @@ class ReaderLayoutTest {
     }
 
     @Test
+    void tableNamesThatLookLikeExcelEscapesRoundTrip() throws IOException {
+        ExcelTable table = ExcelTable.builder(1, 1, 2, 1).name("T_x0041_").columns("a_x0042_").build();
+        byte[] xlsx = Xlsx.write(writer -> {
+            Worksheet s = writer.addWorksheet("S");
+            s.addRow("a_x0042_");
+            s.addRow(1);
+            s.addTable(table);
+        });
+        try (XlsxReader reader = XlsxReader.open(xlsx)) {
+            assertEquals(List.of(table), reader.tables(0));
+        }
+
+        // As Excel saves a table it was told to name T_x0041_: lower-case hex digits.
+        byte[] excel = withTable("<table " + NS + " name=\"T_x005f_x0041_\" displayName=\"T_x005f_x0041_\" ref=\"A1:A2\">"
+                + "<tableColumns><tableColumn name=\"a\"/></tableColumns></table>");
+        try (XlsxReader reader = XlsxReader.open(excel)) {
+            assertEquals("T_x0041_", reader.tables(0).get(0).name());
+        }
+    }
+
+    @Test
     void readsBackTablesWrittenByTheWriter() throws IOException {
         ExcelTable full = ExcelTable.builder(1, 1, 3, 2).name("Orders").columns("Product", "Units\nsold")
                 .style(TableStyle.dark(3)).autoFilter(false).rowStripes(false).columnStripes(true)
