@@ -778,6 +778,28 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void TableNamesThatLookLikeExcelEscapesRoundTrip()
+    {
+        var table = new ExcelTable(1, 1, 2, 1) { Name = "T_x0041_", Columns = ["a_x0042_"] };
+        var bytes = Write(w =>
+        {
+            var sheet = w.AddWorksheet("S");
+            sheet.AddRow("a_x0042_");
+            sheet.AddRow(1);
+            sheet.AddTable(table);
+        });
+        using (var reader = Reader(bytes))
+        {
+            Assert.Equal(table, Assert.Single(reader.GetTables(0)));
+        }
+
+        // As Excel saves a table it was told to name `T_x0041_`: lower-case hex digits.
+        var excel = $"""<table xmlns="{Main}" id="1" name="T_x005f_x0041_" displayName="T_x005f_x0041_" ref="A1:A2"><tableColumns count="1"><tableColumn id="1" name="a"/></tableColumns></table>""";
+        using var fromExcel = Reader(SheetWithTables("<sheetData/>", excel));
+        Assert.Equal("T_x0041_", Assert.Single(fromExcel.GetTables(0)).Name);
+    }
+
+    [Fact]
     public void ComparesTablesByTheirColumnNames()
     {
         var a = new ExcelTable(1, 1, 2, 2) { Name = "T", Columns = ["x", "y"] };

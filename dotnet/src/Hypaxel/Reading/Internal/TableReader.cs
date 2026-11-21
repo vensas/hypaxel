@@ -50,7 +50,8 @@ internal static class TableReader
 
                 table = new ExcelTable(r1, c1, r2, c2)
                 {
-                    Name = Text(attributes, "displayName"u8) ?? Text(attributes, "name"u8),
+                    // Excel escapes table names like other text: `T_x0041_` is stored as `T_x005f_x0041_`.
+                    Name = Text(buffer, attributes, "displayName"u8) ?? Text(buffer, attributes, "name"u8),
                     ShowHeaderRow = !XmlAttributes.TryGet(attributes, "headerRowCount"u8, out var header) || !Trim(header).SequenceEqual("0"u8),
                     HasTotalsRow = XmlAttributes.TryGet(attributes, "totalsRowCount"u8, out var totals)
                         && uint.TryParse(Trim(totals), NumberStyles.None, CultureInfo.InvariantCulture, out var totalsRows) && totalsRows > 0,
@@ -213,8 +214,16 @@ internal static class TableReader
     private static bool Flag(ReadOnlySpan<byte> attributes, ReadOnlySpan<byte> name) =>
         XmlAttributes.TryGet(attributes, name, out var raw) && IsTrue(raw);
 
-    private static string? Text(ReadOnlySpan<byte> attributes, ReadOnlySpan<byte> name) =>
-        XmlAttributes.TryGet(attributes, name, out var raw) ? XmlText.DecodeAttribute(raw) : null;
+    private static string? Text(CharBuffer buffer, ReadOnlySpan<byte> attributes, ReadOnlySpan<byte> name)
+    {
+        if (!XmlAttributes.TryGet(attributes, name, out var raw))
+        {
+            return null;
+        }
+
+        buffer.Clear();
+        return XmlText.Decode(buffer, raw, entities: true, excelEscapes: true) is null ? buffer.Span.ToString() : null;
+    }
 
     private static ReadOnlySpan<byte> Trim(ReadOnlySpan<byte> raw) => raw.Trim(" \t\r\n\f"u8);
 }
