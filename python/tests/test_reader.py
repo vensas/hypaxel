@@ -228,18 +228,21 @@ def test_reads_back_tables_row_properties_and_layout():
         assert wb.tables() == wb.tables("data") == [
             {"name": "Orders", "first_row": 1, "first_col": 1, "last_row": 4, "last_col": 3,
              "columns": ["Product", "Units & more", "Line\nbreak"], "style": "TableStyleDark3", "header_row": True,
-             "autofilter": True, "row_stripes": False, "column_stripes": True, "first_column": True, "last_column": True},
+             "autofilter": True, "row_stripes": False, "column_stripes": True, "first_column": True, "last_column": True,
+             "totals_row": False},
             {"name": "Table2", "first_row": 7, "first_col": 1, "last_row": 9, "last_col": 2,
              "columns": ["Column1", "Column2"], "style": None, "header_row": False,
-             "autofilter": False, "row_stripes": True, "column_stripes": False, "first_column": False, "last_column": False},
+             "autofilter": False, "row_stripes": True, "column_stripes": False, "first_column": False, "last_column": False,
+             "totals_row": False},
         ]
         assert wb.tables(1) == []
         with pytest.raises(XlsxError, match="no worksheet"):
             wb.tables("Missing")
 
         rows = wb.rows("Data")
-        assert rows.column_widths == [(1, 1, 12.5), (2, 2, 30.0)]
+        assert rows.column_widths == [(1, 1, 12.5, False), (2, 2, 30.0, False)]
         assert (rows.column_width(2), rows.column_width(3)) == (30.0, None)
+        assert rows.column_hidden(2) is False and rows.column_hidden(3) is False
         assert rows.outline_summary_above is True and rows.row_outline_levels == 2
         assert (rows.row_number, rows.outline_level, rows.hidden, rows.collapsed, rows.height) == (0, 0, False, False, None)
         seen = [(rows.row_number, len(row), rows.outline_level, rows.hidden, rows.collapsed, rows.height) for row in rows]
@@ -299,3 +302,49 @@ def test_reports_rows_without_values_on_request():
     assert hypaxel.read_rows(data, include_empty_rows=True)[-1] == []
     assert hypaxel.read_records(data, header_row=5, include_empty_rows=True) == []
     assert len(hypaxel.read_dataframe(data, header=False, include_empty_rows=True)) == 2
+
+
+TESTDATA = os.path.join(os.path.dirname(__file__), "..", "..", "testdata", "reader")
+
+
+@pytest.mark.parametrize("producer", ["excel", "libreoffice"])
+def test_reads_tables_rows_and_layout_saved_by_other_applications(producer):
+    styled = producer == "excel"
+    # LibreOffice drops table styles and stores a height on every row.
+    default_height = None if styled else 15.0
+    with hypaxel.open_workbook(os.path.join(TESTDATA, f"{producer}.xlsx"), include_empty_rows=True) as wb:
+        assert wb.sheet_names == ["Orders", "Plain"]
+        assert wb.tables("Orders") == [
+            {"name": "Orders", "first_row": 1, "first_col": 1, "last_row": 4, "last_col": 3,
+             "columns": ["Product", "Units & more", "Price"], "style": "TableStyleDark3" if styled else None,
+             "header_row": True, "autofilter": True, "row_stripes": False, "column_stripes": styled,
+             "first_column": styled, "last_column": styled, "totals_row": False},
+            {"name": "Table2", "first_row": 7, "first_col": 1, "last_row": 8, "last_col": 2,
+             "columns": ["Column1", "Column2"], "style": None, "header_row": False, "autofilter": False,
+             "row_stripes": styled, "column_stripes": False, "first_column": False, "last_column": False, "totals_row": False},
+        ]
+        assert wb.tables("Plain") == []
+
+        rows = wb.rows("Orders", skip_empty=False)
+        assert rows.column_widths == [(1, 1, 14.0, False), (2, 2, 22.5, False), (4, 4, 6.0, True)]
+        assert rows.column_hidden(4) is True
+        assert rows.outline_summary_above is True and rows.row_outline_levels == 2
+        seen = [(rows.row_number, len(row), rows.outline_level, rows.hidden, rows.collapsed, rows.height) for row in rows]
+        assert seen == [
+            (1, 3, 0, False, False, default_height),
+            (2, 3, 1, False, styled, default_height),
+            (3, 3, 2, True, False, default_height),
+            (4, 3, 1, False, True, 30.0),
+            (5, 0, 0, False, False, None),
+            (6, 0, 0, False, False, 45.0),
+            (7, 2, 0, False, False, default_height),
+            (8, 2, 0, False, False, default_height),
+        ]
+
+
+def test_tables_with_a_totals_row_cannot_be_written():
+    wb = Writer()
+    ws = wb.add_worksheet("Data")
+    ws.write_rows([["a"], [1], [2]])
+    with pytest.raises((XlsxError, ValueError), match="totals row"):
+        ws.add_table(1, 1, 3, 1, columns=["a"], totals_row=True)

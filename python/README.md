@@ -89,15 +89,18 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
 - **Tables:** `wb.tables("Orders")` returns the sheet's Excel tables, one dict per table with the
   keys that `add_table` takes (`first_row`, `first_col`, `last_row`, `last_col`, `name`, `columns`,
   `style`, `header_row`, `autofilter`, `row_stripes`, `column_stripes`, `first_column`,
-  `last_column`). Tables are stored apart from the rows and are read only when you ask. A custom
-  (non-built-in) table style reads as `None`.
+  `last_column`, `totals_row`), from top to bottom, then left to right. Tables are stored apart
+  from the rows and are read only when you ask. A custom (non-built-in) table style reads as
+  `None`. `totals_row` tells whether the last row of the range is a totals row; such a table can
+  be read but not written.
 - **Rows and columns:** the iterator returned by `wb.rows()` describes the row it returned last:
   `row_number`, `outline_level`, `hidden`, `collapsed` and `height` (`None` when the row stores no
   height). Rows that the file stores without values (a spacer row with a height, an empty hidden
   row) come back as `[]` with default properties; open the workbook with
   `include_empty_rows=True` to get their properties as well (such rows after the last value are
   then returned too, and `skip_empty=True` still drops them). Before the first row it already has the sheet's `column_widths` (a list of
-  `(first_col, last_col, width)`, explicit and auto-fitted alike), `column_width(col)`,
+  `(first_col, last_col, width, hidden)`, explicit and auto-fitted alike), `column_width(col)`,
+  `column_hidden(col)`,
   `outline_summary_above` and `row_outline_levels`.
 
   ```python
@@ -215,7 +218,7 @@ def export():
 | `Reader.sheet_names`, `Reader.sheets`, `Reader.date_1904`, `Reader.rows(sheet=0, *, skip_empty=False)`, `Reader.close()` | `rows` iterates lists; several iterators can be open at once |
 | `Reader.tables(sheet=0)` | the sheet's Excel tables as dicts with `add_table`'s keys |
 | `RowIterator.row_number`, `outline_level`, `hidden`, `collapsed`, `height` | properties of the row returned last |
-| `RowIterator.column_widths`, `column_width(col)`, `outline_summary_above`, `row_outline_levels` | sheet layout, available before the first row |
+| `RowIterator.column_widths`, `column_width(col)`, `column_hidden(col)`, `outline_summary_above`, `row_outline_levels` | sheet layout, available before the first row |
 | `iter_rows` / `read_rows`, `iter_records` / `read_records`, `read_dataframe` | one-call readers; see [Reading](#reading) |
 
 ### Tables, row grouping and auto-fit

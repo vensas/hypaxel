@@ -254,6 +254,7 @@ impl Reader {
                 d.set_item("column_stripes", t.column_stripes)?;
                 d.set_item("first_column", t.first_column_highlight)?;
                 d.set_item("last_column", t.last_column_highlight)?;
+                d.set_item("totals_row", t.totals_row)?;
                 Ok(d)
             })
             .collect()
@@ -471,11 +472,16 @@ impl RowIterator {
         self.current.height
     }
 
-    /// The column widths the sheet defines as ``(first_col, last_col, width)`` tuples (1-based,
-    /// inclusive). Available before the first row is read.
+    /// The column widths the sheet defines as ``(first_col, last_col, width, hidden)`` tuples
+    /// (1-based, inclusive). Available before the first row is read.
     #[getter]
-    fn column_widths(&mut self) -> PyResult<Vec<(u32, u32, f64)>> {
-        Ok(self.layout()?.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width())).collect())
+    fn column_widths(&mut self) -> PyResult<Vec<(u32, u32, f64, bool)>> {
+        Ok(self.layout()?.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect())
+    }
+
+    /// True if a 1-based column is hidden.
+    fn column_hidden(&mut self, column: u32) -> PyResult<bool> {
+        Ok(self.layout()?.is_column_hidden(column))
     }
 
     /// The width of a 1-based column, or None if the sheet leaves it at the default.
