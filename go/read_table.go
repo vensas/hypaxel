@@ -3,6 +3,7 @@ package hypaxel
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -16,6 +17,8 @@ type ColumnWidth struct {
 	FirstColumn, LastColumn int
 	// Width is in characters of the default font, as in [SheetOptions].
 	Width float64
+	// Hidden reports that the columns are hidden.
+	Hidden bool
 }
 
 // SheetLayout holds the worksheet settings stored ahead of the rows. It is returned by
@@ -41,6 +44,16 @@ func (l *SheetLayout) ColumnWidth(column int) (float64, bool) {
 	return 0, false
 }
 
+// ColumnHidden reports whether a 1-based column is hidden.
+func (l *SheetLayout) ColumnHidden(column int) bool {
+	for _, c := range l.ColumnWidths {
+		if column >= c.FirstColumn && column <= c.LastColumn {
+			return c.Hidden
+		}
+	}
+	return false
+}
+
 // Tables returns the Excel tables of the sheet with this name, matched exactly and then
 // ignoring case. See [Reader.TablesAt].
 func (r *Reader) Tables(name string) ([]Table, error) {
@@ -55,8 +68,9 @@ func (r *Reader) Tables(name string) ([]Table, error) {
 // the [Table] values that [Sheet.AddTable] accepts.
 //
 // Tables live in their own parts, which are read on each call; reading rows does not touch
-// them. TableStyleMedium2 is returned as the zero TableStyle, and a style that is not one of
-// Excel's built-in styles as [TableStyleNone].
+// them. They are returned from top to bottom, then left to right, whatever order the file lists
+// them in. A style that is not one of Excel's built-in styles is returned as [TableStyleNone],
+// and TotalsRow is set for a table whose last row is a totals row.
 func (r *Reader) TablesAt(index int) ([]Table, error) {
 	if index < 0 || index >= len(r.sheets) {
 		return nil, fmt.Errorf("%w: no sheet at index %d", ErrSheetNotFound, index)
@@ -83,6 +97,10 @@ func (r *Reader) TablesAt(index int) ([]Table, error) {
 		}
 		tables = append(tables, t)
 	}
+	sort.SliceStable(tables, func(i, j int) bool {
+		a, b := &tables[i], &tables[j]
+		return a.FirstRow < b.FirstRow || a.FirstRow == b.FirstRow && a.FirstColumn < b.FirstColumn
+	})
 	return tables, nil
 }
 
@@ -124,6 +142,10 @@ func (r *Reader) readTable(part string) (Table, error) {
 			}
 			if count, ok := attr(x.attrs, "headerRowCount"); ok {
 				t.NoHeaderRow = string(trimSpace(count)) == "0"
+			}
+			if count, ok := attr(x.attrs, "totalsRowCount"); ok {
+				n, ok := parseUint32(count)
+				t.TotalsRow = ok && n > 0
 			}
 			descend = true
 		case name == "autoFilter":
@@ -191,10 +213,7 @@ func parseTableStyle(name string) TableStyle {
 		if rest[:digits] != f.name || n < 1 || int(n) > f.count {
 			continue
 		}
-		if family == tableMedium && n == 2 {
-			return 0
-		}
-		return TableStyle(family<<8 | int(n))
+		return newTableStyle(family, int(n))
 	}
 	return TableStyleNone
 }

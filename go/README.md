@@ -364,16 +364,20 @@ return rows.Err()
 ```
 
 - **Tables** live in parts of their own, which are read on each call to `Tables`; reading rows
-  never touches them. A table comes back as the `Table` that `AddTable` takes: `TableStyleMedium2`
-  as the zero `TableStyle`, a custom (not built-in) style as `TableStyleNone`, generated names such
-  as `Table1` and `Column1` filled in, and `NoFilterButtons` set for a table without a header row.
+  never touches them. They are returned from top to bottom, then left to right, whatever order
+  the file lists them in. A table comes back as the `Table` that `AddTable` takes, so it compares
+  equal to the one that was written: a custom (not built-in) style reads as `TableStyleNone`,
+  generated names such as `Table1` and `Column1` are filled in, and `NoFilterButtons` is set for a
+  table without a header row. `TotalsRow` is set when the last row of the range is a totals row;
+  the writer cannot write totals rows and `AddTable` rejects such a table.
 - **Row properties** are those of the rows that `Next` returns; rows without values are skipped
   by default. Open the reader with `WithEmptyRows(true)` to also get the rows that the file stores
   without any value, such as a spacer row with a height or an empty hidden row: they have
   `Len() == 0` and carry their index and properties. Rows that the file does not store are never
   returned. `Height` is the stored height, whether set explicitly or by Excel.
 - **Layout** precedes the rows in the file, so `Layout` reads nothing extra. `ColumnWidths` holds
-  explicit and auto-fitted widths alike; columns that are not listed have the default width.
+  explicit and auto-fitted widths alike, each with its `Hidden` flag; columns that are not listed
+  have the default width, and `ColumnHidden(column)` tells whether a column is hidden.
 
 **`Reader`**
 
@@ -382,8 +386,8 @@ return rows.Err()
 | `OpenReader(path, opts...)`, `NewReader(src io.ReaderAt, size, opts...)` | Open a workbook; `Close` closes a file opened by path |
 | `Sheets()`, `SheetNames()` | Sheets in workbook order with `Name`, `Visibility` (`SheetVisible`, `SheetHidden`, `SheetVeryHidden`) and `Kind` (`SheetKindWorksheet`, `SheetKindChartsheet`, `SheetKindOther`) |
 | `Rows(name)`, `RowsAt(index)` | Stream a sheet, by name (exact, then case-insensitive) or 0-based index |
-| `Tables(name)`, `TablesAt(index)` | The Excel tables of a sheet as `[]Table` |
-| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths`, `ColumnWidth(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
+| `Tables(name)`, `TablesAt(index)` | The Excel tables of a sheet as `[]Table`, ordered by position |
+| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths` (`FirstColumn`, `LastColumn`, `Width`, `Hidden`), `ColumnWidth(column)`, `ColumnHidden(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
 | `Row.OutlineLevel()`, `Hidden()`, `Collapsed()`, `Height()` | Properties of the current row |
 | `Date1904()` | Whether the workbook uses the 1904 date system |
 | `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |

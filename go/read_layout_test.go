@@ -30,7 +30,7 @@ func TestReadBackTablesRowPropertiesAndLayout(t *testing.T) {
 
 	data := writeBook(t, func(w *Writer) {
 		s, err := w.AddSheetOptions("Orders", SheetOptions{
-			Columns:          []Column{{Width: 12.5}, {}, {Width: 30}},
+			Columns:          []Column{{Width: 12.5}, {}, {Width: 30}, {Width: 5, Hidden: true}},
 			RowOutlineLevels: 2, OutlineSummaryAbove: true,
 		})
 		noErr(t, err)
@@ -74,9 +74,12 @@ func TestReadBackTablesRowPropertiesAndLayout(t *testing.T) {
 	rows, err := r.Rows("Orders")
 	noErr(t, err)
 	layout := mustLayout(t, rows)
-	want := SheetLayout{ColumnWidths: []ColumnWidth{{1, 1, 12.5}, {3, 3, 30}}, OutlineSummaryAbove: true, RowOutlineLevels: 2}
+	want := SheetLayout{ColumnWidths: []ColumnWidth{{1, 1, 12.5, false}, {3, 3, 30, false}, {4, 4, 5, true}}, OutlineSummaryAbove: true, RowOutlineLevels: 2}
 	if !reflect.DeepEqual(*layout, want) {
 		t.Errorf("layout: got %+v, want %+v", *layout, want)
+	}
+	if layout.ColumnHidden(3) || !layout.ColumnHidden(4) || layout.ColumnHidden(5) {
+		t.Errorf("ColumnHidden: got %v %v %v", layout.ColumnHidden(3), layout.ColumnHidden(4), layout.ColumnHidden(5))
 	}
 	if w, ok := layout.ColumnWidth(3); !ok || w != 30 {
 		t.Errorf("ColumnWidth(3) = %v, %v", w, ok)
@@ -139,7 +142,7 @@ func TestReadLayoutFromOtherProducers(t *testing.T) {
 		`<x:sheetFormatPr defaultRowHeight="15" outlineLevelRow="9"/>` +
 		`<x:cols><x:col min="1" max="16384" width="8.5" style="1"/><x:col min="2" max="3" width="20" customWidth="1"/>` +
 		`<x:col min="4" max="4" hidden="1"/><x:col min="0" max="2" width="1"/><x:col min="5" max="4" width="1"/>` +
-		`<x:col min="6" max="99999" width=" 7.25 "/><x:col min="7" max="7" width="-1"/><x:col min="8" max="8" width="NaN"/></x:cols>` +
+		`<x:col min="6" max="99999" width=" 7.25 " hidden="true"/><x:col min="7" max="7" width="-1"/><x:col min="8" max="8" width="NaN"/></x:cols>` +
 		`<x:sheetData>` +
 		`<x:row r="2" spans="1:1" ht="18.75" outlineLevel="3" hidden="true" collapsed="1"><x:c r="A2"><x:v>1</x:v></x:c></x:row>` +
 		`<x:row r="3" ht="x" outlineLevel="12" hidden="0" collapsed="false" customHeight="1"><x:c><x:v>2</x:v></x:c></x:row>` +
@@ -153,7 +156,7 @@ func TestReadLayoutFromOtherProducers(t *testing.T) {
 	r := openBytes(t, sheetWithTable(t, sheet, table))
 
 	want := []Table{{FirstRow: 2, FirstColumn: 2, LastRow: 9, LastColumn: 4, Name: "Shown",
-		Columns: []string{"Line\nbreak", "A & B", ""}, Style: TableStyleNone, ColumnStripes: true, HighlightFirstColumn: true}}
+		Columns: []string{"Line\nbreak", "A & B", ""}, Style: TableStyleNone, ColumnStripes: true, HighlightFirstColumn: true, TotalsRow: true}}
 	if got := mustTables(t, r, "S"); !reflect.DeepEqual(got, want) {
 		t.Errorf("tables:\n got %+v\nwant %+v", got, want)
 	}
@@ -161,7 +164,7 @@ func TestReadLayoutFromOtherProducers(t *testing.T) {
 	rows, err := r.Rows("S")
 	noErr(t, err)
 	layout := mustLayout(t, rows)
-	wantLayout := SheetLayout{ColumnWidths: []ColumnWidth{{1, 16384, 8.5}, {2, 3, 20}, {6, 16384, 7.25}}, OutlineSummaryAbove: true, RowOutlineLevels: 7}
+	wantLayout := SheetLayout{ColumnWidths: []ColumnWidth{{1, 16384, 8.5, false}, {2, 3, 20, false}, {6, 16384, 7.25, true}}, OutlineSummaryAbove: true, RowOutlineLevels: 7}
 	if !reflect.DeepEqual(*layout, wantLayout) {
 		t.Errorf("layout: got %+v, want %+v", *layout, wantLayout)
 	}
@@ -339,5 +342,142 @@ func TestReadReturnsRowsWithoutValuesOnRequest(t *testing.T) {
 	}
 	if got := readRowProps(t, other, "S"); !reflect.DeepEqual(got, want[2:3]) {
 		t.Fatalf("other producer, default: %+v", got)
+	}
+}
+
+func TestTableStyleMedium2IsTheZeroValue(t *testing.T) {
+	if TableStyleMedium(2) != TableStyle(0) {
+		t.Fatalf("TableStyleMedium(2) = %d, want 0", TableStyleMedium(2))
+	}
+	if got := TableStyleMedium(2).String(); got != "TableStyleMedium2" {
+		t.Errorf("String() = %q", got)
+	}
+	written := Table{FirstRow: 1, FirstColumn: 1, LastRow: 2, LastColumn: 1, Name: "T", Columns: []string{"a"}, Style: TableStyleMedium(2)}
+	data := writeBook(t, func(w *Writer) {
+		s := mustSheet(t, w, "S")
+		noErr(t, s.WriteRow("a"))
+		noErr(t, s.WriteRow(1))
+		noErr(t, s.AddTable(written))
+	})
+	if got := mustTables(t, openBytes(t, data), "S"); !reflect.DeepEqual(got, []Table{written}) {
+		t.Errorf("got %+v, want %+v", got, written)
+	}
+}
+
+func TestReadTablesInPositionOrder(t *testing.T) {
+	const ns = ` xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"`
+	rel := func(id, target string) string {
+		return `<Relationship Id="` + id + `" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/` + target + `"/>`
+	}
+	data := singleSheet(t, `<worksheet`+ns+`><sheetData/></worksheet>`, "",
+		"xl/worksheets/_rels/sheet1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`+
+			rel("rId3", "c.xml")+rel("rId2", "b.xml")+rel("rId1", "a.xml")+`</Relationships>`,
+		"xl/tables/a.xml", `<table`+ns+` name="A" ref="A1:B2"/>`,
+		"xl/tables/b.xml", `<table`+ns+` name="B" ref="D1:E2"/>`,
+		"xl/tables/c.xml", `<table`+ns+` name="C" ref="A5:B6"/>`)
+	var names []string
+	for _, table := range mustTables(t, openBytes(t, data), "S") {
+		names = append(names, table.Name)
+	}
+	if got := strings.Join(names, ""); got != "ABC" {
+		t.Errorf("order = %s, want ABC", got)
+	}
+}
+
+type savedRow struct {
+	index, cells, level int
+	hidden, collapsed   bool
+	height              float64
+	hasHeight           bool
+}
+
+// readSavedWorkbook reads a workbook from testdata/reader at the repository root: the tables
+// and layout of its Orders sheet and the properties of every stored row.
+func readSavedWorkbook(t *testing.T, file string) ([]Table, SheetLayout, []savedRow) {
+	t.Helper()
+	r, err := OpenReader("../testdata/reader/"+file, WithEmptyRows(true))
+	noErr(t, err)
+	defer r.Close()
+	if got := r.SheetNames(); !reflect.DeepEqual(got, []string{"Orders", "Plain"}) {
+		t.Fatalf("sheets = %v", got)
+	}
+	if got := mustTables(t, r, "Plain"); len(got) != 0 {
+		t.Errorf("Plain: unexpected tables %+v", got)
+	}
+	tables := mustTables(t, r, "Orders")
+	rows, err := r.Rows("Orders")
+	noErr(t, err)
+	defer rows.Close()
+	layout := *mustLayout(t, rows)
+	var seen []savedRow
+	for rows.Next() {
+		row := rows.Row()
+		height, hasHeight := row.Height()
+		seen = append(seen, savedRow{row.Index(), row.Len(), row.OutlineLevel(), row.Hidden(), row.Collapsed(), height, hasHeight})
+	}
+	noErr(t, rows.Err())
+	return tables, layout, seen
+}
+
+var savedWorkbookLayout = SheetLayout{
+	ColumnWidths:        []ColumnWidth{{1, 1, 14, false}, {2, 2, 22.5, false}, {4, 4, 6, true}},
+	OutlineSummaryAbove: true,
+	RowOutlineLevels:    2,
+}
+
+func TestReadWorkbookSavedByExcel(t *testing.T) {
+	tables, layout, rows := readSavedWorkbook(t, "excel.xlsx")
+	wantTables := []Table{
+		{FirstRow: 1, FirstColumn: 1, LastRow: 4, LastColumn: 3, Name: "Orders", Columns: []string{"Product", "Units & more", "Price"},
+			Style: TableStyleDark(3), NoRowStripes: true, ColumnStripes: true, HighlightFirstColumn: true, HighlightLastColumn: true},
+		{FirstRow: 7, FirstColumn: 1, LastRow: 8, LastColumn: 2, Name: "Table2", Columns: []string{"Column1", "Column2"},
+			Style: TableStyleNone, NoHeaderRow: true, NoFilterButtons: true},
+	}
+	if !reflect.DeepEqual(tables, wantTables) {
+		t.Errorf("tables:\n got %+v\nwant %+v", tables, wantTables)
+	}
+	if !reflect.DeepEqual(layout, savedWorkbookLayout) {
+		t.Errorf("layout: got %+v, want %+v", layout, savedWorkbookLayout)
+	}
+	wantRows := []savedRow{
+		{1, 3, 0, false, false, 0, false},
+		{2, 3, 1, false, true, 0, false},
+		{3, 3, 2, true, false, 0, false},
+		{4, 3, 1, false, true, 30, true},
+		{6, 0, 0, false, false, 45, true},
+		{7, 2, 0, false, false, 0, false},
+		{8, 2, 0, false, false, 0, false},
+	}
+	if !reflect.DeepEqual(rows, wantRows) {
+		t.Errorf("rows:\n got %+v\nwant %+v", rows, wantRows)
+	}
+}
+
+// LibreOffice drops table styles and stores a height on every row.
+func TestReadWorkbookSavedByLibreOffice(t *testing.T) {
+	tables, layout, rows := readSavedWorkbook(t, "libreoffice.xlsx")
+	wantTables := []Table{
+		{FirstRow: 1, FirstColumn: 1, LastRow: 4, LastColumn: 3, Name: "Orders", Columns: []string{"Product", "Units & more", "Price"},
+			Style: TableStyleNone, NoRowStripes: true},
+		{FirstRow: 7, FirstColumn: 1, LastRow: 8, LastColumn: 2, Name: "Table2", Columns: []string{"Column1", "Column2"},
+			Style: TableStyleNone, NoHeaderRow: true, NoFilterButtons: true, NoRowStripes: true},
+	}
+	if !reflect.DeepEqual(tables, wantTables) {
+		t.Errorf("tables:\n got %+v\nwant %+v", tables, wantTables)
+	}
+	if !reflect.DeepEqual(layout, savedWorkbookLayout) {
+		t.Errorf("layout: got %+v, want %+v", layout, savedWorkbookLayout)
+	}
+	wantRows := []savedRow{
+		{1, 3, 0, false, false, 15, true},
+		{2, 3, 1, false, false, 15, true},
+		{3, 3, 2, true, false, 15, true},
+		{4, 3, 1, false, true, 30, true},
+		{6, 0, 0, false, false, 45, true},
+		{7, 2, 0, false, false, 15, true},
+		{8, 2, 0, false, false, 15, true},
+	}
+	if !reflect.DeepEqual(rows, wantRows) {
+		t.Errorf("rows:\n got %+v\nwant %+v", rows, wantRows)
 	}
 }

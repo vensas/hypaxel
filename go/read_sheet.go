@@ -304,7 +304,7 @@ func (r *Rows) findSheetData() error {
 func (r *Rows) readColumn() error {
 	var first, last uint32
 	var width float64
-	var hasFirst, hasLast, hasWidth bool
+	var hasFirst, hasLast, hasWidth, hidden bool
 	for it := (attrIter{r.x.attrs}); ; {
 		name, value, ok := it.next()
 		if !ok {
@@ -317,6 +317,8 @@ func (r *Rows) readColumn() error {
 			last, hasLast = parseUint32(value)
 		case "width":
 			width, hasWidth = parseMeasure(value)
+		case "hidden":
+			hidden = isTrue(value)
 		}
 	}
 	if !hasFirst || !hasLast || !hasWidth {
@@ -329,7 +331,7 @@ func (r *Rows) readColumn() error {
 	if len(r.layout.ColumnWidths) >= MaxColumns {
 		return r.x.malformed("the sheet defines more than 16384 column ranges")
 	}
-	r.layout.ColumnWidths = append(r.layout.ColumnWidths, ColumnWidth{FirstColumn: int(first), LastColumn: int(last), Width: width})
+	r.layout.ColumnWidths = append(r.layout.ColumnWidths, ColumnWidth{FirstColumn: int(first), LastColumn: int(last), Width: width, Hidden: hidden})
 	return nil
 }
 
