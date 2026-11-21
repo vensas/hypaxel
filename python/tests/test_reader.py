@@ -207,3 +207,67 @@ def test_1904_dates():
     with hypaxel.open_workbook(data) as wb:
         assert wb.date_1904
         assert list(wb.rows()) == [[dt.datetime(2024, 2, 29)]]
+
+
+def test_reads_back_tables_row_properties_and_layout():
+    def fill(wb):
+        ws = wb.add_worksheet("Data", column_widths=[12.5, 30], row_outline_levels=2, outline_summary_above=True)
+        ws.write_row(["Product", "Units & more", "Line\nbreak"])
+        ws.write_row(["Widget", 3], outline_level=1)
+        ws.write_row(["Gadget", 5], outline_level=2, hidden=True)
+        ws.write_row(["Gizmo"], outline_level=1, collapsed=True, height=20.5)
+        ws.skip_rows(2)
+        ws.write_rows([[1, 2], [3, 4], [5, 6]])
+        ws.add_table(1, 1, 4, 3, columns=["Product", "Units & more", "Line\nbreak"], name="Orders", style="TableStyleDark3",
+                     row_stripes=False, column_stripes=True, first_column=True, last_column=True)
+        ws.add_table(7, 1, 9, 2, header_row=False, style=None)
+        wb.add_worksheet("Plain").write_row(["x"])
+
+    data = build(fill)
+    with hypaxel.open_workbook(data) as wb:
+        assert wb.tables() == wb.tables("data") == [
+            {"name": "Orders", "first_row": 1, "first_col": 1, "last_row": 4, "last_col": 3,
+             "columns": ["Product", "Units & more", "Line\nbreak"], "style": "TableStyleDark3", "header_row": True,
+             "autofilter": True, "row_stripes": False, "column_stripes": True, "first_column": True, "last_column": True},
+            {"name": "Table2", "first_row": 7, "first_col": 1, "last_row": 9, "last_col": 2,
+             "columns": ["Column1", "Column2"], "style": None, "header_row": False,
+             "autofilter": False, "row_stripes": True, "column_stripes": False, "first_column": False, "last_column": False},
+        ]
+        assert wb.tables(1) == []
+        with pytest.raises(XlsxError, match="no worksheet"):
+            wb.tables("Missing")
+
+        rows = wb.rows("Data")
+        assert rows.column_widths == [(1, 1, 12.5), (2, 2, 30.0)]
+        assert (rows.column_width(2), rows.column_width(3)) == (30.0, None)
+        assert rows.outline_summary_above is True and rows.row_outline_levels == 2
+        assert (rows.row_number, rows.outline_level, rows.hidden, rows.collapsed, rows.height) == (0, 0, False, False, None)
+        seen = [(rows.row_number, len(row), rows.outline_level, rows.hidden, rows.collapsed, rows.height) for row in rows]
+        assert seen == [
+            (1, 3, 0, False, False, None),
+            (2, 2, 1, False, False, None),
+            (3, 2, 2, True, False, None),
+            (4, 1, 1, False, True, 20.5),
+            (5, 0, 0, False, False, None),
+            (6, 0, 0, False, False, None),
+            (7, 2, 0, False, False, None),
+            (8, 2, 0, False, False, None),
+            (9, 2, 0, False, False, None),
+        ]
+
+        compact = wb.rows("Data", skip_empty=True)
+        assert [compact.row_number for _ in compact] == [1, 2, 3, 4, 7, 8, 9]
+
+        plain = wb.rows("Plain")
+        assert plain.column_widths == [] and plain.outline_summary_above is False and plain.row_outline_levels == 0
+
+    # A table read from a workbook can be written again with the same keys.
+    table = hypaxel.open_workbook(data).tables()[0]
+    position = [table.pop(key) for key in ("first_row", "first_col", "last_row", "last_col")]
+
+    def copy(wb):
+        ws = wb.add_worksheet("Copy")
+        ws.write_rows([["Product", "Units & more", "Line\nbreak"], [1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        ws.add_table(*position, **table)
+
+    assert hypaxel.open_workbook(build(copy)).tables()[0] == {**table, **dict(zip(("first_row", "first_col", "last_row", "last_col"), position))}
