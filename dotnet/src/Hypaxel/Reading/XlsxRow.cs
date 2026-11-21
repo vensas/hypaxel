@@ -29,6 +29,18 @@ public sealed class XlsxRow
     /// <summary>1-based row number as shown in Excel.</summary>
     public int Number { get; internal set; }
 
+    /// <summary>Outline (grouping) level, 0–7.</summary>
+    public int OutlineLevel { get; private set; }
+
+    /// <summary>True if the row is hidden (e.g. a row inside a collapsed group).</summary>
+    public bool Hidden { get; private set; }
+
+    /// <summary>True for the summary row of a collapsed group.</summary>
+    public bool Collapsed { get; private set; }
+
+    /// <summary>Height in points, or null if the row stores none.</summary>
+    public double? Height { get; private set; }
+
     /// <summary>Number of cells with a value.</summary>
     public int Count { get; private set; }
 
@@ -199,9 +211,13 @@ public sealed class XlsxRow
         return text.ToString();
     }
 
-    internal void Reset(int number)
+    internal void Reset(int number, int outlineLevel, bool hidden, bool collapsed, double? height)
     {
         Number = number;
+        OutlineLevel = outlineLevel;
+        Hidden = hidden;
+        Collapsed = collapsed;
+        Height = height;
         Count = 0;
         Text.Clear();
     }

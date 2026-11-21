@@ -36,8 +36,11 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     private readonly XlsxRow _row;
     private byte[] _scratch = new byte[64];
     private int _scratchLength;
+    private readonly List<ColumnWidth> _columnWidths = [];
     private State _state;
     private int _previousRow;
+    private bool _outlineSummaryAbove;
+    private int _rowOutlineLevels;
 
     internal WorksheetReader(string name, Utf8XmlReader xml, string[] sharedStrings, StyleTable styles, bool is1904)
     {
@@ -73,6 +76,58 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     /// <summary>The current row, valid after <see cref="Read"/> returned true. The same instance is reused for every row.</summary>
     public XlsxRow Row => _row;
 
+    /// <summary>
+    /// The column widths the sheet defines, explicit and auto-fitted alike, in file order. Columns that
+    /// are not covered have the default width. Available before the first row is read.
+    /// </summary>
+    /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    public IReadOnlyList<ColumnWidth> ColumnWidths
+    {
+        get
+        {
+            ReadLayout();
+            return _columnWidths;
+        }
+    }
+
+    /// <summary>True if summary rows sit above their groups (<see cref="WorksheetOptions.OutlineSummaryAbove"/>).</summary>
+    /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    public bool OutlineSummaryAbove
+    {
+        get
+        {
+            ReadLayout();
+            return _outlineSummaryAbove;
+        }
+    }
+
+    /// <summary>The deepest row outline level the sheet declares (0 without grouping).</summary>
+    /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    public int RowOutlineLevels
+    {
+        get
+        {
+            ReadLayout();
+            return _rowOutlineLevels;
+        }
+    }
+
+    /// <summary>The width of a 1-based column in characters of the default font; null if the sheet leaves it at the default.</summary>
+    /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    public double? GetColumnWidth(int column)
+    {
+        ReadLayout();
+        foreach (var width in _columnWidths)
+        {
+            if (column >= width.FirstColumn && column <= width.LastColumn)
+            {
+                return width.Width;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>Advances to the next row that has at least one value.</summary>
     /// <returns>False at the end of the sheet.</returns>
     /// <exception cref="XlsxReadException">The worksheet part is damaged; the message names the part and row.</exception>
@@ -92,17 +147,45 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
                     var token = _xml.Next();
                     if (token is XmlToken.Start or XmlToken.Empty && _xml.Name.SequenceEqual("row"u8))
                     {
-                        int number;
-                        if (XmlAttributes.TryGet(_xml.Attributes, "r"u8, out var raw))
+                        var number = _previousRow + 1;
+                        var hasNumber = false;
+                        var outlineLevel = 0;
+                        var hidden = false;
+                        var collapsed = false;
+                        double? height = null;
+                        var attributes = new XmlAttributes(_xml.Attributes);
+                        while (attributes.MoveNext())
                         {
-                            if (!StyleTable.TryParseInt(raw, out number))
+                            var name = attributes.Name;
+                            if (name.SequenceEqual("r"u8))
                             {
-                                throw _xml.Malformed("A row has an invalid row number.");
+                                if (hasNumber)
+                                {
+                                    continue;
+                                }
+
+                                hasNumber = true;
+                                if (!StyleTable.TryParseInt(attributes.Value, out number))
+                                {
+                                    throw _xml.Malformed("A row has an invalid row number.");
+                                }
                             }
-                        }
-                        else
-                        {
-                            number = _previousRow + 1;
+                            else if (name.SequenceEqual("outlineLevel"u8))
+                            {
+                                outlineLevel = TableReader.ParseOutlineLevel(attributes.Value);
+                            }
+                            else if (name.SequenceEqual("hidden"u8))
+                            {
+                                hidden = TableReader.IsTrue(attributes.Value);
+                            }
+                            else if (name.SequenceEqual("collapsed"u8))
+                            {
+                                collapsed = TableReader.IsTrue(attributes.Value);
+                            }
+                            else if (name.SequenceEqual("ht"u8))
+                            {
+                                height = TableReader.ParseMeasure(attributes.Value);
+                            }
                         }
 
                         if (number is < 1 or > CellReference.MaxRows)
@@ -116,7 +199,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
                             continue;
                         }
 
-                        _row.Reset(number);
+                        _row.Reset(number, outlineLevel, hidden, collapsed, height);
                         ReadCells();
                         if (_row.Count > 0)
                         {
@@ -156,6 +239,53 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         _xml.Dispose();
     }
 
+    private void ReadLayout()
+    {
+        if (_state == State.BeforeData)
+        {
+            FindSheetData();
+        }
+    }
+
+    private void ReadColumn(ReadOnlySpan<byte> raw)
+    {
+        uint first = 0, last = 0;
+        double? width = null;
+        var attributes = new XmlAttributes(raw);
+        while (attributes.MoveNext())
+        {
+            var name = attributes.Name;
+            if (name.SequenceEqual("min"u8))
+            {
+                first = ParseColumnBound(attributes.Value);
+            }
+            else if (name.SequenceEqual("max"u8))
+            {
+                last = ParseColumnBound(attributes.Value);
+            }
+            else if (name.SequenceEqual("width"u8))
+            {
+                width = TableReader.ParseMeasure(attributes.Value);
+            }
+        }
+
+        last = Math.Min(last, CellReference.MaxColumns);
+        if (width is null || first < 1 || first > last)
+        {
+            return;
+        }
+
+        if (_columnWidths.Count >= CellReference.MaxColumns)
+        {
+            throw _xml.Malformed("The sheet defines more than 16384 column ranges.");
+        }
+
+        _columnWidths.Add(new ColumnWidth((int)first, (int)last, width.GetValueOrDefault()));
+    }
+
+    private static uint ParseColumnBound(ReadOnlySpan<byte> raw) =>
+        uint.TryParse(raw.Trim(" \t\r\n"u8), NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : 0;
+
     private void FindSheetData()
     {
         while (true)
@@ -179,8 +309,22 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
                 return;
             }
 
-            if (token == XmlToken.Start
-                && !name.SequenceEqual("worksheet"u8) && !name.SequenceEqual("dialogsheet"u8) && !name.SequenceEqual("macrosheet"u8))
+            var descend = name.SequenceEqual("worksheet"u8) || name.SequenceEqual("dialogsheet"u8) || name.SequenceEqual("macrosheet"u8)
+                || name.SequenceEqual("sheetPr"u8) || name.SequenceEqual("cols"u8);
+            if (name.SequenceEqual("outlinePr"u8))
+            {
+                _outlineSummaryAbove = XmlAttributes.TryGet(_xml.Attributes, "summaryBelow"u8, out var below) && TableReader.IsFalse(below);
+            }
+            else if (name.SequenceEqual("sheetFormatPr"u8))
+            {
+                _rowOutlineLevels = XmlAttributes.TryGet(_xml.Attributes, "outlineLevelRow"u8, out var levels) ? TableReader.ParseOutlineLevel(levels) : 0;
+            }
+            else if (name.SequenceEqual("col"u8))
+            {
+                ReadColumn(_xml.Attributes);
+            }
+
+            if (token == XmlToken.Start && !descend)
             {
                 _xml.SkipElement();
             }
@@ -706,3 +850,9 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         return double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && double.IsFinite(value);
     }
 }
+
+/// <summary>A run of adjacent columns that share one width.</summary>
+/// <param name="FirstColumn">1-based first column of the run.</param>
+/// <param name="LastColumn">1-based last column of the run.</param>
+/// <param name="Width">Width in characters of the default font, as in <see cref="ColumnDefinition.Width"/>.</param>
+public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double Width);
