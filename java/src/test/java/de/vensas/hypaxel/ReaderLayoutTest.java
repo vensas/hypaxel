@@ -197,7 +197,45 @@ class ReaderLayoutTest {
     }
 
     @Test
-    void sheetsWithoutAPartOrAfterCloseHaveNoTables() throws IOException {
+    void boundsTheMemoryOfASheetsTables() throws IOException {
+        String table = "<table " + NS + " name=\"T\" ref=\"A1:B2\"><tableColumns><tableColumn name=\"a\"/><tableColumn name=\"b\"/></tableColumns></table>";
+        byte[] repeated = singleSheet("<worksheet " + NS + "><sheetData/></worksheet>", "",
+                "xl/worksheets/_rels/sheet1.xml.rels", sheetRels("../tables/table1.xml", "../tables/table1.xml", "../tables/table1.xml"),
+                "xl/tables/table1.xml", table);
+        try (XlsxReader reader = XlsxReader.open(repeated)) {
+            assertEquals(1, reader.tables(0).size());
+        }
+
+        String column = "<tableColumn name=\"" + "n".repeat(4200) + "\"/>";
+        XlsxException e = tableError("<table " + NS + " name=\"T\" ref=\"A1:B2\"><tableColumns>" + column.repeat(16384) + "</tableColumns></table>");
+        assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
+        assertTrue(e.getMessage().contains("too many names"), e.getMessage());
+    }
+
+    @Test
+    void parsesIntegerAttributesAsUnsigned32BitDigits() throws IOException {
+        String sheet = "<worksheet " + NS + "><sheetFormatPr outlineLevelRow=\"4294967295\"/><cols>"
+                + "<col min=\"1\" max=\"4294967295\" width=\"9\"/><col min=\"+2\" max=\"3\" width=\"5\"/>"
+                + "<col min=\"2\" max=\"4294967296\" width=\"5\"/></cols><sheetData>"
+                + "<row r=\"1\" outlineLevel=\"4294967295\"><c><v>1</v></c></row>"
+                + "<row r=\"2\" outlineLevel=\"+3\"><c><v>2</v></c></row></sheetData></worksheet>";
+        try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(List.of(new ColumnWidth(1, 16384, 9, false)), rows.columnWidths());
+            assertEquals(7, rows.rowOutlineLevels());
+            assertEquals(7, rows.nextRow().outlineLevel());
+            assertEquals(0, rows.nextRow().outlineLevel());
+        }
+
+        String totals = "<table " + NS + " name=\"T\" ref=\"A1:A3\" totalsRowCount=\"%s\"/>";
+        for (String[] c : new String[][] {{"3000000000", "true"}, {"+1", "false"}, {"0", "false"}, {" 1 ", "true"}, {"", "false"}}) {
+            try (XlsxReader reader = XlsxReader.open(withTable(String.format(totals, c[0])))) {
+                assertEquals(Boolean.parseBoolean(c[1]), reader.tables(0).get(0).totalsRow(), c[0]);
+            }
+        }
+    }
+
+    @Test
+    void sheetsWithoutAPartHaveNoTablesAndAClosedReaderRejectsTheCall() throws IOException {
         String workbook = "<workbook " + NS + " xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">"
                 + "<sheets><sheet name=\"Lost\" sheetId=\"1\" r:id=\"rId5\"/></sheets></workbook>";
         byte[] xlsx = ReaderTest.pkg("_rels/.rels", ReaderTest.ROOT_RELS, "xl/workbook.xml", workbook);
@@ -384,9 +422,25 @@ class ReaderLayoutTest {
         }
 
         try (XlsxReader reader = XlsxReader.open(singleSheet("<worksheet " + NS + "><cols><col min=\"1\" max=\"2\" width=\"9\"/></cols><sheetData/></worksheet>", ""))) {
+            SheetReader closedEarly = reader.worksheet(0);
+            closedEarly.close();
+            assertEquals(XlsxException.Kind.INVALID_STATE, assertThrows(XlsxException.class, closedEarly::columnWidths).kind());
+            assertEquals(XlsxException.Kind.INVALID_STATE, assertThrows(XlsxException.class, closedEarly::rowOutlineLevels).kind());
+
+            SheetReader readFirst = reader.worksheet(0);
+            assertEquals(1, readFirst.columnWidths().size());
+            readFirst.close();
+            assertEquals(1, readFirst.columnWidths().size());
+            assertFalse(readFirst.outlineSummaryAbove());
+        }
+
+        String manyCols = "<col min=\"1\" max=\"1\" width=\"1\"/>".repeat(16385);
+        try (XlsxReader reader = XlsxReader.open(singleSheet("<worksheet " + NS + "><cols>" + manyCols + "</cols><sheetData/></worksheet>", ""))) {
             SheetReader rows = reader.worksheet(0);
-            rows.close();
-            assertEquals(List.of(), rows.columnWidths());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::columnWidths).kind());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::columnWidths).kind());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::outlineSummaryAbove).kind());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, () -> rows.columnHidden(1)).kind());
         }
     }
 

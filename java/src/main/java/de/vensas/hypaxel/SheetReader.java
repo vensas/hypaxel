@@ -36,6 +36,7 @@ public final class SheetReader implements Closeable, Iterable<Row> {
     private final SheetParser parser;
     private final Row row;
     private boolean finished;
+    private Exception layoutFailure;
 
     SheetReader(SheetInfo sheet, SheetParser parser) {
         this.sheet = sheet;
@@ -51,9 +52,12 @@ public final class SheetReader implements Closeable, Iterable<Row> {
     /**
      * Returns the column widths the sheet defines, explicit and auto-fitted alike, in file order.
      * Columns that are not covered have the default width. Like the outline settings, the widths
-     * precede the rows in the file, so they are available before the first row is read.
+     * precede the rows in the file, so they are available before the first row is read, and they
+     * stay available after the rows were read or the reader was closed.
      *
-     * @throws XlsxException if the worksheet is damaged ({@link XlsxException.Kind#MALFORMED})
+     * @throws XlsxException if the worksheet is damaged ({@link XlsxException.Kind#MALFORMED}), on
+     *     this and every later call; or if the reader was closed before the layout was read
+     *     ({@link XlsxException.Kind#INVALID_STATE})
      * @throws IOException if the source cannot be read
      */
     public List<ColumnWidth> columnWidths() throws IOException {
@@ -94,9 +98,22 @@ public final class SheetReader implements Closeable, Iterable<Row> {
     }
 
     private void readLayout() throws IOException {
+        if (parser.layoutComplete()) {
+            return;
+        }
+        if (layoutFailure instanceof IOException) {
+            throw (IOException) layoutFailure;
+        }
+        if (layoutFailure != null) {
+            throw (RuntimeException) layoutFailure;
+        }
+        if (finished) {
+            throw new XlsxException(XlsxException.Kind.INVALID_STATE, "the sheet reader was closed before its layout was read");
+        }
         try {
             parser.readLayout();
         } catch (IOException | RuntimeException e) {
+            layoutFailure = e;
             close();
             throw e;
         }

@@ -197,7 +197,12 @@ public final class XlsxReader implements Closeable {
      * {@link TableStyle#NONE}, and {@link ExcelTable#totalsRow()} tells whether the last row of the
      * range is a totals row.
      *
-     * @throws XlsxException if a table part is damaged ({@link XlsxException.Kind#MALFORMED})
+     * <p>A part that the sheet references more than once is read once. A sheet may have at most
+     * 4,096 tables, holding at most 64 MiB of table and column names between them.
+     *
+     * @throws XlsxException if a table part is damaged ({@link XlsxException.Kind#MALFORMED}), a
+     *     limit is exceeded ({@link XlsxException.Kind#LIMIT_EXCEEDED}) or the reader is closed
+     *     ({@link XlsxException.Kind#INVALID_STATE})
      */
     public List<ExcelTable> tables(int index) throws IOException {
         checkIndex(index);

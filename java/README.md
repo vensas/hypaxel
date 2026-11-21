@@ -178,6 +178,10 @@ their number and properties. Rows that the file does not store are never returne
 | `columnHidden(column)` | Whether a 1-based column is hidden |
 | `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
 
+The layout getters work before the first row, after the rows were read and after `close()` once the
+layout has been read. They throw `INVALID_STATE` if the reader was closed before the layout was read,
+and repeat the error if reading the layout failed.
+
 **`Row`**
 
 | Method | Purpose |
@@ -210,7 +214,9 @@ their number and properties. Rows that the file does not store are never returne
 - **Safety:** document type declarations are rejected (no entity expansion or external entities),
   every XML token (16 MiB) and row (16,384 cells, 256 MiB of text) is bounded, ZIP entries must
   match their declared size and CRC-32, and `ReadOptions.builder().maxSharedStringsBytes(...)`
-  (default 1 GiB) caps the shared string table. Legacy `.xls` files, encrypted workbooks, CSV and
+  (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
+  64 MiB of table and column names between them, and a table part that is referenced more than
+  once is read once. Legacy `.xls` files, encrypted workbooks, CSV and
   Word files fail with `XlsxException` of kind `INVALID_FILE`, damaged parts with `MALFORMED` and
   a `part()` such as `xl/worksheets/sheet1.xml`; messages name the part and row. Invalid UTF-8 in
   text is replaced with U+FFFD.

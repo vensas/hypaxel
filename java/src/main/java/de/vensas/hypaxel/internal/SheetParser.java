@@ -66,6 +66,7 @@ public final class SheetParser {
     private final RowBuffer row;
     private final ByteBuilder scratch = new ByteBuilder(64);
     private int state = BEFORE_DATA;
+    private boolean layoutComplete;
     private int previousRow;
     private final List<ColumnWidth> columnWidths = new ArrayList<>();
     private boolean outlineSummaryAbove;
@@ -98,6 +99,11 @@ public final class SheetParser {
         if (state == BEFORE_DATA) {
             findSheetData();
         }
+    }
+
+    /** True once everything ahead of the rows has been read without an error. */
+    public boolean layoutComplete() {
+        return layoutComplete;
     }
 
     public List<ColumnWidth> columnWidths() {
@@ -196,6 +202,11 @@ public final class SheetParser {
     }
 
     private void findSheetData() throws IOException {
+        scanToSheetData();
+        layoutComplete = true;
+    }
+
+    private void scanToSheetData() throws IOException {
         while (true) {
             int event = xml.next();
             if (event == XmlReader.EOF) {
@@ -243,8 +254,8 @@ public final class SheetParser {
     }
 
     private void readColumnWidth() {
-        int first = -1;
-        int last = -1;
+        long first = -1;
+        long last = -1;
         double width = Double.NaN;
         boolean hasFirst = false;
         boolean hasLast = false;
@@ -253,10 +264,10 @@ public final class SheetParser {
         while (xml.nextAttribute()) {
             if (xml.attributeIs(MIN) && !hasFirst) {
                 hasFirst = true;
-                first = attributeDigits();
+                first = attributeUnsigned();
             } else if (xml.attributeIs(MAX) && !hasLast) {
                 hasLast = true;
-                last = attributeDigits();
+                last = attributeUnsigned();
             } else if (xml.attributeIs(WIDTH) && !hasWidth) {
                 hasWidth = true;
                 width = attributeMeasure();
@@ -274,7 +285,7 @@ public final class SheetParser {
         if (columnWidths.size() >= MAX_COLUMNS) {
             throw xml.malformed("the sheet defines more than 16384 column ranges");
         }
-        columnWidths.add(new ColumnWidth(first, last, width, hidden));
+        columnWidths.add(new ColumnWidth((int) first, (int) last, width, hidden));
     }
 
     /** The current attribute as a non-negative integer; -1 if invalid. */
@@ -283,9 +294,15 @@ public final class SheetParser {
         return parseDigits(b, trimStart(b, xml.valueStart, xml.valueEnd), trimEnd(b, xml.valueStart, xml.valueEnd));
     }
 
+    /** The current attribute as an unsigned 32-bit integer (digits only); -1 if invalid. */
+    private long attributeUnsigned() {
+        byte[] b = xml.buffer();
+        return parseUnsigned(b, trimStart(b, xml.valueStart, xml.valueEnd), trimEnd(b, xml.valueStart, xml.valueEnd));
+    }
+
     private int attributeOutlineLevel() {
-        int level = attributeDigits();
-        return level < 0 ? 0 : Math.min(level, 7);
+        long level = attributeUnsigned();
+        return level < 0 ? 0 : (int) Math.min(level, 7);
     }
 
     private boolean attributeIsTrue() {
@@ -641,6 +658,23 @@ public final class SheetParser {
     }
 
     /** Parses a non-negative decimal integer that fits into an int; -1 if invalid. */
+    /** Parses digits (no sign) into an unsigned 32-bit integer; -1 if invalid or larger than 4294967295. */
+    static long parseUnsigned(byte[] b, int from, int to) {
+        int length = to - from;
+        if (length == 0 || length > 10) {
+            return -1;
+        }
+        long n = 0;
+        for (int i = from; i < to; i++) {
+            int c = b[i] - '0';
+            if (c < 0 || c > 9) {
+                return -1;
+            }
+            n = n * 10 + c;
+        }
+        return n > 0xFFFF_FFFFL ? -1 : n;
+    }
+
     static int parseDigits(byte[] b, int from, int to) {
         int length = to - from;
         if (length == 0 || length > 10) {

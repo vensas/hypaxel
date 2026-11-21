@@ -2,6 +2,7 @@ package de.vensas.hypaxel.internal;
 
 import de.vensas.hypaxel.ExcelTable;
 import de.vensas.hypaxel.TableStyle;
+import de.vensas.hypaxel.XlsxException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,7 +30,14 @@ final class TableParser {
     private TableParser() {
     }
 
-    static ExcelTable parse(XmlReader xml) throws IOException {
+    /** Bytes charged per column on top of its name. */
+    private static final int COLUMN_COST = 32;
+
+    /**
+     * Parses a table part. {@code budget[0]} is the number of name bytes the caller still accepts;
+     * it is reduced by the table's name and column names, plus {@value #COLUMN_COST} per column.
+     */
+    static ExcelTable parse(XmlReader xml, long[] budget) throws IOException {
         int[] range = null;
         String name = null;
         boolean headerRow = true;
@@ -65,7 +73,8 @@ final class TableParser {
                 }
                 String headerRows = xml.attribute(HEADER_ROW_COUNT);
                 headerRow = headerRows == null || !headerRows.strip().equals("0");
-                totalsRow = Ascii.parseUnsigned(xml.attribute(TOTALS_ROW_COUNT)) > 0;
+                totalsRow = parseCount(xml.attribute(TOTALS_ROW_COUNT)) > 0;
+                charge(budget, name == null ? 0 : utf8Length(name));
                 descend = true;
             } else if (xml.nameIs(AUTO_FILTER)) {
                 autoFilter = true;
@@ -77,6 +86,7 @@ final class TableParser {
                 }
                 String column = xml.attribute(NAME, true);
                 columns.add(column == null ? "" : column);
+                charge(budget, (column == null ? 0 : utf8Length(column)) + COLUMN_COST);
             } else if (xml.nameIs(TABLE_STYLE_INFO)) {
                 style = parseStyle(xml.attribute(NAME));
                 rowStripes = isTrue(xml.attribute(SHOW_ROW_STRIPES));
@@ -105,6 +115,42 @@ final class TableParser {
             builder.name(name);
         }
         return builder.build();
+    }
+
+    private static void charge(long[] budget, long cost) {
+        budget[0] -= cost;
+        if (budget[0] < 0) {
+            throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, "the tables of a worksheet hold too many names");
+        }
+    }
+
+    private static long utf8Length(String text) {
+        long length = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            length += c < 0x80 ? 1 : c < 0x800 ? 2 : Character.isSurrogate(c) ? 2 : 3;
+        }
+        return length;
+    }
+
+    /** Parses digits (no sign) into an unsigned 32-bit integer; -1 if absent or invalid. */
+    private static long parseCount(String value) {
+        if (value == null) {
+            return -1;
+        }
+        String digits = value.strip();
+        if (digits.isEmpty() || digits.length() > 10) {
+            return -1;
+        }
+        long n = 0;
+        for (int i = 0; i < digits.length(); i++) {
+            int c = digits.charAt(i) - '0';
+            if (c < 0 || c > 9) {
+                return -1;
+            }
+            n = n * 10 + c;
+        }
+        return n > 0xFFFF_FFFFL ? -1 : n;
     }
 
     private static boolean isTrue(String value) {

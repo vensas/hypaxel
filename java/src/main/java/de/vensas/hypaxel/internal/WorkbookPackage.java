@@ -9,12 +9,16 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /** The structure of an XLSX package: its parts, sheets, date system and cell formats. */
 public final class WorkbookPackage {
     /** Most tables read from one worksheet. */
     static final int MAX_TABLES = 4096;
+    /** Most bytes of table and column names held for the tables of one worksheet (see {@link TableParser#parse}). */
+    static final long MAX_TABLE_TEXT = 64L * 1024 * 1024;
 
     private static final String NOT_A_WORKBOOK = "the package has no workbook part; it may be a Word or PowerPoint file";
 
@@ -152,17 +156,23 @@ public final class WorkbookPackage {
         if (rels == null) {
             return List.of();
         }
-        List<ExcelTable> tables = new ArrayList<>();
+        Set<String> targets = new LinkedHashSet<>();
+        int count = 0;
         for (Relationship r : rels) {
             if (!r.is("table")) {
                 continue;
             }
-            if (tables.size() >= MAX_TABLES) {
+            if (++count > MAX_TABLES) {
                 throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, part + " has more than " + MAX_TABLES + " tables");
             }
-            XmlReader xml = open(archive, r.target);
+            targets.add(r.target);
+        }
+        List<ExcelTable> tables = new ArrayList<>(targets.size());
+        long[] budget = {MAX_TABLE_TEXT};
+        for (String target : targets) {
+            XmlReader xml = open(archive, target);
             try {
-                tables.add(TableParser.parse(xml));
+                tables.add(TableParser.parse(xml, budget));
             } finally {
                 xml.close();
             }
