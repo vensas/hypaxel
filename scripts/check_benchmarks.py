@@ -77,6 +77,8 @@ def check_suite(path: Path, suite: dict, errors: list[str], matched: set[tuple[s
             fail(f"{key} must be {SUITE_KEYS[key].__name__}")
     if errors and errors[-1].startswith(str(path.relative_to(ROOT))):
         return
+    if not suite["versions"]:
+        fail("versions must name what the figures are compared with")
     if suite["language"] not in IMPLEMENTATIONS:
         fail(f"unknown language {suite['language']}")
         return
@@ -155,7 +157,10 @@ def check_coverage(matched: set[tuple[str, int]], errors: list[str]) -> None:
                 errors.append(f"{readme.relative_to(ROOT)}: table starting with {table[0][0]!r} has no results file")
 
 
-def check_highlights(errors: list[str]) -> None:
+LINKS = ("suite", "comparisonSuite", "memorySuite")
+
+
+def check_highlights(errors: list[str], suites: dict[str, dict]) -> None:
     path = ROOT / "benchmarks" / "highlights.json"
     readme = (ROOT / "README.md").read_text()
     glance = readme[readme.index("## At a glance"):readme.index("## Quick look")].replace("`", "")
@@ -173,6 +178,20 @@ def check_highlights(errors: list[str]) -> None:
             errors.append(f"{name}: unknown language")
         if "memory" in item and item.get("memoryKind") not in MEMORY_KINDS:
             errors.append(f"{name}: memory needs a memoryKind")
+        if "suite" not in item:
+            errors.append(f"{name}: needs suite")
+        for key in LINKS:
+            if key not in item:
+                continue
+            ids = [item[key]] if isinstance(item[key], str) else item[key]
+            if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                errors.append(f"{name}: {key} must be a suite id or a non-empty list of them")
+                continue
+            for suite_id in ids:
+                if suite_id not in suites:
+                    errors.append(f"{name}: {key} {suite_id!r} is not a results file")
+                elif suites[suite_id].get("language") != item.get("language"):
+                    errors.append(f"{name}: {key} {suite_id!r} is for {suites[suite_id].get('language')}")
         for key in ("value", "comparison", "memory"):
             if key in item and item[key] not in glance:
                 errors.append(f"{name}: {key} {item[key]!r} is not in the README's At a glance section")
@@ -196,7 +215,7 @@ def main() -> int:
         ids.add(suite.get("id"))
         suites.append(suite)
     check_coverage(matched, errors)
-    check_highlights(errors)
+    check_highlights(errors, {suite.get("id"): suite for suite in suites})
     for error in errors:
         print(error, file=sys.stderr)
     print(f"{len(suites)} suites, {len(errors)} problems")

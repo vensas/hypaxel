@@ -1,0 +1,96 @@
+{
+  "id": "dotnet-write-rss",
+  "language": "dotnet",
+  "title": ".NET: peak RSS writing 100,000 and 1,000,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, generated as they are written and written to a file",
+  "method": "Peak resident memory of the whole process (/usr/bin/time -l), the median of three runs, each case in its own process with the --write-rss mode. In MiB, labelled MB.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores, 64 GB",
+    "os": "macOS 26.6",
+    "runtime": ".NET 10.0.13"
+  },
+  "versions": [
+    "SpreadCheetah 1.29.0",
+    "ClosedXML 0.105.1"
+  ],
+  "metrics": [
+    {
+      "id": "rss100k",
+      "label": "100k rows",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    },
+    {
+      "id": "rss1m",
+      "label": "1M rows",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "rss1m",
+  "rows": [
+    {
+      "label": "Rows only, nothing written",
+      "subject": false,
+      "values": {
+        "rss100k": 51,
+        "rss1m": 51
+      }
+    },
+    {
+      "label": "Hypaxel, typed Write",
+      "subject": true,
+      "values": {
+        "rss100k": 67,
+        "rss1m": 68
+      }
+    },
+    {
+      "label": "Hypaxel, AddRowAsync",
+      "subject": true,
+      "values": {
+        "rss100k": 64,
+        "rss1m": 66
+      }
+    },
+    {
+      "label": "Hypaxel, object mapping",
+      "subject": true,
+      "values": {
+        "rss100k": 69,
+        "rss1m": 69
+      }
+    },
+    {
+      "label": "Hypaxel, shared strings",
+      "subject": true,
+      "values": {
+        "rss100k": 78,
+        "rss1m": 216
+      }
+    },
+    {
+      "label": "SpreadCheetah",
+      "subject": false,
+      "values": {
+        "rss100k": 61,
+        "rss1m": 68
+      }
+    },
+    {
+      "label": "ClosedXML",
+      "subject": false,
+      "values": {
+        "rss100k": 344,
+        "rss1m": 2031
+      }
+    }
+  ],
+  "notes": [
+    "The first row is the .NET runtime plus generating the rows: Hypaxel adds 16 to 17 MB on top of it at 100k rows and at 1M, while ClosedXML grows with the sheet. Shared strings grow with the number of distinct values."
+  ],
+  "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet build -c Release && /usr/bin/time -l \\\n  dotnet bin/Release/net10.0/Hypaxel.Benchmarks.dll --write-rss hypaxel 1000000 out.xlsx",
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}
