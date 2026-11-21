@@ -169,6 +169,8 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
   #props = 0
   #height: number | undefined
   #layout: SheetLayout | undefined
+  /** Why the sheet could not be opened or its layout read; thrown again by every later call. */
+  #layoutError: XlsxError | undefined
   #reading = false
 
   /** @internal */
@@ -218,6 +220,8 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
   /**
    * The sheet's column widths and outline settings. They precede the rows in the file, so this
    * can be called before the first row is read; it then reads the first batch on the calling thread.
+   * If the sheet cannot be opened or its layout read, this, {@link layoutAsync}, {@link next} and
+   * {@link nextAsync} throw that error from then on.
    */
   layout(): SheetLayout {
     this.#idle()
@@ -241,7 +245,7 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
       const row = this.#take()
       if (row !== undefined) return { done: false, value: row }
       const rows = this.#rows
-      if (rows === undefined) return { done: true, value: undefined }
+      if (rows === undefined) return this.#ended()
       this.#load(rows, this.#fetch(() => rows.next()))
     }
   }
@@ -253,7 +257,7 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
       const row = this.#take()
       if (row !== undefined) return { done: false, value: row }
       const rows = this.#rows
-      if (rows === undefined) return { done: true, value: undefined }
+      if (rows === undefined) return this.#ended()
       this.#load(rows, await this.#fetchAsync(rows))
     }
   }
@@ -289,8 +293,7 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     try {
       return guard(read)
     } catch (error) {
-      this.#rows = undefined
-      throw error
+      throw this.#failed(error)
     }
   }
 
@@ -300,14 +303,27 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     try {
       return await rows.nextAsync()
     } catch (error) {
-      this.#rows = undefined
-      throw error instanceof XlsxError ? error : new XlsxError(error instanceof Error ? error.message : String(error))
+      throw this.#failed(error)
     } finally {
       this.#reading = false
     }
   }
 
+  /** Stops reading after a failure; a failure before the layout arrived is kept and thrown again. */
+  #failed(error: unknown): XlsxError {
+    this.#rows = undefined
+    const failure = error instanceof XlsxError ? error : new XlsxError(error instanceof Error ? error.message : String(error))
+    if (this.#layout === undefined) this.#layoutError = failure
+    return failure
+  }
+
+  #ended(): IteratorResult<ReadValue[], undefined> {
+    if (this.#layoutError !== undefined) throw this.#layoutError
+    return { done: true, value: undefined }
+  }
+
   #known(): SheetLayout {
+    if (this.#layoutError !== undefined) throw this.#layoutError
     if (this.#layout === undefined) throw new XlsxError('the rows were closed before the sheet layout was read')
     return this.#layout
   }

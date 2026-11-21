@@ -105,7 +105,9 @@ Python, Node.js, .NET, Java, Go and PHP).
   - When the rows of a worksheet end, the readers read the rest of its ZIP entry, so a damaged
     entry is reported even when the damage lies after the rows or the sheet has none (Rust, .NET,
     Java, and through the core Python and Node.js; Go already did). A failure while reading the
-    layout is reported again by every later layout call and by the next row call.
+    layout is reported again by every later layout call and by the next row call, in every
+    implementation; in Node.js this includes a sheet that cannot be opened, which used to end
+    silently after the first error.
   - .NET: `ExcelTable` compares `Columns` by their names, so a table read back equals the one
     that was written.
   - Asking for the layout of a worksheet reader that was closed before the layout was read is an

@@ -190,7 +190,8 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   then returned too, and `skipEmpty: true` still drops them). `rows.layout()` (or `await rows.layoutAsync()`) gives the sheet's
   `columnWidths` (`{ firstColumn, lastColumn, width, hidden }`, explicit and auto-fitted alike),
   `columnWidth(column)`, `columnHidden(column)`, `outlineSummaryAbove` and `rowOutlineLevels`. They can be read before
-  the first row; the layout arrives with the first batch of rows.
+  the first row. If the sheet cannot be opened or its layout read, `layout()`, `layoutAsync()` and
+  the row methods throw that error every time they are called.
 
   ```ts
   const [table] = workbook.tables('Orders')                // table.options.name, .columns, .style, ...

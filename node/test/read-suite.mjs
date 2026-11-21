@@ -226,7 +226,7 @@ export function defineReadSuite(label, api) {
     const bytes = toBufferSync([['some shared text']], { sharedStrings: true })
     const rows = openWorkbookSync(bytes, { maxSharedStringsBytes: 4 }).rows()
     assert.throws(() => rows.next(), (e) => e instanceof XlsxError && /limit/.test(e.message))
-    assert.equal(rows.next().done, true)
+    assert.throws(() => rows.next(), /limit/, 'a sheet that cannot be opened keeps reporting why')
     assert.throws(() => openWorkbookSync(bytes, { maxSharedStringsBytes: -1 }), XlsxError)
   })
 
@@ -626,5 +626,38 @@ export function defineReadSuite(label, api) {
       [8, 20.05, ['Item 5', 16, 21]],
     ])
     assert.deepEqual(openWorkbookSync(bytes).rows(0, { skipEmpty: true }).next().value, ['Table 1'])
+  })
+
+  test('reports a layout failure again on every later call', async () => {
+    const workbook = async (sheet) => {
+      const zip = new JSZip()
+      zip.file('_rels/.rels', '<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+      zip.file('xl/workbook.xml', '<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>')
+      zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+      if (sheet !== undefined) zip.file('xl/worksheets/sheet1.xml', sheet)
+      return zip.generateAsync({ type: 'uint8array' })
+    }
+    const cols = '<col min="1" max="1" width="1"/>'.repeat(16_385)
+    const cases = [
+      [await workbook(`<worksheet><cols>${cols}</cols><sheetData><row><c><v>1</v></c></row></sheetData></worksheet>`), /column ranges/],
+      [await workbook(undefined), /missing/],
+    ]
+    for (const [bytes, expected] of cases) {
+      const rows = openWorkbookSync(bytes).rows()
+      assert.throws(() => rows.layout(), expected)
+      assert.throws(() => rows.layout(), expected)
+      await assert.rejects(rows.layoutAsync(), expected)
+      assert.throws(() => rows.next(), expected)
+      await assert.rejects(rows.nextAsync(), expected)
+
+      const first = openWorkbookSync(bytes).rows()
+      assert.throws(() => first.next(), expected)
+      assert.throws(() => first.layout(), expected)
+      await assert.rejects(first.nextAsync(), expected)
+
+      const later = openWorkbookSync(bytes).rows()
+      await assert.rejects(later.layoutAsync(), expected)
+      assert.throws(() => later.toArray(), expected)
+    }
   })
 }
