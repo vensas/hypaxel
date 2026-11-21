@@ -1,0 +1,78 @@
+name: Notify product site
+
+# Sends a hypaxel-updated repository_dispatch to vensas/vensas-libs-web when a version tag is
+# pushed or when docs, the changelog or benchmark results change on main. The site repository
+# decides whether to redeploy or open a review pull request.
+# Needs the LIBS_WEB_DISPATCH_TOKEN secret: a fine-grained token or GitHub App token with
+# contents: write on vensas/vensas-libs-web only.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    # Path filters are not evaluated for tag pushes, so every v* tag triggers a release dispatch.
+    paths:
+      - README.md
+      - "*/README.md"
+      - CHANGELOG.md
+      - docs/assets/**
+      - "*/benchmarks/results/**"
+      - benchmarks/highlights.json
+      - .github/workflows/notify-site.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notify-site-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.repository == 'vensas/hypaxel'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.ref_type == 'tag'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Send repository_dispatch
+        env:
+          GH_TOKEN: ${{ secrets.LIBS_WEB_DISPATCH_TOKEN }}
+          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::The LIBS_WEB_DISPATCH_TOKEN secret is not set."
+            exit 1
+          fi
+
+          if [ "${REF_TYPE}" = "tag" ]; then
+            kind=release
+            previous=""
+            if tag=$(git describe --tags --abbrev=0 --match 'v*' "${SHA}^" 2>/dev/null); then
+              previous=$(git rev-list -n 1 "${tag}")
+            fi
+          else
+            kind=docs
+            previous="${BEFORE}"
+            if [ -z "${previous}" ] || [ "${previous}" = "0000000000000000000000000000000000000000" ]; then
+              previous=""
+            fi
+          fi
+
+          jq -n \
+            --arg ref "${REF}" \
+            --arg sha "${SHA}" \
+            --arg previous "${previous}" \
+            --arg kind "${kind}" \
+            '{event_type: "hypaxel-updated",
+              client_payload: {ref: $ref, sha: $sha, kind: $kind,
+                               previous_sha: (if $previous == "" then null else $previous end)}}' \
+            | tee /dev/stderr \
+            | gh api --method POST repos/vensas/vensas-libs-web/dispatches --input -
+          echo "Dispatched hypaxel-updated (${kind}) for ${REF} at ${SHA}."
