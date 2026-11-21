@@ -963,3 +963,22 @@ fn reads_a_sheet_exported_by_numbers() {
     let mut rows = reader.worksheet_at(0).unwrap();
     assert_eq!(rows.next_row().unwrap().unwrap().number(), 2, "without the option the chart row is skipped");
 }
+
+#[test]
+fn table_names_that_look_like_excel_escapes_round_trip() {
+    let table = Table::new(1, 1, 2, 1).name("T_x0041_").columns(["a_x0042_"]);
+    let bytes = write(|w| {
+        let mut s = w.add_worksheet("S")?;
+        s.add_row(("a_x0042_",))?;
+        s.add_row((1,))?;
+        s.add_table(&table)?;
+        Ok(())
+    });
+    assert_eq!(reader(&bytes).tables_at(0).unwrap(), [table]);
+
+    // As Excel saves a table it was told to name `T_x0041_`: lower-case hex digits.
+    let excel = sheet_with_table(
+        r#"<table name="T_x005f_x0041_" displayName="T_x005f_x0041_" ref="A1:A2"><tableColumns><tableColumn name="a"/></tableColumns></table>"#,
+    );
+    assert_eq!(reader(&excel).tables_at(0).unwrap()[0].name.as_deref(), Some("T_x0041_"));
+}

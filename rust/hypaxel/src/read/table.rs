@@ -27,7 +27,8 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>, budget: &mut usize) -> Resu
             (None, b"table") => match tag.attr(b"ref").and_then(parse_range) {
                 Some((r1, c1, r2, c2)) => {
                     let mut t = Table::new(r1, c1, r2, c2).style(TableStyle::None).autofilter(false).row_stripes(false);
-                    t.name = text(&tag, b"displayName", false).or_else(|| text(&tag, b"name", false));
+                    // Excel escapes table names like other text: `T_x0041_` is stored as `T_x005f_x0041_`.
+                    t.name = text(&tag, b"displayName", true).or_else(|| text(&tag, b"name", true));
                     t.header_row = tag.attr(b"headerRowCount").is_none_or(|v| v.trim_ascii() != b"0");
                     t.totals_row = tag.attr(b"totalsRowCount").and_then(parse_u32).is_some_and(|n| n > 0);
                     cost = t.name.as_ref().map_or(0, String::len);
