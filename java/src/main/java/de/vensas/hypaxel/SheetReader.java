@@ -129,6 +129,12 @@ public final class SheetReader implements Closeable, Iterable<Row> {
      * @throws IOException if the source cannot be read
      */
     public Row nextRow() throws IOException {
+        if (layoutFailure instanceof IOException) {
+            throw (IOException) layoutFailure;
+        }
+        if (layoutFailure != null) {
+            throw (RuntimeException) layoutFailure;
+        }
         if (finished) {
             return null;
         }
@@ -137,6 +143,9 @@ public final class SheetReader implements Closeable, Iterable<Row> {
                 return row;
             }
         } catch (IOException | RuntimeException e) {
+            if (!parser.layoutComplete()) {
+                layoutFailure = e;
+            }
             close();
             throw e;
         }

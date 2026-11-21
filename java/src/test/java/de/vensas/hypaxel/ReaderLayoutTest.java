@@ -433,7 +433,7 @@ class ReaderLayoutTest {
             XlsxException e = assertThrows(XlsxException.class, rows::columnWidths);
             assertEquals(XlsxException.Kind.MALFORMED, e.kind());
             assertTrue(e.getMessage().contains("more than 16384 column ranges"), e.getMessage());
-            assertNull(rows.nextRow());
+            assertEquals(e, assertThrows(XlsxException.class, rows::nextRow));
 
             assertThrows(XlsxException.class, reader.worksheet(0)::nextRow);
         }
@@ -465,7 +465,102 @@ class ReaderLayoutTest {
             assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::columnWidths).kind());
             assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::outlineSummaryAbove).kind());
             assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, () -> rows.columnHidden(1)).kind());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::nextRow).kind());
         }
+        try (XlsxReader reader = XlsxReader.open(singleSheet("<worksheet " + NS + "><cols>" + manyCols + "</cols><sheetData/></worksheet>", ""))) {
+            SheetReader rows = reader.worksheet(0);
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::nextRow).kind());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::columnWidths).kind());
+            assertEquals(XlsxException.Kind.MALFORMED, assertThrows(XlsxException.class, rows::nextRow).kind());
+        }
+    }
+
+    @Test
+    void verifiesTheWholeWorksheetEntry() throws IOException {
+        String trailer = "<pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>";
+        String empty = "<worksheet " + NS + "><cols><col min=\"1\" max=\"1\" width=\"9\"/></cols><sheetData/>" + trailer + "</worksheet>";
+        String oneRow = "<worksheet " + NS + "><sheetData><row r=\"1\"><c><v>1</v></c></row></sheetData>" + trailer + "</worksheet>";
+        for (String sheet : List.of(empty, oneRow)) {
+            byte[] good = storedSingleSheet(sheet);
+            try (XlsxReader reader = XlsxReader.open(good); SheetReader rows = reader.worksheet(0)) {
+                rows.columnWidths();
+                while (rows.nextRow() != null) {
+                    // read to the end
+                }
+            }
+            byte[] bad = withBadSheetCrc(good);
+            try (XlsxReader reader = XlsxReader.open(bad); SheetReader rows = reader.worksheet(0)) {
+                XlsxException e = assertThrows(XlsxException.class, () -> {
+                    rows.columnWidths();
+                    while (rows.nextRow() != null) {
+                        // read to the end
+                    }
+                });
+                assertTrue(e.getMessage().contains("CRC"), e.getMessage());
+            }
+        }
+
+        byte[] bad = withBadSheetCrc(storedSingleSheet(empty));
+        try (XlsxReader reader = XlsxReader.open(bad); SheetReader rows = reader.worksheet(0)) {
+            for (int i = 0; i < 2; i++) {
+                assertTrue(assertThrows(XlsxException.class, rows::columnWidths).getMessage().contains("CRC"));
+            }
+            assertTrue(assertThrows(XlsxException.class, rows::nextRow).getMessage().contains("CRC"));
+        }
+        try (XlsxReader reader = XlsxReader.open(bad); SheetReader rows = reader.worksheet(0)) {
+            assertTrue(assertThrows(XlsxException.class, rows::nextRow).getMessage().contains("CRC"));
+            assertTrue(assertThrows(XlsxException.class, rows::outlineSummaryAbove).getMessage().contains("CRC"));
+        }
+    }
+
+    /** A package whose parts are stored without compression. */
+    private static byte[] storedSingleSheet(String sheetXml) throws IOException {
+        byte[] deflated = singleSheet(sheetXml, "");
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(deflated));
+                java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(out)) {
+            for (java.util.zip.ZipEntry entry = in.getNextEntry(); entry != null; entry = in.getNextEntry()) {
+                byte[] data = in.readAllBytes();
+                java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+                crc.update(data);
+                java.util.zip.ZipEntry stored = new java.util.zip.ZipEntry(entry.getName());
+                stored.setMethod(java.util.zip.ZipEntry.STORED);
+                stored.setSize(data.length);
+                stored.setCompressedSize(data.length);
+                stored.setCrc(crc.getValue());
+                zip.putNextEntry(stored);
+                zip.write(data);
+                zip.closeEntry();
+            }
+        }
+        return out.toByteArray();
+    }
+
+    /** Flips a byte of the worksheet's CRC-32 in its local and its central header. */
+    private static byte[] withBadSheetCrc(byte[] xlsx) {
+        byte[] bytes = xlsx.clone();
+        byte[] name = "xl/worksheets/sheet1.xml".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        int patched = 0;
+        for (int i = 0; i + 4 <= bytes.length; i++) {
+            int crcAt;
+            int nameAt;
+            if (bytes[i] == 'P' && bytes[i + 1] == 'K' && bytes[i + 2] == 3 && bytes[i + 3] == 4) {
+                crcAt = i + 14;
+                nameAt = i + 30;
+            } else if (bytes[i] == 'P' && bytes[i + 1] == 'K' && bytes[i + 2] == 1 && bytes[i + 3] == 2) {
+                crcAt = i + 16;
+                nameAt = i + 46;
+            } else {
+                continue;
+            }
+            if (nameAt + name.length <= bytes.length
+                    && java.util.Arrays.equals(bytes, nameAt, nameAt + name.length, name, 0, name.length)) {
+                bytes[crcAt] ^= (byte) 0xFF;
+                patched++;
+            }
+        }
+        assertEquals(2, patched);
+        return bytes;
     }
 
     private static List<String> rowSummaries(byte[] xlsx, ReadOptions options) throws IOException {

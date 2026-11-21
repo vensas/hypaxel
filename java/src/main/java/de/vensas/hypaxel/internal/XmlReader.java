@@ -77,6 +77,19 @@ public final class XmlReader {
         return depth;
     }
 
+    /**
+     * Reads the rest of the input without parsing it, so that the input can verify what it
+     * delivers (for a ZIP entry, its size and CRC-32).
+     */
+    public void drain() throws IOException {
+        pos = end;
+        while (!eof) {
+            if (input.read(buf, 0, buf.length) <= 0) {
+                eof = true;
+            }
+        }
+    }
+
     /** Releases the underlying input. */
     public void close() {
         input.close();

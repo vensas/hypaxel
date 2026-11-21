@@ -94,6 +94,15 @@ public final class SheetParser {
         xml.close();
     }
 
+    /** Reads the rest of the worksheet entry, so that its size and CRC-32 are verified, and closes it. */
+    private void finish() throws IOException {
+        try {
+            xml.drain();
+        } finally {
+            close();
+        }
+    }
+
     /** Reads the worksheet up to its rows, if that has not happened yet, so that the layout getters are complete. */
     public void readLayout() throws IOException {
         if (state == BEFORE_DATA) {
@@ -146,7 +155,7 @@ public final class SheetParser {
                 }
                 start = false;
             } else if (event == XmlReader.END || event == XmlReader.EOF) {
-                close();
+                finish();
                 return false;
             } else {
                 continue;
@@ -221,7 +230,7 @@ public final class SheetParser {
                 if (start) {
                     state = IN_DATA;
                 } else {
-                    close();
+                    finish();
                 }
                 return;
             }
