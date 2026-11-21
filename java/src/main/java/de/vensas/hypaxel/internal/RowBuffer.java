@@ -20,6 +20,12 @@ public final class RowBuffer {
     /** 1-based row number. */
     public int number;
     public int count;
+    /** Outline (grouping) level, 0 to 7. */
+    public int outlineLevel;
+    public boolean hidden;
+    public boolean collapsed;
+    /** Height in points; NaN if the row stores none. */
+    public double height = Double.NaN;
     /** 1-based column of each cell, ascending. */
     public int[] columns;
     public byte[] types;
@@ -141,6 +147,10 @@ public final class RowBuffer {
         RowBuffer copy = new RowBuffer(n, textCopy, sharedStrings, date1904);
         copy.number = number;
         copy.count = count;
+        copy.outlineLevel = outlineLevel;
+        copy.hidden = hidden;
+        copy.collapsed = collapsed;
+        copy.height = height;
         System.arraycopy(columns, 0, copy.columns, 0, count);
         System.arraycopy(types, 0, copy.types, 0, count);
         System.arraycopy(numbers, 0, copy.numbers, 0, count);

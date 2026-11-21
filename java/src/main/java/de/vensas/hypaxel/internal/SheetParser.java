@@ -1,8 +1,12 @@
 package de.vensas.hypaxel.internal;
 
+import de.vensas.hypaxel.ColumnWidth;
 import de.vensas.hypaxel.XlsxException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /** Streaming worksheet parser: one row at a time, with memory bounded by the widest row. */
 public final class SheetParser {
@@ -25,6 +29,22 @@ public final class SheetParser {
     private static final byte[] R_PH = Ascii.bytes("rPh");
     private static final byte[] R_PR = Ascii.bytes("rPr");
     private static final byte[] PHONETIC_PR = Ascii.bytes("phoneticPr");
+    private static final byte[] OUTLINE_LEVEL = Ascii.bytes("outlineLevel");
+    private static final byte[] HIDDEN = Ascii.bytes("hidden");
+    private static final byte[] COLLAPSED = Ascii.bytes("collapsed");
+    private static final byte[] HT = Ascii.bytes("ht");
+    private static final byte[] SHEET_PR = Ascii.bytes("sheetPr");
+    private static final byte[] OUTLINE_PR = Ascii.bytes("outlinePr");
+    private static final byte[] SUMMARY_BELOW = Ascii.bytes("summaryBelow");
+    private static final byte[] SHEET_FORMAT_PR = Ascii.bytes("sheetFormatPr");
+    private static final byte[] OUTLINE_LEVEL_ROW = Ascii.bytes("outlineLevelRow");
+    private static final byte[] COLS = Ascii.bytes("cols");
+    private static final byte[] COL = Ascii.bytes("col");
+    private static final byte[] MIN = Ascii.bytes("min");
+    private static final byte[] MAX = Ascii.bytes("max");
+    private static final byte[] WIDTH = Ascii.bytes("width");
+    private static final byte[] TRUE = Ascii.bytes("true");
+    private static final byte[] FALSE = Ascii.bytes("false");
 
     private static final int TYPE_NUMBER = 0;
     private static final int TYPE_SHARED = 1;
@@ -46,6 +66,9 @@ public final class SheetParser {
     private final ByteBuilder scratch = new ByteBuilder(64);
     private int state = BEFORE_DATA;
     private int previousRow;
+    private final List<ColumnWidth> columnWidths = new ArrayList<>();
+    private boolean outlineSummaryAbove;
+    private int rowOutlineLevels;
 
     public SheetParser(XmlReader xml, SharedStringTable sharedStrings, DateStyles styles, boolean date1904) {
         this.xml = xml;
@@ -66,6 +89,25 @@ public final class SheetParser {
     public void close() {
         state = DONE;
         xml.close();
+    }
+
+    /** Reads the worksheet up to its rows, if that has not happened yet, so that the layout getters are complete. */
+    public void readLayout() throws IOException {
+        if (state == BEFORE_DATA) {
+            findSheetData();
+        }
+    }
+
+    public List<ColumnWidth> columnWidths() {
+        return Collections.unmodifiableList(columnWidths);
+    }
+
+    public boolean outlineSummaryAbove() {
+        return outlineSummaryAbove;
+    }
+
+    public int rowOutlineLevels() {
+        return rowOutlineLevels;
     }
 
     /**
@@ -101,12 +143,29 @@ public final class SheetParser {
                 continue;
             }
             int number = previousRow + 1;
+            boolean numbered = false;
+            int outlineLevel = 0;
+            boolean hidden = false;
+            boolean collapsed = false;
+            double height = Double.NaN;
             while (xml.nextAttribute()) {
                 if (xml.attributeIs(R)) {
-                    number = parseDigits(xml.buffer(), trimStart(xml.buffer(), xml.valueStart, xml.valueEnd), trimEnd(xml.buffer(), xml.valueStart, xml.valueEnd));
+                    if (numbered) {
+                        continue;
+                    }
+                    numbered = true;
+                    number = attributeDigits();
                     if (number < 0) {
                         throw xml.malformed("a row has an invalid row number");
                     }
+                } else if (xml.attributeIs(OUTLINE_LEVEL)) {
+                    outlineLevel = attributeOutlineLevel();
+                } else if (xml.attributeIs(HIDDEN)) {
+                    hidden = attributeIsTrue();
+                } else if (xml.attributeIs(COLLAPSED)) {
+                    collapsed = attributeIsTrue();
+                } else if (xml.attributeIs(HT)) {
+                    height = attributeMeasure();
                 }
             }
             if (number < 1 || number > MAX_ROWS) {
@@ -117,6 +176,10 @@ public final class SheetParser {
                 continue;
             }
             row.number = number;
+            row.outlineLevel = outlineLevel;
+            row.hidden = hidden;
+            row.collapsed = collapsed;
+            row.height = height;
             readCells();
             if (row.count > 0) {
                 return true;
@@ -131,21 +194,118 @@ public final class SheetParser {
                 close();
                 return;
             }
-            if (event == XmlReader.EMPTY && xml.nameIs(SHEET_DATA)) {
-                close();
-                return;
-            }
-            if (event != XmlReader.START) {
+            if (event != XmlReader.START && event != XmlReader.EMPTY) {
                 continue;
             }
+            boolean start = event == XmlReader.START;
             if (xml.nameIs(SHEET_DATA)) {
-                state = IN_DATA;
+                if (start) {
+                    state = IN_DATA;
+                } else {
+                    close();
+                }
                 return;
             }
-            if (!xml.nameIs(WORKSHEET) && !xml.nameIs(DIALOGSHEET) && !xml.nameIs(MACROSHEET)) {
+            boolean descend = false;
+            if (xml.nameIs(WORKSHEET) || xml.nameIs(DIALOGSHEET) || xml.nameIs(MACROSHEET) || xml.nameIs(SHEET_PR) || xml.nameIs(COLS)) {
+                descend = true;
+            } else if (xml.nameIs(OUTLINE_PR)) {
+                outlineSummaryAbove = false;
+                while (xml.nextAttribute()) {
+                    if (xml.attributeIs(SUMMARY_BELOW)) {
+                        outlineSummaryAbove = attributeEquals((byte) '0') || attributeEquals(FALSE);
+                        break;
+                    }
+                }
+            } else if (xml.nameIs(SHEET_FORMAT_PR)) {
+                rowOutlineLevels = 0;
+                while (xml.nextAttribute()) {
+                    if (xml.attributeIs(OUTLINE_LEVEL_ROW)) {
+                        rowOutlineLevels = attributeOutlineLevel();
+                        break;
+                    }
+                }
+            } else if (xml.nameIs(COL)) {
+                readColumnWidth();
+            }
+            if (start && !descend) {
                 xml.skipElement();
             }
         }
+    }
+
+    private void readColumnWidth() {
+        int first = -1;
+        int last = -1;
+        double width = Double.NaN;
+        boolean hasFirst = false;
+        boolean hasLast = false;
+        boolean hasWidth = false;
+        while (xml.nextAttribute()) {
+            if (xml.attributeIs(MIN) && !hasFirst) {
+                hasFirst = true;
+                first = attributeDigits();
+            } else if (xml.attributeIs(MAX) && !hasLast) {
+                hasLast = true;
+                last = attributeDigits();
+            } else if (xml.attributeIs(WIDTH) && !hasWidth) {
+                hasWidth = true;
+                width = attributeMeasure();
+            }
+        }
+        if (first < 0 || last < 0 || Double.isNaN(width)) {
+            return;
+        }
+        last = Math.min(last, MAX_COLUMNS);
+        if (first < 1 || first > last) {
+            return;
+        }
+        if (columnWidths.size() >= MAX_COLUMNS) {
+            throw xml.malformed("the sheet defines more than 16384 column ranges");
+        }
+        columnWidths.add(new ColumnWidth(first, last, width));
+    }
+
+    /** The current attribute as a non-negative integer; -1 if invalid. */
+    private int attributeDigits() {
+        byte[] b = xml.buffer();
+        return parseDigits(b, trimStart(b, xml.valueStart, xml.valueEnd), trimEnd(b, xml.valueStart, xml.valueEnd));
+    }
+
+    private int attributeOutlineLevel() {
+        int level = attributeDigits();
+        return level < 0 ? 0 : Math.min(level, 7);
+    }
+
+    private boolean attributeIsTrue() {
+        return attributeEquals((byte) '1') || attributeEquals(TRUE);
+    }
+
+    private boolean attributeEquals(byte expected) {
+        byte[] b = xml.buffer();
+        int from = trimStart(b, xml.valueStart, xml.valueEnd);
+        return trimEnd(b, xml.valueStart, xml.valueEnd) - from == 1 && b[from] == expected;
+    }
+
+    private boolean attributeEquals(byte[] expected) {
+        byte[] b = xml.buffer();
+        int from = trimStart(b, xml.valueStart, xml.valueEnd);
+        if (trimEnd(b, xml.valueStart, xml.valueEnd) - from != expected.length) {
+            return false;
+        }
+        for (int i = 0; i < expected.length; i++) {
+            if (b[from + i] != expected[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** The current attribute as a finite, non-negative number; NaN if invalid. */
+    private double attributeMeasure() {
+        byte[] b = xml.buffer();
+        double value = Numbers.parse(b, trimStart(b, xml.valueStart, xml.valueEnd), trimEnd(b, xml.valueStart, xml.valueEnd));
+        return value >= 0 && !Double.isInfinite(value) ? value : Double.NaN;
     }
 
     private void readCells() throws IOException {

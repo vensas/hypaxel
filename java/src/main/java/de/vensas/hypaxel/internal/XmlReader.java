@@ -423,13 +423,18 @@ public final class XmlReader {
      * Resets the attribute cursor of {@link #nextAttribute()}.
      */
     public String attribute(byte[] name) {
+        return attribute(name, false);
+    }
+
+    /** Like {@link #attribute(byte[])}; with {@code excelEscapes}, {@code _xHHHH_} escapes are decoded as well. */
+    public String attribute(byte[] name, boolean excelEscapes) {
         int saved = attrPos;
         attrPos = attrsStart;
         try {
             while (nextAttribute()) {
                 if (attributeIs(name)) {
                     ByteBuilder out = new ByteBuilder(valueEnd - valueStart);
-                    if (XmlText.decode(out, buf, valueStart, valueEnd, true, false) != null) {
+                    if (XmlText.decode(out, buf, valueStart, valueEnd, true, excelEscapes) != null) {
                         return null;
                     }
                     return out.toString();

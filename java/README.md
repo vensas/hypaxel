@@ -128,6 +128,28 @@ try (Stream<Row> rows = reader.worksheet("Orders").stream()) {   // independent 
 Keep `row.copy()`, `row.toList()` or the values you need. `stream()` yields copies, so they may be
 collected.
 
+Tables, row properties and column widths that the writer can add are read back as well, so a
+workbook written with Hypaxel can be checked with Hypaxel alone:
+
+```java
+List<ExcelTable> tables = reader.tables("Orders");          // or tables(0); the same class addTable takes
+tables.get(0).name(); tables.get(0).columns(); tables.get(0).style();
+
+try (SheetReader rows = reader.worksheet("Orders")) {
+    List<ColumnWidth> widths = rows.columnWidths();         // known before the first row is read
+    OptionalDouble width = rows.columnWidth(2);             // empty: default width
+    boolean summaryAbove = rows.outlineSummaryAbove();
+    for (Row row : rows) {
+        row.outlineLevel(); row.hidden(); row.collapsed(); row.height();
+    }
+}
+```
+
+Tables are stored in their own parts and are read only when `tables` is called; reading rows does
+not touch them. A table style that is not one of Excel's built-in styles reads as
+`TableStyle.NONE`. Row properties are reported for the rows that are returned, that is rows with at
+least one value.
+
 **`XlsxReader`**
 
 | Method | Purpose |
@@ -138,12 +160,23 @@ collected.
 | `worksheet(index)` | Sheet by 0-based position |
 | `isDate1904()` | Whether the workbook uses the 1904 date system |
 | `sharedStringCount()` | Entries in the shared string table (loads it) |
+| `tables(name)`, `tables(index)` | The sheet's Excel tables as `ExcelTable`: name, range, columns, style and options; read on each call |
+
+**`SheetReader`**
+
+| Method | Purpose |
+| --- | --- |
+| `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back |
+| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`) the sheet defines, explicit and auto-fitted, in file order |
+| `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width |
+| `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
 
 **`Row`**
 
 | Method | Purpose |
 | --- | --- |
 | `number()`, `cellCount()`, `lastColumn()`, `column(i)` | Row number, cells with a value and their columns |
+| `outlineLevel()`, `hidden()`, `collapsed()`, `height()` | Grouping level 0 to 7, hidden and collapsed state, height in points (`OptionalDouble`) |
 | `type(column)` | `CellType`: `EMPTY`, `STRING`, `NUMBER`, `BOOLEAN`, `DATE_TIME`, `ERROR` |
 | `getString`, `getNumber`, `getBoolean`, `getError` | Typed values without allocation (except the `String` of inline text) |
 | `getDateTime(column)` | `ExcelDateTime`: `serial()`, `kind()`, `toLocalDateTime()`, `toLocalDate()`, `toLocalTime()`, `toDuration()`, `toObject()` |

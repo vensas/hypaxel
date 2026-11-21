@@ -1,5 +1,6 @@
 package de.vensas.hypaxel.internal;
 
+import de.vensas.hypaxel.ExcelTable;
 import de.vensas.hypaxel.SheetInfo;
 import de.vensas.hypaxel.SheetKind;
 import de.vensas.hypaxel.SheetVisibility;
@@ -11,6 +12,9 @@ import java.util.List;
 
 /** The structure of an XLSX package: its parts, sheets, date system and cell formats. */
 public final class WorkbookPackage {
+    /** Most tables read from one worksheet. */
+    static final int MAX_TABLES = 4096;
+
     private static final String NOT_A_WORKBOOK = "the package has no workbook part; it may be a Word or PowerPoint file";
 
     private static final byte[] RELATIONSHIP = Ascii.bytes("Relationship");
@@ -135,6 +139,34 @@ public final class WorkbookPackage {
             throw new XlsxException(XlsxException.Kind.MALFORMED, part, "the worksheet part of sheet \"" + info.name() + "\" is missing");
         }
         return open(archive, part);
+    }
+
+    /** Reads the tables of the sheet at {@code index} from their own parts, in relationship order. */
+    public List<ExcelTable> readTables(int index) throws IOException {
+        String part = sheetParts.get(index);
+        if (part == null) {
+            return List.of();
+        }
+        List<Relationship> rels = relationships(archive, relsPath(part));
+        if (rels == null) {
+            return List.of();
+        }
+        List<ExcelTable> tables = new ArrayList<>();
+        for (Relationship r : rels) {
+            if (!r.is("table")) {
+                continue;
+            }
+            if (tables.size() >= MAX_TABLES) {
+                throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, part + " has more than " + MAX_TABLES + " tables");
+            }
+            XmlReader xml = open(archive, r.target);
+            try {
+                tables.add(TableParser.parse(xml));
+            } finally {
+                xml.close();
+            }
+        }
+        return Collections.unmodifiableList(tables);
     }
 
     private static XmlReader open(ZipArchive archive, String part) throws IOException {

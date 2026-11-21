@@ -5,7 +5,9 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Iterator;
+import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.OptionalDouble;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.stream.Stream;
@@ -43,6 +45,50 @@ public final class SheetReader implements Closeable, Iterable<Row> {
     /** Returns the sheet being read. */
     public SheetInfo sheet() {
         return sheet;
+    }
+
+    /**
+     * Returns the column widths the sheet defines, explicit and auto-fitted alike, in file order.
+     * Columns that are not covered have the default width. Like the outline settings, the widths
+     * precede the rows in the file, so they are available before the first row is read.
+     *
+     * @throws XlsxException if the worksheet is damaged ({@link XlsxException.Kind#MALFORMED})
+     * @throws IOException if the source cannot be read
+     */
+    public List<ColumnWidth> columnWidths() throws IOException {
+        readLayout();
+        return parser.columnWidths();
+    }
+
+    /** Returns the width of a 1-based column; empty if the sheet leaves it at the default. */
+    public OptionalDouble columnWidth(int column) throws IOException {
+        for (ColumnWidth width : columnWidths()) {
+            if (column >= width.firstColumn() && column <= width.lastColumn()) {
+                return OptionalDouble.of(width.width());
+            }
+        }
+        return OptionalDouble.empty();
+    }
+
+    /** Returns whether summary rows sit above their groups, as set by {@link SheetOptions.Builder#outlineSummaryAbove()}. */
+    public boolean outlineSummaryAbove() throws IOException {
+        readLayout();
+        return parser.outlineSummaryAbove();
+    }
+
+    /** Returns the deepest row outline level the sheet declares; 0 without grouping. */
+    public int rowOutlineLevels() throws IOException {
+        readLayout();
+        return parser.rowOutlineLevels();
+    }
+
+    private void readLayout() throws IOException {
+        try {
+            parser.readLayout();
+        } catch (IOException | RuntimeException e) {
+            close();
+            throw e;
+        }
     }
 
     /**

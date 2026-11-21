@@ -148,6 +148,10 @@ public final class XlsxReader implements Closeable {
      *     {@link XlsxException.Kind#UNSUPPORTED} for chart sheets
      */
     public SheetReader worksheet(String name) throws IOException {
+        return worksheet(sheetIndex(name));
+    }
+
+    private int sheetIndex(String name) {
         Objects.requireNonNull(name, "name");
         int index = sheetNames.indexOf(name);
         if (index < 0) {
@@ -161,16 +165,46 @@ public final class XlsxReader implements Closeable {
         if (index < 0) {
             throw new XlsxException(XlsxException.Kind.SHEET_NOT_FOUND, "there is no sheet named \"" + name + "\"");
         }
-        return worksheet(index);
+        return index;
     }
 
-    /** Opens the sheet at a 0-based position in {@link #sheets()} for reading. */
-    public SheetReader worksheet(int index) throws IOException {
+    private void checkIndex(int index) {
         ensureOpen();
         if (index < 0 || index >= workbook.sheets().size()) {
             throw new XlsxException(XlsxException.Kind.SHEET_NOT_FOUND,
                     "there is no sheet at index " + index + "; the workbook has " + workbook.sheets().size());
         }
+    }
+
+    /**
+     * Returns the Excel tables of the sheet with this name, matched exactly and then ignoring
+     * case. See {@link #tables(int)}.
+     *
+     * @throws XlsxException {@link XlsxException.Kind#SHEET_NOT_FOUND} if there is no such sheet
+     */
+    public List<ExcelTable> tables(String name) throws IOException {
+        return tables(sheetIndex(name));
+    }
+
+    /**
+     * Returns the Excel tables of the sheet at a 0-based position in {@link #sheets()}, as the
+     * {@link ExcelTable} values that {@link Worksheet#addTable(ExcelTable)} accepts; empty if the
+     * sheet has none.
+     *
+     * <p>Tables live in their own parts, which are read on each call; reading rows does not touch
+     * them. A table style that is not one of Excel's built-in styles is reported as
+     * {@link TableStyle#NONE}.
+     *
+     * @throws XlsxException if a table part is damaged ({@link XlsxException.Kind#MALFORMED})
+     */
+    public List<ExcelTable> tables(int index) throws IOException {
+        checkIndex(index);
+        return workbook.readTables(index);
+    }
+
+    /** Opens the sheet at a 0-based position in {@link #sheets()} for reading. */
+    public SheetReader worksheet(int index) throws IOException {
+        checkIndex(index);
         SharedStringTable strings = sharedStrings();
         XmlReader xml = workbook.openSheet(index);
         return new SheetReader(workbook.sheets().get(index), new SheetParser(xml, strings, workbook.styles(), workbook.date1904()));

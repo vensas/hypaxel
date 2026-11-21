@@ -122,6 +122,40 @@ public final class ExcelTable {
         return highlightLastColumn;
     }
 
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof ExcelTable table
+                && firstRow == table.firstRow
+                && firstColumn == table.firstColumn
+                && lastRow == table.lastRow
+                && lastColumn == table.lastColumn
+                && Objects.equals(name, table.name)
+                && columns.equals(table.columns)
+                && style.equals(table.style)
+                && headerRow == table.headerRow
+                && autoFilter == table.autoFilter
+                && rowStripes == table.rowStripes
+                && columnStripes == table.columnStripes
+                && highlightFirstColumn == table.highlightFirstColumn
+                && highlightLastColumn == table.highlightLastColumn;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(firstRow, firstColumn, lastRow, lastColumn, name, columns, style, headerRow, autoFilter,
+                rowStripes, columnStripes, highlightFirstColumn, highlightLastColumn);
+    }
+
+    /** Returns the name, range and options, e.g. {@code Orders A1:C10 [Product, Units] TableStyleMedium2}. */
+    @Override
+    public String toString() {
+        return (name == null ? "(unnamed)" : name) + " " + CellReference.range(firstRow, firstColumn, lastRow, lastColumn)
+                + " " + columns + " " + style
+                + " headerRow=" + headerRow + " autoFilter=" + autoFilter
+                + " rowStripes=" + rowStripes + " columnStripes=" + columnStripes
+                + " highlightFirstColumn=" + highlightFirstColumn + " highlightLastColumn=" + highlightLastColumn;
+    }
+
     /** Builder for {@link ExcelTable}. */
     public static final class Builder {
         private final int firstRow;
