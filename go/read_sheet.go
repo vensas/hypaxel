@@ -80,16 +80,18 @@ const (
 // returns false or Close is called, and is stopped by the garbage collector for a Rows that
 // is dropped without either. Call Close when stopping early.
 type Rows struct {
-	x         *xmlReader
-	rc        io.ReadCloser
-	styles    []DateKind
-	row       Row
-	layout    SheetLayout
-	scratch   []byte
-	state     uint8
-	emptyRows bool
-	previous  uint32
-	err       error
+	x          *xmlReader
+	rc         io.ReadCloser
+	styles     []DateKind
+	row        Row
+	layout     SheetLayout
+	scratch    []byte
+	state      uint8
+	emptyRows  bool
+	layoutRead bool
+	previous   uint32
+	layoutErr  error
+	err        error
 }
 
 // Next advances to the next row that holds at least one value; rows that are missing from the
@@ -114,15 +116,32 @@ func (r *Rows) Next() bool {
 
 // Layout returns the column widths and outline settings of the sheet. They precede the rows in
 // the file, so Layout can be called before the first Next and reads nothing extra. An error
-// stops the Rows; Err reports it as well.
+// while reading them stops the Rows, and Err reports it as well. Once read, the layout stays
+// available, also after the last row, after Close and after an error in a later row. Layout
+// returns [ErrRowsClosed] if the Rows was closed before the layout was read.
 func (r *Rows) Layout() (*SheetLayout, error) {
 	if r.state == rowsBeforeData {
-		if err := r.findSheetData(); err != nil {
+		if err := r.readHeader(); err != nil {
 			r.err = err
+			r.finish()
+		} else if r.state == rowsDone {
 			r.finish()
 		}
 	}
-	return &r.layout, r.err
+	switch {
+	case r.layoutRead:
+		return &r.layout, nil
+	case r.layoutErr != nil:
+		return &r.layout, r.layoutErr
+	}
+	return &r.layout, ErrRowsClosed
+}
+
+// readHeader reads the worksheet up to its rows and records whether the layout is complete.
+func (r *Rows) readHeader() error {
+	err := r.findSheetData()
+	r.layoutRead, r.layoutErr = err == nil, err
+	return err
 }
 
 // Row returns the current row. It is overwritten by the next call to Next; the strings and
@@ -184,7 +203,7 @@ func (r *Rows) advance() (bool, error) {
 		case rowsDone:
 			return false, nil
 		case rowsBeforeData:
-			if err := r.findSheetData(); err != nil {
+			if err := r.readHeader(); err != nil {
 				return false, err
 			}
 			continue

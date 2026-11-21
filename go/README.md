@@ -430,7 +430,7 @@ return rows.Err()
   rows without references, out-of-order cells, rich text, inline strings, phonetic runs, CDATA,
   and Excel's `_xHHHH_` escapes.
 - **Safety:** document type declarations are rejected (no entity expansion), every XML token is
-  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, every sheet to 4,096 tables, ZIP entries must match
+  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, every sheet to 4,096 tables holding 64 MiB of table and column names, ZIP entries must match
   their declared size and CRC-32, and `WithMaxSharedStringsBytes` caps the shared string table.
   Damaged input returns an error, never a panic or a hang; the reader is fuzz-tested.
 
@@ -442,6 +442,7 @@ Errors name the part they come from, as `*ReadError` with a `Part` field:
 | `ErrSheetNotFound` | No sheet with that name or index |
 | `ErrMalformed` | Invalid XML, a bad cell value or reference, a missing part, or a ZIP entry that fails its size or CRC check |
 | `ErrLimitExceeded` | A safety limit above was reached |
+| `ErrRowsClosed` | `Rows.Layout` was called on a `Rows` that was closed before its layout was read |
 | `ErrUnsupported` | A chart sheet, a UTF-16 part, an encrypted ZIP entry or an unknown compression method |
 
 Not read (yet): formulas' text, styles beyond date detection, merged ranges, comments and

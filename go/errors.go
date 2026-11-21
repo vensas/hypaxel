@@ -49,6 +49,9 @@ var (
 	// ErrMalformed reports a damaged workbook part: invalid XML, a bad cell value, or a ZIP
 	// entry that fails its size or CRC-32 check.
 	ErrMalformed = errors.New("hypaxel: malformed workbook")
+	// ErrRowsClosed reports a [Rows.Layout] call on a Rows that was closed before its layout was
+	// read.
+	ErrRowsClosed = errors.New("hypaxel: rows are closed")
 	// ErrLimitExceeded reports a workbook that exceeds a safety limit of the Reader, such as
 	// [WithMaxSharedStringsBytes] or the 16 MiB bound on a single XML token.
 	ErrLimitExceeded = errors.New("hypaxel: read limit exceeded")

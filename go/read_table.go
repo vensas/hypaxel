@@ -11,6 +11,13 @@ import (
 // maxSheetTables bounds the tables read from one worksheet.
 const maxSheetTables = 4096
 
+// maxTableText bounds the bytes of table and column names held for the tables of one worksheet,
+// counting tableColumnCost bytes per column on top of its name.
+const (
+	maxTableText    = 64 << 20
+	tableColumnCost = 32
+)
+
 // ColumnWidth is a run of adjacent columns that share one width.
 type ColumnWidth struct {
 	// FirstColumn and LastColumn are 1-based and inclusive.
@@ -69,7 +76,7 @@ func (r *Reader) Tables(name string) ([]Table, error) {
 //
 // Tables live in their own parts, which are read on each call; reading rows does not touch
 // them. They are returned from top to bottom, then left to right, whatever order the file lists
-// them in. A style that is not one of Excel's built-in styles is returned as [TableStyleNone],
+// them in, and a part that the sheet references more than once is read once. A style that is not one of Excel's built-in styles is returned as [TableStyleNone],
 // and TotalsRow is set for a table whose last row is a totals row.
 func (r *Reader) TablesAt(index int) ([]Table, error) {
 	if index < 0 || index >= len(r.sheets) {
@@ -83,15 +90,25 @@ func (r *Reader) TablesAt(index int) ([]Table, error) {
 	if err != nil {
 		return nil, err
 	}
-	var tables []Table
+	var targets []string
+	seen := make(map[string]struct{})
+	count := 0
 	for i := range rels {
 		if !rels[i].is("table") {
 			continue
 		}
-		if len(tables) >= maxSheetTables {
+		if count++; count > maxSheetTables {
 			return nil, partError(part, ErrLimitExceeded, "the sheet has more than %d tables", maxSheetTables)
 		}
-		t, err := r.readTable(rels[i].target)
+		if _, ok := seen[rels[i].target]; !ok {
+			seen[rels[i].target] = struct{}{}
+			targets = append(targets, rels[i].target)
+		}
+	}
+	tables := make([]Table, 0, len(targets))
+	budget := maxTableText
+	for _, target := range targets {
+		t, err := r.readTable(target, &budget)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +121,9 @@ func (r *Reader) TablesAt(index int) ([]Table, error) {
 	return tables, nil
 }
 
-func (r *Reader) readTable(part string) (Table, error) {
+// readTable reads one table part. budget is the number of name bytes the caller still accepts;
+// it is reduced by what the table holds.
+func (r *Reader) readTable(part string, budget *int) (Table, error) {
 	x, rc, err := r.open(part)
 	if err != nil {
 		return Table{}, err
@@ -124,6 +143,7 @@ func (r *Reader) readTable(part string) (Table, error) {
 			continue
 		}
 		descend := false
+		cost := 0
 		name := string(x.name)
 		switch {
 		case root:
@@ -147,6 +167,7 @@ func (r *Reader) readTable(part string) (Table, error) {
 				n, ok := parseUint32(count)
 				t.TotalsRow = ok && n > 0
 			}
+			cost = len(t.Name)
 			descend = true
 		case name == "autoFilter":
 			t.NoFilterButtons = false
@@ -162,6 +183,7 @@ func (r *Reader) readTable(part string) (Table, error) {
 					column = string(out)
 				}
 			}
+			cost = len(column) + tableColumnCost
 			t.Columns = append(t.Columns, column)
 		case name == "tableStyleInfo":
 			style, _ := attr(x.attrs, "name")
@@ -170,6 +192,9 @@ func (r *Reader) readTable(part string) (Table, error) {
 			t.ColumnStripes = flagAttr(x.attrs, "showColumnStripes")
 			t.HighlightFirstColumn = flagAttr(x.attrs, "showFirstColumn")
 			t.HighlightLastColumn = flagAttr(x.attrs, "showLastColumn")
+		}
+		if *budget -= cost; *budget < 0 {
+			return Table{}, partError(part, ErrLimitExceeded, "the tables of a worksheet hold too many names")
 		}
 		if ev == xmlStart && !descend {
 			if err := x.skipElement(); err != nil {
@@ -263,7 +288,13 @@ func parseOutlineLevel(raw []byte) uint8 {
 
 // parseMeasure parses a width or height: a finite, non-negative decimal number.
 func parseMeasure(raw []byte) (float64, bool) {
-	n, err := strconv.ParseFloat(string(trimSpace(raw)), 64)
+	raw = trimSpace(raw)
+	for _, c := range raw {
+		if !isDigit(c) && c != '.' && c != '+' && c != '-' && c != 'e' && c != 'E' {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseFloat(string(raw), 64)
 	if err != nil || math.IsInf(n, 0) || math.IsNaN(n) || n < 0 {
 		return 0, false
 	}

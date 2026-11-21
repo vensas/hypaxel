@@ -1,8 +1,11 @@
 package hypaxel
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -549,5 +552,135 @@ func TestReadTableWithTotalsRowSavedByExcel(t *testing.T) {
 	want := []string{"1=Total", "5=21.085", "6=33.736", "8=99696", "10=34500", "11=1000"}
 	if !reflect.DeepEqual(totals, want) {
 		t.Errorf("totals row:\n got %v\nwant %v", totals, want)
+	}
+}
+
+func TestReadTablesBoundsMemory(t *testing.T) {
+	const sheet = `<worksheet><sheetData/></worksheet>`
+	const table = `<table displayName="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns></table>`
+	rels := `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` + strings.Repeat(tableRel, 3) + `</Relationships>`
+	repeated := singleSheet(t, sheet, "", "xl/worksheets/_rels/sheet1.xml.rels", rels, "xl/tables/t.xml", table)
+	tables, err := openBytes(t, repeated).Tables("S")
+	noErr(t, err)
+	if len(tables) != 1 {
+		t.Errorf("a part referenced three times gave %d tables, want 1", len(tables))
+	}
+
+	column := `<tableColumn name="` + strings.Repeat("n", 4200) + `"/>`
+	heavy := `<table displayName="T" ref="A1:B2"><tableColumns>` + strings.Repeat(column, MaxColumns) + `</tableColumns></table>`
+	_, err = openBytes(t, sheetWithTable(t, sheet, heavy)).Tables("S")
+	wantErr(t, err, ErrLimitExceeded)
+	var re *ReadError
+	if !errors.As(err, &re) || re.Part != "xl/tables/t.xml" || !strings.Contains(re.Message, "too many names") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestLayoutOnSheetWithoutRowsVerifiesTheEntry(t *testing.T) {
+	sheet := `<worksheet><cols><col min="1" max="1" width="9"/></cols><sheetData/>` + strings.Repeat(`<mergeCell ref="A1:B2"/>`, 20_000) + `</worksheet>`
+	data := singleSheet(t, sheet, "")
+	damaged := bytes.Clone(data)
+	damaged[centralEntry(t, data, "xl/worksheets/sheet1.xml")+16] ^= 0xFF
+
+	for _, concurrent := range []bool{false, true} {
+		for _, withLayout := range []bool{false, true} {
+			rows, err := openBytes(t, damaged, WithConcurrentInflate(concurrent)).Rows("S")
+			noErr(t, err)
+			if withLayout {
+				layout, err := rows.Layout()
+				noErr(t, err)
+				if len(layout.ColumnWidths) != 1 {
+					t.Errorf("layout: %+v", layout)
+				}
+			}
+			if rows.Next() {
+				t.Fatal("unexpected row")
+			}
+			if err := rows.Err(); !errors.Is(err, ErrMalformed) || !errors.Is(err, zip.ErrChecksum) {
+				t.Errorf("concurrent %v, layout %v: Err() = %v, want a checksum error", concurrent, withLayout, err)
+			}
+			if withLayout {
+				if _, err := rows.Layout(); err != nil {
+					t.Errorf("Layout after the end: %v", err)
+				}
+			}
+		}
+	}
+
+	rows, err := openBytes(t, data).Rows("S")
+	noErr(t, err)
+	_, err = rows.Layout()
+	noErr(t, err)
+	if rows.rc != nil {
+		t.Error("Layout at the end of the rows left the entry open")
+	}
+}
+
+func TestLayoutErrorsAreItsOwn(t *testing.T) {
+	sheet := `<worksheet><cols><col min="2" max="3" width="7.5"/></cols><sheetData><row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>x</v></c></row></sheetData></worksheet>`
+	rows, err := openBytes(t, singleSheet(t, sheet, "")).Rows("S")
+	noErr(t, err)
+	if _, err := rows.Layout(); err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+	}
+	wantErr(t, rows.Err(), ErrMalformed)
+	layout, err := rows.Layout()
+	noErr(t, err)
+	if width, ok := layout.ColumnWidth(3); !ok || width != 7.5 {
+		t.Errorf("layout after a row error: %+v", layout)
+	}
+
+	rows, err = openBytes(t, singleSheet(t, sheet, "")).Rows("S")
+	noErr(t, err)
+	for rows.Next() {
+	}
+	if layout, err := rows.Layout(); err != nil || len(layout.ColumnWidths) != 1 {
+		t.Errorf("layout read by Next: %+v, %v", layout, err)
+	}
+
+	rows, err = openBytes(t, singleSheet(t, sheet, "")).Rows("S")
+	noErr(t, err)
+	noErr(t, rows.Close())
+	if _, err := rows.Layout(); !errors.Is(err, ErrRowsClosed) {
+		t.Errorf("Layout on closed rows: %v", err)
+	}
+	if rows.Next() || rows.Err() != nil {
+		t.Errorf("closed rows: Err() = %v", rows.Err())
+	}
+
+	bad := `<worksheet><cols>` + strings.Repeat(`<col min="1" max="1" width="1"/>`, MaxColumns+1) + `</cols><sheetData/></worksheet>`
+	rows, err = openBytes(t, singleSheet(t, bad, "")).Rows("S")
+	noErr(t, err)
+	_, first := rows.Layout()
+	_, second := rows.Layout()
+	wantErr(t, first, ErrMalformed)
+	if second != first {
+		t.Errorf("second Layout: %v, want %v", second, first)
+	}
+}
+
+func TestReadMeasuresArePlainDecimals(t *testing.T) {
+	sheet := `<worksheet><cols><col min="1" max="1" width="0x1p4"/><col min="2" max="2" width="1_0"/><col min="3" max="3" width="Inf"/><col min="4" max="4" width="1.5e1"/></cols>` +
+		`<sheetData><row ht="0x1p4"><c><v>1</v></c></row><row ht="NaN"><c><v>2</v></c></row><row ht=" 12.5 "><c><v>3</v></c></row></sheetData></worksheet>`
+	rows, err := openBytes(t, singleSheet(t, sheet, "")).Rows("S")
+	noErr(t, err)
+	layout, err := rows.Layout()
+	noErr(t, err)
+	if len(layout.ColumnWidths) != 1 || layout.ColumnWidths[0] != (ColumnWidth{FirstColumn: 4, LastColumn: 4, Width: 15}) {
+		t.Errorf("column widths: %+v", layout.ColumnWidths)
+	}
+	var heights []float64
+	for rows.Next() {
+		height, ok := rows.Row().Height()
+		if !ok {
+			height = -1
+		}
+		heights = append(heights, height)
+	}
+	noErr(t, rows.Err())
+	if !slices.Equal(heights, []float64{-1, -1, 12.5}) {
+		t.Errorf("heights: %v", heights)
 	}
 }
