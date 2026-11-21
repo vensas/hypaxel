@@ -68,36 +68,41 @@ Python, Node.js, .NET, Java, Go and PHP).
     adds their properties and returns such rows after the last value too, and `skip_empty` /
     `skipEmpty` still drops them.
   - Each worksheet has its column widths (runs of columns with their hidden flag, explicit and
-    auto-fitted alike), lookups by column for the width and the hidden flag, `outline_summary_above` and the declared row outline levels. They precede
-    the rows in the file and are available before the first row is read.
+    auto-fitted alike), lookups by column for the width and the hidden flag,
+    `outline_summary_above` and the declared row outline levels. They precede the rows in the
+    file and are available before the first row is read.
   - Rust: `XlsxReader::tables(name)` / `tables_at(index)` → `Vec<Table>`; `Row::outline_level`,
     `is_hidden`, `is_collapsed`, `height`; `Rows::layout()` → `SheetLayout` (`column_widths`,
-    `column_width`, `outline_summary_above`, `row_outline_levels`) with `ColumnWidth`;
-    `TableStyle::name()` is now public.
+    `column_width`, `is_column_hidden`, `outline_summary_above`, `row_outline_levels`) with
+    `ColumnWidth`; `TableStyle::name()` is now public.
   - Python: `Reader.tables(sheet)` → dicts with `add_table`'s keys; on the row iterator
     `row_number`, `outline_level`, `hidden`, `collapsed`, `height`, `column_widths`,
-    `column_width(col)`, `outline_summary_above`, `row_outline_levels`.
+    `column_width(col)`, `column_hidden(col)`, `outline_summary_above`, `row_outline_levels`.
   - Node.js and browsers: `Workbook.tables(sheet)` → `ReadTable` (`firstRow`, `firstColumn`,
     `lastRow`, `lastColumn`, `options`); on `SheetRows` `rowNumber`, `outlineLevel`, `hidden`,
-    `collapsed`, `height`, `layout()` / `layoutAsync()` → `SheetLayout` with `ColumnWidth`. The
-    layout and row properties travel in the row batches, identically on both engines.
+    `collapsed`, `height`, `layout()` / `layoutAsync()` → `SheetLayout` (`columnWidths`,
+    `columnWidth`, `columnHidden`, `outlineSummaryAbove`, `rowOutlineLevels`) with
+    `ColumnWidth`. The layout and row properties travel in the row batches, identically on both
+    engines.
   - .NET: `XlsxReader.GetTables(name or index)` → `IReadOnlyList<ExcelTable>`;
     `XlsxRow.OutlineLevel`, `Hidden`, `Collapsed`, `Height`; `WorksheetReader.ColumnWidths`,
-    `GetColumnWidth`, `OutlineSummaryAbove`, `RowOutlineLevels`; `ColumnWidth`.
+    `GetColumnWidth`, `IsColumnHidden`, `OutlineSummaryAbove`, `RowOutlineLevels`;
+    `ColumnWidth`.
   - Go: `Reader.Tables(name)` / `TablesAt(index)` → `[]Table`; `Row.OutlineLevel`, `Hidden`,
     `Collapsed`, `Height`; `Rows.Layout()` → `*SheetLayout` (`ColumnWidths`,
-    `ColumnWidth(column)`, `OutlineSummaryAbove`, `RowOutlineLevels`) with `ColumnWidth`.
+    `ColumnWidth(column)`, `ColumnHidden(column)`, `OutlineSummaryAbove`, `RowOutlineLevels`)
+    with `ColumnWidth`.
   - Java: `XlsxReader.tables(name or index)` → `List<ExcelTable>` (which gains `equals`,
     `hashCode` and `toString`); `Row.outlineLevel`, `hidden`, `collapsed`, `height`;
-    `SheetReader.columnWidths`, `columnWidth`, `outlineSummaryAbove`, `rowOutlineLevels`;
-    `ColumnWidth`.
+    `SheetReader.columnWidths`, `columnWidth`, `columnHidden`, `outlineSummaryAbove`,
+    `rowOutlineLevels`; `ColumnWidth`.
   - Checked against the same workbook saved by Excel for Mac and by LibreOffice Calc, and against
     tables with a totals row saved by Excel and downloaded from Google Sheets, and a sheet
     exported by Apple Numbers (`testdata/reader/`), in every implementation.
   - Go: `TableStyleMedium(2)` is now the zero `TableStyle`, so a table written with it compares
     equal to the table read back.
   - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table, 64 MiB
-    of table and column names per sheet 16,384 column ranges per sheet and 65,536
+    of table and column names per sheet, 16,384 column ranges per sheet and 65,536
     relationships per part (links to external targets do not count). A table part that a
     sheet references several times is read once.
   - Integer attributes (row numbers, outline levels, column ranges) are read as plain digits in
