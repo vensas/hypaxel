@@ -304,7 +304,7 @@ if err != nil {
 defer rows.Close()
 for rows.Next() {
 	row := rows.Row()                          // reused by the next call to Next
-	// row.Index() is the 1-based Excel row; rows without values are skipped.
+	// row.Index() is the 1-based Excel row; rows without values are skipped (see WithEmptyRows).
 	for column, v := range row.Cells() {
 		switch v.Kind() {
 		case hypaxel.ValueString:
@@ -368,7 +368,10 @@ return rows.Err()
   as the zero `TableStyle`, a custom (not built-in) style as `TableStyleNone`, generated names such
   as `Table1` and `Column1` filled in, and `NoFilterButtons` set for a table without a header row.
 - **Row properties** are those of the rows that `Next` returns; rows without values are skipped
-  as before. `Height` is the stored height, whether set explicitly or by Excel.
+  by default. Open the reader with `WithEmptyRows(true)` to also get the rows that the file stores
+  without any value, such as a spacer row with a height or an empty hidden row: they have
+  `Len() == 0` and carry their index and properties. Rows that the file does not store are never
+  returned. `Height` is the stored height, whether set explicitly or by Excel.
 - **Layout** precedes the rows in the file, so `Layout` reads nothing extra. `ColumnWidths` holds
   explicit and auto-fitted widths alike; columns that are not listed have the default width.
 
@@ -384,6 +387,7 @@ return rows.Err()
 | `Row.OutlineLevel()`, `Hidden()`, `Collapsed()`, `Height()` | Properties of the current row |
 | `Date1904()` | Whether the workbook uses the 1904 date system |
 | `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |
+| `WithEmptyRows(on)` | Option: also return rows stored without values, with their properties (default off) |
 | `WithConcurrentInflate(on)` | Option: decompress on a separate goroutine while parsing (default on, off when `GOMAXPROCS` is 1) |
 
 **`Value`** is a small immutable struct; the zero value is empty.

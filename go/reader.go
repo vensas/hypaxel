@@ -20,6 +20,7 @@ var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 type readConfig struct {
 	maxSharedStringsBytes int64
 	pipeline              bool
+	emptyRows             bool
 }
 
 // ReadOption configures a [Reader].
@@ -39,6 +40,14 @@ func WithMaxSharedStringsBytes(n int64) ReadOption {
 // every core busy.
 func WithConcurrentInflate(enabled bool) ReadOption {
 	return func(c *readConfig) { c.pipeline = enabled }
+}
+
+// WithEmptyRows sets whether [Rows.Next] also returns the rows that the file stores without
+// any value, for example a spacer row with a height or an empty hidden row. It is off by
+// default. Such a row has no cells but carries its index and properties. Rows that the file
+// does not store are never returned.
+func WithEmptyRows(enabled bool) ReadOption {
+	return func(c *readConfig) { c.emptyRows = enabled }
 }
 
 // Visibility is whether a sheet is shown in Excel's tab bar.
@@ -283,7 +292,7 @@ func (r *Reader) RowsAt(index int) (*Rows, error) {
 		return nil, err
 	}
 	rc = r.overlap(x, rc)
-	rows := &Rows{x: x, rc: rc, styles: r.styles, row: Row{sst: sst, date1904: r.date1904}}
+	rows := &Rows{x: x, rc: rc, styles: r.styles, emptyRows: r.cfg.emptyRows, row: Row{sst: sst, date1904: r.date1904}}
 	if p, ok := rc.(*pipeReader); ok {
 		// Rows dropped without Close would otherwise leave the goroutine blocked forever.
 		runtime.AddCleanup(rows, (*pipeReader).stop, p)

@@ -80,20 +80,22 @@ const (
 // returns false or Close is called, and is stopped by the garbage collector for a Rows that
 // is dropped without either. Call Close when stopping early.
 type Rows struct {
-	x        *xmlReader
-	rc       io.ReadCloser
-	styles   []DateKind
-	row      Row
-	layout   SheetLayout
-	scratch  []byte
-	state    uint8
-	previous uint32
-	err      error
+	x         *xmlReader
+	rc        io.ReadCloser
+	styles    []DateKind
+	row       Row
+	layout    SheetLayout
+	scratch   []byte
+	state     uint8
+	emptyRows bool
+	previous  uint32
+	err       error
 }
 
 // Next advances to the next row that holds at least one value; rows that are missing from the
-// file or only carry formatting are skipped. It returns false at the end of the sheet or on an
-// error, and closes the Rows then.
+// file or only carry formatting are skipped. With [WithEmptyRows], rows that the file stores
+// without values are returned as well. It returns false at the end of the sheet or on an error,
+// and closes the Rows then.
 func (r *Rows) Next() bool {
 	if r.state == rowsDone {
 		return false
@@ -238,15 +240,18 @@ func (r *Rows) advance() (bool, error) {
 			return false, x.malformed("row number %d is outside 1..1048576", number)
 		}
 		r.previous = number
-		if ev == xmlEmpty {
+		if ev == xmlEmpty && !r.emptyRows {
 			continue
 		}
 		r.row.index = int(number)
 		r.row.props = props
-		if err := r.readCells(); err != nil {
+		if ev == xmlEmpty {
+			r.row.cells = r.row.cells[:0]
+			r.row.text = r.row.text[:0]
+		} else if err := r.readCells(); err != nil {
 			return false, err
 		}
-		if len(r.row.cells) > 0 {
+		if r.emptyRows || len(r.row.cells) > 0 {
 			return true, nil
 		}
 	}

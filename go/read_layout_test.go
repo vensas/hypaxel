@@ -275,3 +275,69 @@ func TestReadMalformedTablesAndLayout(t *testing.T) {
 		}
 	}
 }
+
+type emptyRowProps struct {
+	index, cells, lastColumn, level int
+	hidden                          bool
+	height                          float64
+}
+
+func readRowProps(t *testing.T, data []byte, sheet string, opts ...ReadOption) []emptyRowProps {
+	t.Helper()
+	rows, err := openBytes(t, data, opts...).Rows(sheet)
+	noErr(t, err)
+	var seen []emptyRowProps
+	for rows.Next() {
+		row := rows.Row()
+		height, _ := row.Height()
+		seen = append(seen, emptyRowProps{row.Index(), row.Len(), row.LastColumn(), row.OutlineLevel(), row.Hidden(), height})
+		if got := len(row.AppendValues(nil)); got != row.LastColumn() {
+			t.Fatalf("row %d: %d values, last column %d", row.Index(), got, row.LastColumn())
+		}
+	}
+	noErr(t, rows.Err())
+	return seen
+}
+
+func TestReadReturnsRowsWithoutValuesOnRequest(t *testing.T) {
+	data := writeBook(t, func(w *Writer) {
+		s, err := w.AddSheetOptions("Data", SheetOptions{RowOutlineLevels: 1})
+		noErr(t, err)
+		noErr(t, s.WriteRow("first"))
+		noErr(t, s.BeginRow(RowOptions{Height: 40}))
+		noErr(t, s.EndRow())
+		noErr(t, s.BeginRow(RowOptions{Index: 5}))
+		noErr(t, s.WriteRow(5))
+		noErr(t, s.BeginRow(RowOptions{OutlineLevel: 1, Hidden: true}))
+		noErr(t, s.EndRow())
+	})
+	valued := []emptyRowProps{{index: 1, cells: 1, lastColumn: 1}, {index: 5, cells: 1, lastColumn: 1}}
+	for _, opts := range [][]ReadOption{nil, {WithEmptyRows(false)}} {
+		if got := readRowProps(t, data, "Data", opts...); !reflect.DeepEqual(got, valued) {
+			t.Fatalf("default: %+v", got)
+		}
+	}
+	want := []emptyRowProps{
+		{index: 1, cells: 1, lastColumn: 1},
+		{index: 2, height: 40},
+		{index: 5, cells: 1, lastColumn: 1},
+		{index: 6, level: 1, hidden: true},
+	}
+	if got := readRowProps(t, data, "Data", WithEmptyRows(true)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("with empty rows: %+v", got)
+	}
+
+	other := singleSheet(t, `<worksheet><sheetData><row r="2" ht="30"/><row r="3" hidden="1"><c r="A3" s="1"/></row><row><c><v>1</v></c></row><row r="9"></row></sheetData></worksheet>`, "")
+	want = []emptyRowProps{
+		{index: 2, height: 30},
+		{index: 3, hidden: true},
+		{index: 4, cells: 1, lastColumn: 1},
+		{index: 9},
+	}
+	if got := readRowProps(t, other, "S", WithEmptyRows(true)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("other producer: %+v", got)
+	}
+	if got := readRowProps(t, other, "S"); !reflect.DeepEqual(got, want[2:3]) {
+		t.Fatalf("other producer, default: %+v", got)
+	}
+}
