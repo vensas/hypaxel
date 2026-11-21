@@ -4,7 +4,7 @@
   "group": "Reading",
   "title": ".NET reading: 1,000,000 rows, time",
   "dataset": "1,000,000 rows × 10 columns, written by the Hypaxel writer with inline or shared strings, read cell by cell",
-  "method": "Each reader runs in its own process with the --read-quick stopwatch runner: one warm-up, then the best of three runs. Every reader produces the same checksum (10,000,000 cells, the sum of all numbers including date serials, 42,833,558 string characters, 500,000 TRUEs). The machine was otherwise idle.",
+  "method": "Times come from one --read-quick stopwatch run per runtime, which runs every reader with one warm-up and then the best of three runs. Every reader produces the same checksum (10,000,000 cells, the sum of all numbers including date serials, 42,833,558 string characters, 500,000 TRUEs). The machine was otherwise idle.",
   "environment": {
     "hardware": "Apple M1 Max, 10 cores, 64 GB",
     "os": "macOS 26.6",
@@ -47,29 +47,29 @@
       "label": "Hypaxel, TryGetText/TryGetDouble (inline)",
       "subject": true,
       "values": {
-        "net8": 0.74,
-        "net9": 0.8,
-        "net10": 0.76,
-        "net11": 0.73
+        "net8": 0.71,
+        "net9": 0.77,
+        "net10": 0.72,
+        "net11": 0.72
       }
     },
     {
       "label": "Hypaxel, GetValue (ExcelValue) (inline)",
       "subject": true,
       "values": {
-        "net8": 0.82,
-        "net9": 0.86,
-        "net10": 0.8,
-        "net11": 0.79
+        "net8": 0.78,
+        "net9": 0.83,
+        "net10": 0.76,
+        "net11": 0.76
       }
     },
     {
       "label": "Hypaxel, BackgroundDecompression (inline)",
       "subject": true,
       "values": {
-        "net8": 0.59,
-        "net9": 0.56,
-        "net10": 0.52,
+        "net8": 0.58,
+        "net9": 0.55,
+        "net10": 0.51,
         "net11": 0.51
       }
     },
@@ -77,90 +77,90 @@
       "label": "Sylvan.Data.Excel (inline)",
       "subject": false,
       "values": {
-        "net8": 2.19,
-        "net9": 2.04,
+        "net8": 2.1,
+        "net9": 2.01,
         "net10": 1.87,
-        "net11": 1.94
+        "net11": 1.91
       }
     },
     {
       "label": "ExcelDataReader (inline)",
       "subject": false,
       "values": {
-        "net8": 5.24,
-        "net9": 4.82,
+        "net8": 5.02,
+        "net9": 4.69,
         "net10": 4.26,
-        "net11": 4.6
+        "net11": 4.55
       }
     },
     {
       "label": "MiniExcel (inline)",
       "subject": false,
       "values": {
-        "net8": 9.24,
-        "net9": 8.1,
-        "net10": 6.94,
-        "net11": 7.28
+        "net8": 8.79,
+        "net9": 7.79,
+        "net10": 6.89,
+        "net11": 7.13
       }
     },
     {
       "label": "Hypaxel, TryGetText/TryGetDouble (shared)",
       "subject": true,
       "values": {
-        "net8": 0.8,
-        "net9": 0.86,
-        "net10": 0.81,
-        "net11": 0.82
+        "net8": 0.76,
+        "net9": 0.82,
+        "net10": 0.79,
+        "net11": 0.8
       }
     },
     {
       "label": "Hypaxel, GetValue (ExcelValue) (shared)",
       "subject": true,
       "values": {
-        "net8": 0.87,
-        "net9": 0.89,
-        "net10": 0.83,
-        "net11": 0.85
+        "net8": 0.81,
+        "net9": 0.86,
+        "net10": 0.81,
+        "net11": 0.82
       }
     },
     {
       "label": "Hypaxel, BackgroundDecompression (shared)",
       "subject": true,
       "values": {
-        "net8": 0.64,
-        "net9": 0.6,
-        "net10": 0.56,
-        "net11": 0.58
+        "net8": 0.61,
+        "net9": 0.59,
+        "net10": 0.55,
+        "net11": 0.56
       }
     },
     {
       "label": "Sylvan.Data.Excel (shared)",
       "subject": false,
       "values": {
-        "net8": 2.18,
-        "net9": 2.07,
-        "net10": 1.92,
-        "net11": 1.99
+        "net8": 2.08,
+        "net9": 2.02,
+        "net10": 1.91,
+        "net11": 1.96
       }
     },
     {
       "label": "ExcelDataReader (shared)",
       "subject": false,
       "values": {
-        "net8": 5.29,
-        "net9": 4.88,
-        "net10": 4.4,
-        "net11": 4.64
+        "net8": 4.99,
+        "net9": 4.69,
+        "net10": 4.35,
+        "net11": 4.57
       }
     },
     {
       "label": "MiniExcel (shared)",
       "subject": false,
       "values": {
-        "net8": 14.77,
-        "net9": 13.71,
-        "net10": 12.49,
-        "net11": 12.84
+        "net8": 13.85,
+        "net9": 12.73,
+        "net10": 12.0,
+        "net11": 12.25
       }
     }
   ],

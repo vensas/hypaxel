@@ -3,7 +3,7 @@
   "language": "go",
   "title": "Go: 100,000 and 1,000,000 rows",
   "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean",
-  "method": "Time and allocated bytes from go test -bench with the rows built beforehand and a discarding destination: about a dozen iterations per case at 100k rows (one for the in-memory case), three at 1M. Peak RSS from separate runs, one process per case, generating the rows on the fly; it includes the Go runtime and both libraries. Other processes were using the machine, so treat small differences as noise.",
+  "method": "Time and allocated bytes from go test -bench with the rows built beforehand and a discarding destination: about a dozen iterations per case at 100k rows (one for the in-memory case), three at 1M. Peak RSS from separate runs, one process per case, generating the rows on the fly; it includes the Go runtime and both libraries. The machine was otherwise idle.",
   "environment": {
     "hardware": "Apple M1 Max, 10 cores",
     "os": "macOS 26.6",
@@ -60,69 +60,69 @@
       "label": "Hypaxel, typed cells",
       "subject": true,
       "values": {
-        "t100k": 88,
+        "t100k": 87,
         "alloc100k": 0.2,
-        "rss100k": 18,
-        "t1m": 0.92,
+        "rss100k": 19,
+        "t1m": 0.84,
         "alloc1m": 0.4,
-        "rss1m": 19
+        "rss1m": 21
       }
     },
     {
       "label": "Hypaxel, struct mapping",
       "subject": true,
       "values": {
-        "t100k": 95,
+        "t100k": 92,
         "alloc100k": 0.2,
-        "rss100k": 18,
-        "t1m": 0.97,
-        "alloc1m": 0.4,
-        "rss1m": 19
+        "rss100k": 19,
+        "t1m": 0.91,
+        "alloc1m": 0.2,
+        "rss1m": 21
       }
     },
     {
       "label": "Hypaxel, WriteRow",
       "subject": true,
       "values": {
-        "t100k": 100,
+        "t100k": 98,
         "alloc100k": 10.9,
-        "rss100k": 19,
-        "t1m": 1.02,
+        "rss100k": 20,
+        "t1m": 0.96,
         "alloc1m": 107,
-        "rss1m": 20
+        "rss1m": 21
       }
     },
     {
       "label": "Hypaxel, shared strings",
       "subject": true,
       "values": {
-        "t100k": 113,
-        "alloc100k": 17.7,
-        "rss100k": 28,
-        "t1m": 1.37,
+        "t100k": 107,
+        "alloc100k": 17.8,
+        "rss100k": 30,
+        "t1m": 1.17,
         "alloc1m": 214,
-        "rss1m": 157
+        "rss1m": 159
       }
     },
     {
       "label": "excelize, StreamWriter",
       "subject": false,
       "values": {
-        "t100k": 432,
+        "t100k": 403,
         "alloc100k": 171,
-        "rss100k": 78,
-        "t1m": 5.62,
+        "rss100k": 79,
+        "t1m": 4.02,
         "alloc1m": 1317,
-        "rss1m": 179
+        "rss1m": 191
       }
     },
     {
       "label": "excelize, in-memory",
       "subject": false,
       "values": {
-        "t100k": 1740,
+        "t100k": 1598,
         "alloc100k": 1250,
-        "rss100k": 631,
+        "rss100k": 650,
         "t1m": null,
         "alloc1m": null,
         "rss1m": null
@@ -130,9 +130,9 @@
     }
   ],
   "notes": [
-    "The typed and struct-mapping cases make 27 to 66 allocations per workbook, whatever the number of rows.",
+    "The typed and struct-mapping cases make 27 to 62 allocations per workbook, whatever the number of rows.",
     "With shared strings, memory grows with the number of distinct strings, here one per row.",
-    "The 1M-row file is 40.5 MB from Hypaxel and 62.9 MB from excelize's StreamWriter. At compression level 6 it is 29.0 MB and takes 1.32 s; at level 0 it is 331 MB and takes 0.37 s.",
+    "The 1M-row file is 40.5 MB from Hypaxel and 62.9 MB from excelize's StreamWriter. At compression level 6 it is 29.0 MB and takes 1.25 s; at level 0 it is 331 MB and takes 0.31 s.",
     "The in-memory excelize case was not run at 1M rows."
   ],
   "reproduce": "cd go/tests\ngo test -run '^$' -bench Write -benchmem                                 # 100,000 rows\ngo test -run '^$' -bench Write -benchmem -rows 1000000 -benchtime 3x     # 1,000,000 rows\ngo run ./cmd/bench                                                       # peak RSS, 100,000 rows\ngo run ./cmd/bench 1000000",

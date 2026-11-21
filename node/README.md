@@ -17,8 +17,8 @@ same engine compiled to WebAssembly, with the same API.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
   panes, auto filters, Excel tables, row grouping, auto-fit columns, hidden sheets, tab colors.
 - **Browsers too:** one package, picked by your bundler: native in Node.js, WebAssembly (171 KB
-  gzipped) in the browser. Generates a 100k-row file in about 0.15 s in Chrome, about **12x faster
-  than SheetJS and 20x faster than ExcelJS** there (see [Browsers](#browsers)).
+  gzipped) in the browser. Generates a 100k-row file in about 0.15 s in Chrome, about **11x faster
+  than SheetJS and 19x faster than ExcelJS** there (see [Browsers](#browsers)).
 - **Typed:** written in TypeScript (strict), ships its own type declarations, works from ESM and CommonJS.
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md) through [napi-rs](https://napi.rs)
@@ -229,18 +229,18 @@ Export helpers (`stream`, `webStream`, `toBuffer`, `toBufferSync`, `writeFile`) 
 
 Writing 10 columns per row: five numbers, three strings (one unique per row), a `Date` and a boolean. Each case
 runs in its own process; "peak RSS" is that process's peak resident memory, which includes Node.js
-itself and both libraries (about 85 MB before any row is written).
+itself and both libraries: the smallest case peaks at 84 MB, nearly all of it Node.js.
 
 Measured on an Apple M1 Max (macOS 26.6) with Node.js 22.23.2 against ExcelJS 4.4.0.
 
 | Case | 100k rows | Peak RSS | 1M rows | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, arrays, streamed | 133 ms | 87 MB | 1.23 s | 104 MB |
-| Hypaxel, arrays, to buffer | 131 ms | 97 MB | 1.23 s | 204 MB |
-| Hypaxel, objects, to buffer | 151 ms | 99 MB | 1.36 s | 207 MB |
-| Hypaxel, WebAssembly engine, arrays, to buffer | 223 ms | 108 MB | 1.91 s | 271 MB |
-| ExcelJS, streaming writer | 815 ms | 169 MB | 7.89 s | 612 MB |
-| ExcelJS, in-memory workbook | 4,186 ms | 1,301 MB | not run | not run |
+| Hypaxel, arrays, streamed | 130 ms | 84 MB | 1.19 s | 101 MB |
+| Hypaxel, arrays, to buffer | 124 ms | 94 MB | 1.19 s | 202 MB |
+| Hypaxel, objects, to buffer | 140 ms | 96 MB | 1.30 s | 203 MB |
+| Hypaxel, WebAssembly engine, arrays, to buffer | 202 ms | 108 MB | 1.82 s | 271 MB |
+| ExcelJS, streaming writer | 811 ms | 170 MB | 7.63 s | 604 MB |
+| ExcelJS, in-memory workbook | 3,830 ms | 1,300 MB | not run | not run |
 
 These are single runs, so treat small differences as noise. The 1M-row file is 50 MB from Hypaxel
 and 67 MB from ExcelJS's streaming writer. The WebAssembly row runs the browser build in Node.js;
@@ -263,9 +263,9 @@ Measured on an Apple M1 Max (macOS 26.6) with Chrome 158.0.8127.36, SheetJS 0.20
 
 | Library | 100k rows | File | 300k rows | File |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel (WebAssembly) | 153 ms | 5.0 MB | 484 ms | 15.2 MB |
-| SheetJS | 1,913 ms | 15.1 MB | 7,099 ms | 45.5 MB |
-| ExcelJS | 3,074 ms | 5.8 MB | 9,617 ms | 17.5 MB |
+| Hypaxel (WebAssembly) | 145 ms | 5.0 MB | 455 ms | 15.2 MB |
+| SheetJS | 1,653 ms | 15.1 MB | 6,502 ms | 45.5 MB |
+| ExcelJS | 2,816 ms | 5.8 MB | 8,775 ms | 17.5 MB |
 
 Hypaxel's WebAssembly memory stayed at 2.4 MB in both runs. The browser does not expose the peak
 JavaScript heap, so memory is not compared across libraries here. Download sizes, gzipped: Hypaxel

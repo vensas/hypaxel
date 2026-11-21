@@ -4,7 +4,7 @@
   "group": "Reading",
   "title": ".NET reading: background decompression",
   "dataset": "1,000,000 rows × 10 columns, written by the Hypaxel writer with inline or shared strings, read cell by cell",
-  "method": "XlsxReaderOptions.BackgroundDecompression measured interleaved with the default on the same files.",
+  "method": "From the .NET 10 --read-quick run: the best of three runs and the CPU time of that run, summed over all threads.",
   "environment": {
     "hardware": "Apple M1 Max, 10 cores, 64 GB",
     "os": "macOS 26.6",
@@ -31,38 +31,38 @@
       "label": "Default (inline)",
       "subject": true,
       "values": {
-        "time": 0.77,
-        "cpu": 0.76
+        "time": 0.72,
+        "cpu": 0.74
       }
     },
     {
       "label": "BackgroundDecompression (inline)",
       "subject": true,
       "values": {
-        "time": 0.53,
-        "cpu": 0.92
+        "time": 0.51,
+        "cpu": 0.87
       }
     },
     {
       "label": "Default (shared)",
       "subject": true,
       "values": {
-        "time": 0.83,
-        "cpu": 0.84
+        "time": 0.79,
+        "cpu": 0.79
       }
     },
     {
       "label": "BackgroundDecompression (shared)",
       "subject": true,
       "values": {
-        "time": 0.58,
-        "cpu": 0.97
+        "time": 0.55,
+        "cpu": 0.92
       }
     }
   ],
   "notes": [
-    "With several readers at once on the 10 cores (inline file), the total time is 0.80–0.84 s by default and 0.56–0.59 s with it for 4 readers, but 1.14–1.15 s and 1.54–1.56 s for 10 readers.",
-    "It saves about 30% of the time when cores are idle but costs about 20% more CPU; when every core is busy it makes the total slower, which is why it is off by default. Each open worksheet holds 1 MiB of buffers (four 256 KiB chunks) while it is on."
+    "With several readers at once on the 10 cores (inline file, one process per reader, each reporting its best of three), a read takes 0.76–0.77 s by default and 0.53–0.54 s with it for 4 readers, but 0.84–0.89 s and 0.92–1.05 s for 10 readers.",
+    "It saves about 30% of the time when cores are idle but costs 15 to 20% more CPU; when every core is busy it makes the total slower, which is why it is off by default. Each open worksheet holds 1 MiB of buffers (four 256 KiB chunks) while it is on."
   ],
   "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --read-quick 1000000                    # all readers, both files\ndotnet run -c Release -f net10.0 -- --read-quick 1000000 Sylvan shared      # one reader, one file",
   "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"

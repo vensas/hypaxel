@@ -1,0 +1,119 @@
+{
+  "id": "python-1m",
+  "language": "python",
+  "title": "Python: 1,000,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean",
+  "method": "benchmarks/bench.py. Peak Python memory is measured with tracemalloc in a separate, untimed run; the workbook is written to memory, so the figures include the output. Rows marked with * include building the DataFrame from the row list.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Python 3.13"
+  },
+  "versions": [
+    "XlsxWriter 3.3.3 (constant_memory)",
+    "openpyxl 3.1.5 (write_only)",
+    "pandas 3.1.1",
+    "polars 2.1.0"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rate",
+      "label": "Throughput",
+      "unit": "rows/s",
+      "lowerIsBetter": false
+    },
+    {
+      "id": "mem",
+      "label": "Peak Python memory",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakHeap"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel write_rows",
+      "subject": true,
+      "values": {
+        "time": 0.74,
+        "rate": 1360000,
+        "mem": 53
+      }
+    },
+    {
+      "label": "Hypaxel stream_rows",
+      "subject": true,
+      "values": {
+        "time": 0.73,
+        "rate": 1370000,
+        "mem": 106
+      }
+    },
+    {
+      "label": "XlsxWriter (constant_memory)",
+      "subject": false,
+      "values": {
+        "time": 37.94,
+        "rate": 26400,
+        "mem": 60
+      }
+    },
+    {
+      "label": "openpyxl (write_only)",
+      "subject": false,
+      "values": {
+        "time": 63.97,
+        "rate": 15600,
+        "mem": 66
+      }
+    },
+    {
+      "label": "Hypaxel pandas DataFrame*",
+      "subject": true,
+      "values": {
+        "time": 2.03,
+        "rate": 493000,
+        "mem": 163
+      }
+    },
+    {
+      "label": "pandas.to_excel (xlsxwriter)*",
+      "subject": false,
+      "values": {
+        "time": 69.87,
+        "rate": 14300,
+        "mem": 1446
+      }
+    },
+    {
+      "label": "Hypaxel polars DataFrame*",
+      "subject": true,
+      "values": {
+        "time": 2.22,
+        "rate": 450000,
+        "mem": 53
+      }
+    },
+    {
+      "label": "polars.write_excel*",
+      "subject": false,
+      "values": {
+        "time": 50.77,
+        "rate": 19700,
+        "mem": 2550
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel's own memory stays flat: what grows is the output buffer (53 MB at 1M rows), which a streaming response sends instead of keeping."
+  ],
+  "reproduce": "python benchmarks/bench.py 1000000",
+  "sourcePath": "python/benchmarks"
+}

@@ -46,9 +46,9 @@
       "label": "Hypaxel (WebAssembly)",
       "subject": true,
       "values": {
-        "t100k": 153,
+        "t100k": 145,
         "file100k": 5,
-        "t300k": 484,
+        "t300k": 455,
         "file300k": 15.2
       }
     },
@@ -56,9 +56,9 @@
       "label": "SheetJS",
       "subject": false,
       "values": {
-        "t100k": 1913,
+        "t100k": 1653,
         "file100k": 15.1,
-        "t300k": 7099,
+        "t300k": 6502,
         "file300k": 45.5
       }
     },
@@ -66,9 +66,9 @@
       "label": "ExcelJS",
       "subject": false,
       "values": {
-        "t100k": 3074,
+        "t100k": 2816,
         "file100k": 5.8,
-        "t300k": 9617,
+        "t300k": 8775,
         "file300k": 17.5
       }
     }

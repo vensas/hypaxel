@@ -3,7 +3,7 @@
   "language": "java",
   "title": "Java: 100,000 rows",
   "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, written to a discarding stream",
-  "method": "JMH average time per workbook: 2 forks, 5 warm-up and 5 measured iterations of 2 s; allocation from the JMH GC profiler. The machine was running other work (load average about 10).",
+  "method": "JMH average time per workbook: 2 forks, 5 warm-up and 5 measured iterations of 2 s; allocation from the JMH GC profiler. The machine was otherwise idle.",
   "environment": {
     "hardware": "Apple M1 Max, 10 cores",
     "os": "macOS 26.6",
@@ -41,7 +41,7 @@
       "label": "Hypaxel, typed write",
       "subject": true,
       "values": {
-        "time": 118,
+        "time": 113,
         "alloc": 0.17,
         "file": 3.9
       }
@@ -50,7 +50,7 @@
       "label": "Hypaxel, writeRows with a RowWriter",
       "subject": true,
       "values": {
-        "time": 118,
+        "time": 113,
         "alloc": 0.17,
         "file": 3.9
       }
@@ -59,7 +59,7 @@
       "label": "Hypaxel, object mapping",
       "subject": true,
       "values": {
-        "time": 123,
+        "time": 118,
         "alloc": 0.17,
         "file": 3.9
       }
@@ -68,7 +68,7 @@
       "label": "Hypaxel, addRow(Object...)",
       "subject": true,
       "values": {
-        "time": 123,
+        "time": 117,
         "alloc": 14.6,
         "file": 3.9
       }
@@ -77,7 +77,7 @@
       "label": "Hypaxel, shared strings",
       "subject": true,
       "values": {
-        "time": 135,
+        "time": 127,
         "alloc": 3.9,
         "file": 4.1
       }
@@ -86,7 +86,7 @@
       "label": "Hypaxel, compression level 6",
       "subject": true,
       "values": {
-        "time": 324,
+        "time": 307,
         "alloc": 0.37,
         "file": 3
       }
@@ -95,8 +95,8 @@
       "label": "FastExcel, compression level 1",
       "subject": false,
       "values": {
-        "time": 352,
-        "alloc": 261,
+        "time": 288,
+        "alloc": 260,
         "file": 6.9
       }
     },
@@ -104,8 +104,8 @@
       "label": "FastExcel, default settings",
       "subject": false,
       "values": {
-        "time": 443,
-        "alloc": 262,
+        "time": 416,
+        "alloc": 266,
         "file": 5.9
       }
     },
@@ -113,15 +113,13 @@
       "label": "Apache POI SXSSF",
       "subject": false,
       "values": {
-        "time": 1057,
+        "time": 969,
         "alloc": 501,
         "file": 5.6
       }
     }
   ],
-  "notes": [
-    "Treat differences of a few percent as noise."
-  ],
+  "notes": [],
   "reproduce": "cd java\n./mvnw -q -DskipTests install\n./mvnw -q -f benchmarks/pom.xml package\njava -jar benchmarks/target/benchmarks.jar jmh WriteBenchmark -prof gc",
   "sourcePath": "java/benchmarks"
 }

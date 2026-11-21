@@ -238,8 +238,8 @@ public static class ReadCases
     }
 
     /// <summary>
-    /// Stopwatch run over a 1M-row workbook (or the given size): best of three, managed allocations of one run,
-    /// and the process's peak working set. Pass a reader name (and <c>inline</c> or <c>shared</c>) to run only
+    /// Stopwatch run over a 1M-row workbook (or the given size): best of three with the CPU time of that run
+    /// (all threads), managed allocations of one run, and the process's peak working set. Pass a reader name (and <c>inline</c> or <c>shared</c>) to run only
     /// that reader, so that each reader's peak memory is measured in a fresh process; the checksum is then
     /// printed for comparison instead of being checked.
     /// </summary>
@@ -268,15 +268,25 @@ public static class ReadCases
                     reference ??= checksum;
                 }
                 var best = double.MaxValue;
+                var bestCpu = 0.0;
                 long allocated = 0;
+                var process = Process.GetCurrentProcess();
                 for (var i = 0; i < 3; i++)
                 {
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
                     var before = GC.GetTotalAllocatedBytes(true);
+                    process.Refresh();
+                    var cpuBefore = process.TotalProcessorTime;
                     var watch = Stopwatch.StartNew();
                     checksum = run(path);
-                    best = Math.Min(best, watch.Elapsed.TotalMilliseconds);
+                    var elapsed = watch.Elapsed.TotalMilliseconds;
+                    process.Refresh();
+                    if (elapsed < best)
+                    {
+                        best = elapsed;
+                        bestCpu = (process.TotalProcessorTime - cpuBefore).TotalMilliseconds;
+                    }
                     allocated = GC.GetTotalAllocatedBytes(true) - before;
                 }
 
@@ -286,7 +296,7 @@ public static class ReadCases
                 var peakText = peak > 0 ? string.Create(CultureInfo.InvariantCulture, $"  {peak / 1048576.0,6:N0} MB peak WS") : "";
                 Console.WriteLine(string.Create(
                     CultureInfo.InvariantCulture,
-                    $"{mode,-6} {name,-30} {best,8:N0} ms  {allocated / 1048576.0,9:N1} MB allocated{peakText}  {new FileInfo(path).Length / 1048576.0,5:N1} MB file  {ok}"));
+                    $"{mode,-6} {name,-30} {best,8:N0} ms  {bestCpu,8:N0} ms CPU  {allocated / 1048576.0,9:N1} MB allocated{peakText}  {new FileInfo(path).Length / 1048576.0,5:N1} MB file  {ok}"));
             }
         }
     }

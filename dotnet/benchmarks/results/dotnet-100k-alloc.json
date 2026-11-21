@@ -7,7 +7,7 @@
   "environment": {
     "hardware": "Apple M1 Max, 10 cores",
     "os": "macOS 26.6",
-    "runtime": ".NET 8.0.34, 9.0.23, 10.0.15 and 11.0.0"
+    "runtime": ".NET 8.0.19, 9.0.0, 10.0.13 and 11.0.0"
   },
   "versions": [
     "SpreadCheetah 1.29.0",
@@ -50,9 +50,9 @@
       "label": "Hypaxel, typed Write",
       "subject": true,
       "values": {
-        "net8": 208,
+        "net8": 8.8,
         "net9": 12,
-        "net10": 12,
+        "net10": 13,
         "net11": 14
       }
     },
@@ -60,7 +60,7 @@
       "label": "Hypaxel, AddRowAsync",
       "subject": true,
       "values": {
-        "net8": 208,
+        "net8": 8.8,
         "net9": 12,
         "net10": 12,
         "net11": 14
@@ -70,7 +70,7 @@
       "label": "Hypaxel, object mapping",
       "subject": true,
       "values": {
-        "net8": 212,
+        "net8": 11,
         "net9": 15,
         "net10": 15,
         "net11": 17
@@ -80,7 +80,7 @@
       "label": "Hypaxel, shared strings",
       "subject": true,
       "values": {
-        "net8": 11000,
+        "net8": 10100,
         "net9": 10100,
         "net10": 10100,
         "net11": 10100
@@ -90,7 +90,7 @@
       "label": "SpreadCheetah",
       "subject": false,
       "values": {
-        "net8": 84,
+        "net8": 11,
         "net9": 15,
         "net10": 16,
         "net11": 18

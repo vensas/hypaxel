@@ -3,7 +3,7 @@
   "language": "nodejs",
   "title": "Node.js: 100,000 and 1,000,000 rows",
   "dataset": "10 columns per row: five numbers, three strings (one unique per row), a Date and a boolean. Each case runs in its own process",
-  "method": "Single runs. Peak RSS is the process's peak resident memory, which includes Node.js itself and both libraries (about 85 MB before any row is written).",
+  "method": "Single runs. Peak RSS is the process's peak resident memory, which includes Node.js itself and both libraries: the smallest case peaks at 84 MB, nearly all of it Node.js.",
   "environment": {
     "hardware": "Apple M1 Max",
     "os": "macOS 26.6",
@@ -46,39 +46,39 @@
       "label": "Hypaxel, arrays, streamed",
       "subject": true,
       "values": {
-        "t100k": 133,
-        "rss100k": 87,
-        "t1m": 1.23,
-        "rss1m": 104
+        "t100k": 130,
+        "rss100k": 84,
+        "t1m": 1.19,
+        "rss1m": 101
       }
     },
     {
       "label": "Hypaxel, arrays, to buffer",
       "subject": true,
       "values": {
-        "t100k": 131,
-        "rss100k": 97,
-        "t1m": 1.23,
-        "rss1m": 204
+        "t100k": 124,
+        "rss100k": 94,
+        "t1m": 1.19,
+        "rss1m": 202
       }
     },
     {
       "label": "Hypaxel, objects, to buffer",
       "subject": true,
       "values": {
-        "t100k": 151,
-        "rss100k": 99,
-        "t1m": 1.36,
-        "rss1m": 207
+        "t100k": 140,
+        "rss100k": 96,
+        "t1m": 1.3,
+        "rss1m": 203
       }
     },
     {
       "label": "Hypaxel, WebAssembly engine, arrays, to buffer",
       "subject": true,
       "values": {
-        "t100k": 223,
+        "t100k": 202,
         "rss100k": 108,
-        "t1m": 1.91,
+        "t1m": 1.82,
         "rss1m": 271
       }
     },
@@ -86,18 +86,18 @@
       "label": "ExcelJS, streaming writer",
       "subject": false,
       "values": {
-        "t100k": 815,
-        "rss100k": 169,
-        "t1m": 7.89,
-        "rss1m": 612
+        "t100k": 811,
+        "rss100k": 170,
+        "t1m": 7.63,
+        "rss1m": 604
       }
     },
     {
       "label": "ExcelJS, in-memory workbook",
       "subject": false,
       "values": {
-        "t100k": 4186,
-        "rss100k": 1301,
+        "t100k": 3830,
+        "rss100k": 1300,
         "t1m": null,
         "rss1m": null
       }

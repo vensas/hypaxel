@@ -7,7 +7,7 @@
   "environment": {
     "hardware": "Apple M1 Max, 10 cores",
     "os": "macOS 26.6",
-    "runtime": ".NET 8.0.34, 9.0.23, 10.0.15 and 11.0.0"
+    "runtime": ".NET 8.0.19, 9.0.0, 10.0.13 and 11.0.0"
   },
   "versions": [
     "SpreadCheetah 1.29.0"
@@ -44,55 +44,55 @@
       "label": "Hypaxel, typed Write",
       "subject": true,
       "values": {
-        "net8": 1.21,
-        "net9": 0.8,
-        "net10": 0.78,
-        "net11": 0.73
+        "net8": 1.18,
+        "net9": 0.82,
+        "net10": 0.73,
+        "net11": 0.71
       }
     },
     {
       "label": "Hypaxel, AddRowAsync",
       "subject": true,
       "values": {
-        "net8": 1.23,
-        "net9": 0.83,
-        "net10": 0.77,
-        "net11": 0.76
+        "net8": 1.21,
+        "net9": 0.86,
+        "net10": 0.78,
+        "net11": 0.79
       }
     },
     {
       "label": "Hypaxel, object mapping",
       "subject": true,
       "values": {
-        "net8": 1.26,
-        "net9": 0.82,
-        "net10": 0.81,
-        "net11": 0.75
+        "net8": 1.17,
+        "net9": 0.81,
+        "net10": 0.79,
+        "net11": 0.74
       }
     },
     {
       "label": "Hypaxel, shared strings",
       "subject": true,
       "values": {
-        "net8": 1.42,
-        "net9": 1.12,
-        "net10": 1,
-        "net11": 0.99
+        "net8": 1.36,
+        "net9": 1.03,
+        "net10": 0.89,
+        "net11": 0.91
       }
     },
     {
       "label": "SpreadCheetah",
       "subject": false,
       "values": {
-        "net8": 1.41,
-        "net9": 0.85,
-        "net10": 0.76,
+        "net8": 1.22,
+        "net9": 0.83,
+        "net10": 0.75,
         "net11": 0.74
       }
     }
   ],
   "notes": [
-    "At 1M rows Hypaxel and SpreadCheetah allocate less than 1 MB on every version; shared strings allocate 88 MB (96 MB on .NET 8).",
+    "At 1M rows Hypaxel and SpreadCheetah allocate less than 1 MB on every version; shared strings allocate 88 MB.",
     "The file is about 50 MB (53 MB with shared strings), or about 39 MB (41 MB) on .NET 8, whose compression produces smaller output."
   ],
   "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --quick 1000000",

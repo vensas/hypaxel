@@ -49,29 +49,29 @@
       "label": "Hypaxel, Rows.Next",
       "subject": true,
       "values": {
-        "tInline": 1.16,
+        "tInline": 1.14,
         "rssInline": 21,
-        "tShared": 1.2,
-        "rssShared": 73
+        "tShared": 1.18,
+        "rssShared": 74
       }
     },
     {
       "label": "Hypaxel, Rows.All",
       "subject": true,
       "values": {
-        "tInline": 1.16,
+        "tInline": 1.14,
         "rssInline": 21,
-        "tShared": 1.21,
-        "rssShared": 86
+        "tShared": 1.18,
+        "rssShared": 73
       }
     },
     {
       "label": "excelize, Rows with RawCellValue",
       "subject": false,
       "values": {
-        "tInline": 15.55,
+        "tInline": 14.72,
         "rssInline": 22,
-        "tShared": 17,
+        "tShared": 16.54,
         "rssShared": 142
       }
     },
@@ -79,9 +79,9 @@
       "label": "excelize, Rows (formatted values)",
       "subject": false,
       "values": {
-        "tInline": 68.33,
+        "tInline": 66.34,
         "rssInline": 23,
-        "tShared": 69.41,
+        "tShared": 67.41,
         "rssShared": 142
       }
     },
@@ -89,9 +89,9 @@
       "label": "xlsxreader, ReadRows",
       "subject": false,
       "values": {
-        "tInline": 14.51,
+        "tInline": 13.79,
         "rssInline": 22,
-        "tShared": 12.86,
+        "tShared": 12.26,
         "rssShared": 163
       }
     },
@@ -107,13 +107,13 @@
     }
   ],
   "notes": [
-    "tealeg/xlsx, which loads the whole sheet, was not run at 1M rows. At 100k rows it takes 2.33 s and peaks at 715 MB, against 0.22 s and 18 MB for Hypaxel.",
+    "tealeg/xlsx, which loads the whole sheet, was not run at 1M rows. At 100k rows it takes 2.21 s and peaks at 694 MB, against 0.12 s and 19 MB for Hypaxel.",
     "Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string per row holding its inline text) with inline strings, and 15 MB in 1.6k allocations with shared strings (mostly the table itself); excelize allocates 0.97 GB in 20M allocations.",
-    "With GOMAXPROCS=1 there is no core to overlap decompression with, so the reader inflates on the caller's goroutine and takes about 2.1 to 2.2 s (interleaved A/B runs on a busy machine).",
+    "With GOMAXPROCS=1 there is no core to overlap decompression with, so the reader inflates on the caller's goroutine and takes about 2.0 to 2.1 s (GOMAXPROCS=1 go run ./cmd/bench read 1000000).",
     "Formatted excelize values only match on cell counts and text, because numbers and dates come back as display text.",
     "xlsxreader truncates date-times instead of rounding them, so about half of the dates come back one second early; the harness allows for that.",
     "xlsxreader and tealeg/xlsx 3.3.13 cannot read cells without references. tealeg's ValueOnly option crashes on inline strings, so it runs with default options.",
-    "The worksheet XML tokenizer runs at 460 MB/s, 7x faster than encoding/xml's RawToken (64 MB/s) on the same input (go test -bench Tokenize in go/)."
+    "The worksheet XML tokenizer runs at 470 MB/s, 7x faster than encoding/xml's RawToken (66 MB/s) on the same input (go test -bench Tokenize in go/)."
   ],
   "reproduce": "cd go/tests\ngo test -run '^$' -bench Read -benchmem                                  # every reader, 100,000 rows\ngo run ./cmd/bench read 1000000                                          # time and peak RSS",
   "sourcePath": "go/tests"

@@ -7,7 +7,7 @@
   "method": "examples/read_bench.rs. The file is written by Hypaxel and read cell by cell, with a checksum over all values that every reader must match. Each run is in its own process; best of three.",
   "environment": {
     "hardware": "Apple M1 Max",
-    "os": "macOS",
+    "os": "macOS 26.6",
     "runtime": "Rust 1.100, --release"
   },
   "versions": [
@@ -34,7 +34,7 @@
       "label": "Hypaxel XlsxReader",
       "subject": true,
       "values": {
-        "time": 0.78,
+        "time": 0.75,
         "rss": 7
       }
     },
@@ -42,7 +42,7 @@
       "label": "calamine worksheet_cells_reader",
       "subject": false,
       "values": {
-        "time": 2.18,
+        "time": 2.14,
         "rss": 7
       }
     },
@@ -50,7 +50,7 @@
       "label": "calamine worksheet_range",
       "subject": false,
       "values": {
-        "time": 2.43,
+        "time": 2.35,
         "rss": 793
       }
     }

@@ -7,11 +7,11 @@ you write it and compressed straight into a small buffer, which is flushed to an
 `AsyncWrite`. Memory stays flat whether you export 10 rows or 10 million, and the first bytes reach
 the HTTP client while your query is still running.
 
-- **Fast:** writes 1M rows × 10 mixed columns in about 0.75 s, roughly 11–14x faster than
+- **Fast:** writes 1M rows × 10 mixed columns in about 0.7 s, roughly 8–9x faster than
   rust_xlsxwriter (see the benchmarks below).
 - **Constant memory:** about 200 KiB of buffers per workbook. The example axum server peaked at
-  **5.4 MB RSS for the whole process** after three 3M-row downloads, and at 11 MB with 8
-  concurrent downloads.
+  **8.5 MB RSS for the whole process** after three 3M-row downloads, and at 15.5 MB with 8
+  concurrent downloads (macOS, M1 Max).
 - **Streams anywhere:** no `Seek` is needed. The writer has its own streaming ZIP implementation
   with automatic ZIP64 for worksheets over 4 GB.
 - **axum integration:** `hypaxel-axum` turns iterators, closures and async `Stream`s (e.g. `sqlx`)
@@ -244,20 +244,20 @@ Every flushing method has an `_async` twin for `tokio::io::AsyncWrite` destinati
 ## Performance
 
 The same 10-column dataset as the .NET benchmark: int, 2× string, 2× float, datetime, bool, i64,
-unique string, float. Output goes to a `Vec<u8>`. Linux, Xeon 2.1 GHz, 4 vCPUs, Rust 1.97,
-`--release`.
+unique string, float. Output goes to a `Vec<u8>`. macOS 26.6, Apple M1 Max, Rust 1.100,
+rust_xlsxwriter 0.102, `--release`.
 
 | Library | 100k rows (Criterion) | 1M rows | File (1M) |
 | --- | ---: | ---: | ---: |
-| **hypaxel** (tuples) | **74 ms** | **~0.75 s** | 50 MB |
-| **hypaxel** (serde records) | 75 ms | ~0.75 s | 50 MB |
-| hypaxel (shared strings) | 100 ms | ~1.4 s | 53 MB |
-| hypaxel (deflate level 6) | 316 ms | ~3.1 s | 31 MB |
-| rust_xlsxwriter 0.102 (constant memory) | 796 ms | ~8.7 s | 57 MB |
-| rust_xlsxwriter 0.102 | 1,019 ms | ~11.0 s | 59 MB |
+| **hypaxel** (tuples) | **67 ms** | **~0.69 s** | 50 MB |
+| **hypaxel** (serde records) | 70 ms | ~0.70 s | 50 MB |
+| hypaxel (shared strings) | 77 ms | ~0.87 s | 53 MB |
+| hypaxel (deflate level 6) | 185 ms | ~1.87 s | 31 MB |
+| rust_xlsxwriter 0.102 (constant memory) | 541 ms | ~5.3 s | 57 MB |
+| rust_xlsxwriter 0.102 | 551 ms | ~6.1 s | 59 MB |
 
-About half of the remaining time is deflate (zlib-rs, level 1). The other half is generating
-about 330 MB of XML at roughly 35 ns per cell.
+About two thirds of the time is deflate (zlib-rs, level 1): without compression 1M rows take
+0.25 s. The rest is generating about 330 MB of XML at roughly 25 ns per cell.
 
 ```bash
 cargo bench -p hypaxel                          # Criterion, 10k and 100k rows
@@ -265,20 +265,20 @@ HYPAXEL_QUICK=1000000 cargo bench -p hypaxel    # stopwatch run, 1M rows
 ```
 
 **Peak memory, 1M rows.** Each case writes to a file in its own process, generating every row as
-it is written, as a service streaming a database cursor would. macOS, Apple M1 Max, Rust 1.100,
-`--release`, peak RSS from `/usr/bin/time -l`, median of three runs (all three within 0.2 MB, or
-2 MB with shared strings). The first row only generates the rows, without writing them; that
-memory is included in every other figure.
+it is written, as a service streaming a database cursor would. Same machine, peak RSS from
+`/usr/bin/time -l`, median of three runs (all three within 0.1 MB, or 0.6 MB with shared strings).
+The first row only generates the rows, without writing them; that memory is included in every
+other figure.
 
 | Case | Peak RSS (1M) |
 | --- | ---: |
-| rows only, nothing written | 6.1 MB |
-| **hypaxel** (tuples) | **6.9 MB** |
-| **hypaxel** (serde records) | **7.0 MB** |
-| hypaxel (shared strings) | 121 MB |
-| hypaxel (deflate level 6) | 6.9 MB |
-| rust_xlsxwriter 0.102 (constant memory) | 7.6 MB |
-| rust_xlsxwriter 0.102 | 1,436 MB |
+| rows only, nothing written | 6.3 MB |
+| **hypaxel** (tuples) | **7.1 MB** |
+| **hypaxel** (serde records) | **7.2 MB** |
+| hypaxel (shared strings) | 127 MB |
+| hypaxel (deflate level 6) | 7.2 MB |
+| rust_xlsxwriter 0.102 (constant memory) | 7.8 MB |
+| rust_xlsxwriter 0.102 | 1,504 MB |
 
 Hypaxel's memory does not grow with the row count. Shared strings grow with the number of distinct
 strings, here one per row. rust_xlsxwriter's constant-memory mode stays low by writing the
@@ -292,14 +292,14 @@ cargo run --release -p hypaxel --example write_bench -- hypaxel 1000000 out.xlsx
 ### Reading
 
 The same dataset (1M rows × 10 columns, written by hypaxel) read cell by cell, with a checksum
-over all values that every reader must match. macOS, Apple M1 Max, Rust 1.100, calamine 0.38,
-`--release`, each run in its own process (best of three).
+over all values that every reader must match. Same machine, calamine 0.38, `--release`, each run in
+its own process (best of three).
 
 | Reader | Inline strings (49 MB) | Peak RSS | Shared strings (52 MB) | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| **hypaxel** `XlsxReader` | **0.78 s** | **7 MB** | **0.73 s** | **57 MB** |
-| calamine `worksheet_cells_reader` | 2.18 s | 7 MB | 2.05 s | 64 MB |
-| calamine `worksheet_range` | 2.43 s | 793 MB | 2.33 s | 849 MB |
+| **hypaxel** `XlsxReader` | **0.75 s** | **7 MB** | **0.72 s** | **57 MB** |
+| calamine `worksheet_cells_reader` | 2.14 s | 7 MB | 2.02 s | 63 MB |
+| calamine `worksheet_range` | 2.35 s | 793 MB | 2.23 s | 849 MB |
 
 About a quarter of the time is inflate. Cells of the shapes nearly every producer writes
 (`<c r="B2" s="1"><v>42</v></c>`, `<c t="inlineStr"><is><t>…</t></is></c>`) and plain shared string

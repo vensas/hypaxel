@@ -51,8 +51,14 @@ Python, Node.js, .NET, Java, Go and PHP).
 
 ### Changed
 
-- README: the Rust 1M-row write time in "At a glance" is ~0.75 s, matching `rust/README.md`
-  (was ~0.73 s).
+- Benchmarks: every published figure was re-measured, one implementation after another, on the
+  same Apple M1 Max (macOS 26.6) on an otherwise idle machine. Rust and Python writing were
+  previously measured on a Linux Xeon, and some figures came from runs on a busy machine. Python
+  also gains 1M-row write and read tables. The comparison ratios in the READMEs follow the new
+  figures; notably rust_xlsxwriter is ~8–9x slower than Hypaxel on this machine (was ~11–14x on
+  the Xeon).
+- .NET: the `--read-quick` read benchmark also prints the CPU time of the best run, summed over all
+  threads.
 - .NET README: the background decompression table lists time and CPU time in separate columns;
   the figures for several concurrent readers moved to the text.
 

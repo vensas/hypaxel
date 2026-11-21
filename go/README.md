@@ -8,7 +8,7 @@ flat whether you export 10 rows or a million, and a download can start while you
 running.
 
 - **Fast:** writes 100k rows × 10 columns in about 0.09 s, about **5x faster than excelize's
-  `StreamWriter`** and **20x faster than excelize's in-memory API** (see [Performance](#performance)).
+  `StreamWriter`** and **18x faster than excelize's in-memory API** (see [Performance](#performance)).
 - **Constant memory:** the typed cell methods allocate nothing per cell or per row. A million-row
   export peaks at the same resident memory as a 100k-row one.
 - **Streaming:** the destination is any `io.Writer` and does not need to be seekable. The
@@ -455,26 +455,26 @@ Writing 10 columns per row (int, 2× string, 2× float, a decimal-like float, `t
 int64, unique string), the same workload as the other Hypaxel implementations.
 
 Measured on an Apple M1 Max (10 cores, macOS 26.6) with Go 1.27.4 against excelize 2.11.1.
-Other processes were using the machine during the runs, so treat small differences as noise.
+The machine was otherwise idle.
 
 | Case | 100k rows | Allocated | Peak RSS | 1M rows | Allocated | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Hypaxel, typed cells | 88 ms | 0.2 MB | 18 MB | 0.92 s | 0.4 MB | 19 MB |
-| Hypaxel, struct mapping | 95 ms | 0.2 MB | 18 MB | 0.97 s | 0.4 MB | 19 MB |
-| Hypaxel, `WriteRow` | 100 ms | 10.9 MB | 19 MB | 1.02 s | 107 MB | 20 MB |
-| Hypaxel, shared strings | 113 ms | 17.7 MB | 28 MB | 1.37 s | 214 MB | 157 MB |
-| excelize, `StreamWriter` | 432 ms | 171 MB | 78 MB | 5.62 s | 1,317 MB | 179 MB |
-| excelize, in-memory | 1,740 ms | 1,250 MB | 631 MB | not run | not run | not run |
+| Hypaxel, typed cells | 87 ms | 0.2 MB | 19 MB | 0.84 s | 0.4 MB | 21 MB |
+| Hypaxel, struct mapping | 92 ms | 0.2 MB | 19 MB | 0.91 s | 0.2 MB | 21 MB |
+| Hypaxel, `WriteRow` | 98 ms | 10.9 MB | 20 MB | 0.96 s | 107 MB | 21 MB |
+| Hypaxel, shared strings | 107 ms | 17.8 MB | 30 MB | 1.17 s | 214 MB | 159 MB |
+| excelize, `StreamWriter` | 403 ms | 171 MB | 79 MB | 4.02 s | 1,317 MB | 191 MB |
+| excelize, in-memory | 1,598 ms | 1,250 MB | 650 MB | not run | not run | not run |
 
 Time and allocated bytes come from `go test -bench` with the rows built beforehand and a
 discarding destination: about a dozen iterations per case at 100k rows (one for the in-memory
 case), three at 1M. Peak RSS comes from separate runs, one process per case, that generate the
 rows on the fly; it includes the Go runtime and both libraries.
 
-The typed and struct-mapping cases make 27 to 66 allocations per workbook, whatever the number of
+The typed and struct-mapping cases make 27 to 62 allocations per workbook, whatever the number of
 rows. With shared strings, memory grows with the number of distinct strings, here one per row.
 The 1M-row file is 40.5 MB from Hypaxel and 62.9 MB from excelize's `StreamWriter`. At compression
-level 6 it is 29.0 MB and takes 1.32 s; at level 0 it is 331 MB and takes 0.37 s.
+level 6 it is 29.0 MB and takes 1.25 s; at level 0 it is 331 MB and takes 0.31 s.
 
 ### Reading performance
 
@@ -487,18 +487,18 @@ three, on an otherwise idle machine.
 
 | Reader | Inline strings (70.7 MB) | Peak RSS | Shared strings (71.5 MB) | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
-| **Hypaxel**, `Rows.Next` | **1.16 s** | **21 MB** | **1.20 s** | **73 MB** |
-| **Hypaxel**, `Rows.All` | **1.16 s** | **21 MB** | **1.21 s** | **86 MB** |
-| excelize, `Rows` with `RawCellValue` | 15.55 s | 22 MB | 17.00 s | 142 MB |
-| excelize, `Rows` (formatted values) | 68.33 s | 23 MB | 69.41 s | 142 MB |
-| xlsxreader, `ReadRows` | 14.51 s | 22 MB | 12.86 s | 163 MB |
+| **Hypaxel**, `Rows.Next` | **1.14 s** | **21 MB** | **1.18 s** | **74 MB** |
+| **Hypaxel**, `Rows.All` | **1.14 s** | **21 MB** | **1.18 s** | **73 MB** |
+| excelize, `Rows` with `RawCellValue` | 14.72 s | 22 MB | 16.54 s | 142 MB |
+| excelize, `Rows` (formatted values) | 66.34 s | 23 MB | 67.41 s | 142 MB |
+| xlsxreader, `ReadRows` | 13.79 s | 22 MB | 12.26 s | 163 MB |
 | tealeg/xlsx, `OpenFile` | not run | | not run | |
 
 With `GOMAXPROCS=1` there is no core to overlap decompression with, so the reader inflates on the
-caller's goroutine and takes about 2.1–2.2 s (interleaved A/B runs on a busy machine).
+caller's goroutine and takes about 2.0–2.1 s (`GOMAXPROCS=1 go run ./cmd/bench read 1000000`).
 
-At 100k rows tealeg/xlsx, which loads the whole sheet, takes 2.33 s and peaks at 715 MB, against
-0.22 s and 18 MB for Hypaxel. Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string
+At 100k rows tealeg/xlsx, which loads the whole sheet, takes 2.21 s and peaks at 694 MB, against
+0.12 s and 19 MB for Hypaxel. Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string
 per row holding its inline text) with inline strings, and 15 MB in 1.6k allocations with shared
 strings (mostly the table itself); excelize allocates 0.97 GB in 20M allocations.
 
@@ -513,7 +513,7 @@ Inflate and CRC-32 in Go's `compress/flate` and `archive/zip` take as long as al
 so Hypaxel decompresses each sheet and the shared string table on a separate goroutine while
 the caller's goroutine parses (see `WithConcurrentInflate`); a single reader's time is then
 bounded by inflate alone. The parser is purpose-built: it tokenizes the worksheet XML at
-460 MB/s, 7x faster than `encoding/xml`'s `RawToken` (64 MB/s) on the same input
+470 MB/s, 7x faster than `encoding/xml`'s `RawToken` (66 MB/s) on the same input
 (`go test -bench Tokenize` in `go/`), with single-pass fast paths for common cells and plain
 shared strings.
 
