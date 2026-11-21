@@ -191,7 +191,8 @@ java/      Maven project: src/, benchmarks/ (separate project)
 php/       Composer package: src/, tests/, benchmarks/, examples/
 benchmarks/ highlights.json and the format of each implementation's benchmarks/results/*.json
 scripts/   check_benchmarks.py: checks the benchmark JSON against the README tables
-.github/   CI: one workflow per implementation, each triggered only by changes to its own code
+.github/   CI: one workflow per implementation, each triggered only by changes to its own code, plus
+           benchmark checks, the CLA and notify-site.yml (tells the product site about releases and docs changes)
 ```
 
 ## Roadmap
