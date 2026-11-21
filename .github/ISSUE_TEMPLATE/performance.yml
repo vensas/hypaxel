@@ -1,0 +1,73 @@
+name: Performance or memory problem
+description: Hypaxel is slower or uses more memory than expected, or a release regressed.
+labels: [performance]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Measured numbers make these reports actionable. Please include peak memory, not just time, and compare with a library in the same ecosystem rather than across languages.
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: Implementation
+      options:
+        - .NET
+        - Rust
+        - Python
+        - Node.js (native)
+        - Browser (WebAssembly)
+        - Go
+        - Java
+        - PHP
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Writer
+        - Reader
+        - Web integration
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Hypaxel version or commit
+      description: For a regression, also give the last version that was fast.
+      placeholder: 0.3.0 (0.2.0 was fine)
+    validations:
+      required: true
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload
+      description: Rows, columns, cell types (strings, numbers, dates, formulas), styles, number of sheets, and where the output goes (file, HTTP response, memory).
+    validations:
+      required: true
+  - type: textarea
+    id: measurements
+    attributes:
+      label: Measurements
+      description: Wall time and peak memory for Hypaxel, and for any library you compared with, including its version.
+      placeholder: |
+        hypaxel 0.3.0: 2.4 s, 310 MB peak RSS
+        other-library 1.2.3: 1.1 s, 90 MB peak RSS
+    validations:
+      required: true
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Benchmark code
+      description: Code we can run to reproduce the numbers, and how you measured (tool, number of runs, warm-up).
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware and runtime
+      placeholder: Apple M3 Pro, 36 GB, macOS 15.1, Go 1.26.1
+    validations:
+      required: true

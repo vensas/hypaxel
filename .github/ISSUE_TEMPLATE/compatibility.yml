@@ -1,0 +1,70 @@
+name: Compatibility problem
+description: A file written by Hypaxel does not open correctly elsewhere, or a reader rejects or misreads a file from another producer.
+labels: [bug, compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Compatibility with Excel, LibreOffice and other tools is a core goal, so these reports are especially useful. The file itself is usually what we need most.
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Direction
+      options:
+        - Writing — a Hypaxel file does not open or looks wrong in another tool
+        - Reading — a Hypaxel reader rejects or misreads a file from another tool
+    validations:
+      required: true
+  - type: dropdown
+    id: implementation
+    attributes:
+      label: Implementation
+      multiple: true
+      options:
+        - .NET
+        - Rust
+        - Python
+        - Node.js (native)
+        - Browser (WebAssembly)
+        - Go
+        - Java
+        - PHP
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Hypaxel version or commit
+      placeholder: 0.3.0 or e804360
+    validations:
+      required: true
+  - type: input
+    id: other-tool
+    attributes:
+      label: Other tool and version
+      description: The application or library that produced or opened the file.
+      placeholder: Excel for Microsoft 365 16.0.18129 (Windows) / LibreOffice 24.8 / openpyxl 3.1.5
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: |
+        The exact error or repair message, or what differs (values, types, dates, formatting, sheet names, missing rows). Screenshots help for display problems.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Code
+      description: For writing, the code that produces the file. For reading, how you open and iterate it.
+      render: text
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: |
+        Attach the file that fails (zip it first if GitHub rejects `.xlsx`). Remove confidential data before uploading. If you cannot share it, describe how it was created, for example "saved by Excel as Strict Open XML".
+    validations:
+      required: true

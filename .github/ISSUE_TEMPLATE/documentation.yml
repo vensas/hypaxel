@@ -1,0 +1,22 @@
+name: Documentation
+description: Something in a README, example or API doc is missing, wrong or unclear.
+labels: [documentation]
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Where
+      description: File, section or URL.
+      placeholder: python/README.md#fastapi
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested change

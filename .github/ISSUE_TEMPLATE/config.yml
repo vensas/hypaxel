@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/vensas/hypaxel/security/advisories/new
+    about: Report vulnerabilities privately, for example a crafted file that crashes a reader or exhausts memory. Do not open a public issue.
+  - name: Contributing guide
+    url: https://github.com/vensas/hypaxel/blob/main/CONTRIBUTING.md
+    about: How to build, test and submit changes.
