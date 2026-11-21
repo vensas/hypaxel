@@ -113,9 +113,29 @@ fn main() -> hypaxel::Result<()> {
 - **Several sheets at once:** `reader.with_source(File::open(path)?)` creates a second reader that
   shares the parsed workbook and string table, e.g. for another thread; `into_worksheet` gives
   rows that own their source.
+- **Tables:** `reader.tables("Orders")?` (or `tables_at(0)`) returns the sheet's Excel tables as
+  the same `Table` values that `add_table` accepts: name, range, column names, style and the
+  display options. Tables are stored in their own parts and are read only when you ask, so reading
+  values costs the same as before. `autofilter` tells whether the file has filter buttons, and a
+  custom (non-built-in) table style reads as `TableStyle::None`.
+- **Rows and columns:** each `Row` has `outline_level()`, `is_hidden()`, `is_collapsed()` and
+  `height()` (`None` when the row stores no height). `rows.layout()?` gives the `SheetLayout`:
+  `column_widths()` (runs of columns with a first column, last column and width, explicit and
+  auto-fitted alike), `column_width(column)`, `outline_summary_above()` and
+  `row_outline_levels()`. These precede the rows in the file, so they are available before the
+  first `next_row()`. Rows without values are still skipped, whatever their properties.
 
-Not read (yet): formulas' text, styles beyond date detection, merged ranges, comments and
-hyperlinks.
+  ```rust
+  let table = &reader.tables("Orders")?[0];               // table.name, table.columns, table.style, ...
+  let mut rows = reader.worksheet("Orders")?;
+  let width = rows.layout()?.column_width(2);             // None = default width
+  while let Some(row) = rows.next_row()? {
+      let (level, hidden) = (row.outline_level(), row.is_hidden());
+  }
+  ```
+
+Not read (yet): formulas' text, styles beyond date detection, hidden columns, merged ranges,
+comments and hyperlinks.
 
 ## Serde records
 

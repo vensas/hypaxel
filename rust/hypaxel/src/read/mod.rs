@@ -3,6 +3,7 @@
 mod sheet;
 mod sst;
 mod styles;
+mod table;
 mod value;
 mod xml;
 mod zip;
@@ -12,7 +13,7 @@ use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
 
-pub use sheet::{Cell, Row, Rows};
+pub use sheet::{Cell, ColumnWidth, Row, Rows, SheetLayout};
 pub use value::{DateKind, ExcelDateTime, Value};
 
 use self::sst::SharedStrings;
@@ -20,6 +21,10 @@ use self::styles::Styles;
 use self::xml::{Event, XmlReader, decode_into};
 use self::zip::{Directory, EntryReader};
 use crate::error::{Error, Result};
+use crate::table::Table;
+
+/// Most tables read from one worksheet.
+const MAX_TABLES: usize = 4096;
 
 /// Limits that protect against oversized or malicious workbooks.
 #[derive(Debug, Clone)]
@@ -280,6 +285,36 @@ impl<R: Read + Seek> XlsxReader<R> {
         let sst = self.shared_strings.clone().unwrap_or_default();
         let meta = self.meta.clone();
         open_rows(&meta, sst, index, self.source)
+    }
+
+    /// The Excel tables of the sheet with this name (matched exactly, then ignoring case).
+    pub fn tables(&mut self, name: &str) -> Result<Vec<Table>> {
+        let index = self.sheet_index(name)?;
+        self.tables_at(index)
+    }
+
+    /// The Excel tables of the sheet at a 0-based position in [`sheets`](Self::sheets), as the
+    /// [`Table`] values that [`Sheet::add_table`](crate::Sheet::add_table) accepts.
+    ///
+    /// Tables live in their own parts, which are read on each call; reading rows does not touch
+    /// them. A table style that is not one of Excel's built-in styles is reported as
+    /// [`TableStyle::None`](crate::TableStyle::None).
+    pub fn tables_at(&mut self, index: usize) -> Result<Vec<Table>> {
+        self.check_index(index)?;
+        let Some(part) = self.meta.sheets[index].part.as_deref() else {
+            return Ok(Vec::new());
+        };
+        let mut package = Package { dir: &self.meta.dir, source: &mut self.source };
+        let rels = package.relationships(&rels_path(part))?.unwrap_or_default();
+        let mut tables = Vec::new();
+        for rel in rels.iter().filter(|r| r.is("table")) {
+            if tables.len() >= MAX_TABLES {
+                return Err(Error::LimitExceeded(format!("{part} has more than {MAX_TABLES} tables")));
+            }
+            let mut xml = package.xml(&rel.target)?;
+            tables.push(table::parse(&mut xml)?);
+        }
+        Ok(tables)
     }
 
     /// A reader for another handle to the same workbook (e.g. a second `File`), sharing the

@@ -27,7 +27,8 @@ impl Default for TableStyle {
 }
 
 impl TableStyle {
-    fn name(self) -> Option<String> {
+    /// The style's name in the file, e.g. `TableStyleMedium2`; `None` for [`TableStyle::None`].
+    pub fn name(self) -> Option<String> {
         match self {
             TableStyle::None => None,
             TableStyle::Light(n) => Some(format!("TableStyleLight{n}")),

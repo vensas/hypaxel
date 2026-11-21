@@ -415,3 +415,178 @@ fn damaged_files_fail_without_panicking() {
         }
     }
 }
+
+#[test]
+fn reads_back_tables_rows_and_layout_written_by_the_writer() {
+    let full = Table::new(1, 1, 4, 3)
+        .name("Orders")
+        .columns(["Product", "Units & more", "Line\nbreak"])
+        .style(TableStyle::Dark(3))
+        .row_stripes(false)
+        .column_stripes(true)
+        .highlight_first_column(true)
+        .highlight_last_column(true);
+    let plain = Table::new(10, 1, 12, 2).header_row(false).autofilter(false).style(TableStyle::None);
+    let bytes = write(|w| {
+        let options = SheetOptions::new().column_widths(&[12.5, 30.0]).row_outline_levels(2).outline_summary_above();
+        let mut s = w.add_worksheet_with("Data", &options)?;
+        s.add_row(("Product", "Units & more", "Line\nbreak"))?;
+        s.begin_row_with(&RowOptions::new().outline_level(1))?.write("Widget").write(3).end_row()?;
+        s.begin_row_with(&RowOptions::new().outline_level(2).hidden())?.write("Gadget").write(5).end_row()?;
+        s.begin_row_with(&RowOptions::new().outline_level(1).collapsed().height(20.5))?.write("Gizmo").end_row()?;
+        s.begin_row_at(10, Some(33.0), StyleId::default())?.write(1).write(2).end_row()?;
+        s.add_row((3, 4))?;
+        s.add_row((5, 6))?;
+        s.add_table(&full)?;
+        s.add_table(&plain)?;
+        let mut fitted = w.add_worksheet_with("Fitted", &SheetOptions::new().autofit_columns())?;
+        fitted.add_row(("a rather long header", 1))?;
+        Ok(())
+    });
+    let mut reader = reader(&bytes);
+
+    let tables = reader.tables("data").unwrap();
+    assert_eq!(tables, [full, Table { name: Some("Table2".into()), columns: vec!["Column1".into(), "Column2".into()], ..plain }]);
+    assert!(reader.tables_at(1).unwrap().is_empty());
+    assert!(matches!(reader.tables("Missing"), Err(Error::SheetNotFound(_))));
+    assert!(matches!(reader.tables_at(2), Err(Error::SheetNotFound(_))));
+
+    let mut rows = reader.worksheet("Data").unwrap();
+    let layout = rows.layout().unwrap().clone();
+    assert!(layout.outline_summary_above());
+    assert_eq!(layout.row_outline_levels(), 2);
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width())).collect();
+    assert_eq!(widths, [(1, 1, 12.5), (2, 2, 30.0)]);
+    assert_eq!((layout.column_width(2), layout.column_width(3)), (Some(30.0), None));
+
+    let mut seen = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        seen.push((row.number(), row.outline_level(), row.is_hidden(), row.is_collapsed(), row.height()));
+    }
+    assert_eq!(
+        seen,
+        [
+            (1, 0, false, false, None),
+            (2, 1, false, false, None),
+            (3, 2, true, false, None),
+            (4, 1, false, true, Some(20.5)),
+            (10, 0, false, false, Some(33.0)),
+            (11, 0, false, false, None),
+            (12, 0, false, false, None),
+        ]
+    );
+    assert_eq!(rows.layout().unwrap(), &layout);
+
+    let mut fitted = reader.worksheet("Fitted").unwrap();
+    let layout = fitted.layout().unwrap();
+    assert!(!layout.outline_summary_above());
+    assert_eq!(layout.row_outline_levels(), 0);
+    assert!(layout.column_width(1).unwrap() > layout.column_width(2).unwrap());
+    assert_eq!(fitted.next_row().unwrap().unwrap().get(2), Value::Number(1.0));
+}
+
+const TABLE_REL: &str = r#"<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>"#;
+
+fn sheet_with_table(table_xml: &str) -> Vec<u8> {
+    let rels =
+        format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{TABLE_REL}</Relationships>"#);
+    single_sheet(
+        r#"<worksheet><sheetData/></worksheet>"#,
+        "",
+        &[("xl/worksheets/_rels/sheet1.xml.rels", rels.as_str()), ("xl/tables/table1.xml", table_xml)],
+    )
+}
+
+#[test]
+fn reads_tables_and_layout_from_other_producers() {
+    let bytes = sheet_with_table(
+        r#"<?xml version="1.0"?><x:table xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="7" name="Internal" displayName="Sales_2026" ref="$B$2:$D$9" totalsRowCount="1"><x:autoFilter ref="B2:D8"><x:filterColumn colId="0"/></x:autoFilter><x:tableColumns count="3"><x:tableColumn id="1" name="Region &amp; area"/><x:tableColumn id="2" name="Net_x000A_total"><x:calculatedColumnFormula>1+1</x:calculatedColumnFormula></x:tableColumn><x:tableColumn id="3" name="Σ"/></x:tableColumns><x:tableStyleInfo name="My Corporate Style" showFirstColumn="true" showLastColumn="0" showRowStripes="1" showColumnStripes="false"/></x:table>"#,
+    );
+    let tables = reader(&bytes).tables_at(0).unwrap();
+    let expected = Table::new(2, 2, 9, 4)
+        .name("Sales_2026")
+        .columns(["Region & area", "Net\ntotal", "Σ"])
+        .style(TableStyle::None)
+        .highlight_first_column(true);
+    assert_eq!(tables, [expected]);
+
+    let bare = sheet_with_table(
+        r#"<table name="OnlyName" ref="A1" headerRowCount="0"><tableColumns><tableColumn name="x"/></tableColumns></table>"#,
+    );
+    let tables = reader(&bare).tables("S").unwrap();
+    let expected = Table::new(1, 1, 1, 1)
+        .name("OnlyName")
+        .columns(["x"])
+        .style(TableStyle::None)
+        .header_row(false)
+        .autofilter(false)
+        .row_stripes(false);
+    assert_eq!(tables, [expected]);
+
+    let sheet = single_sheet(
+        r#"<worksheet><sheetPr><tabColor rgb="FF00FF00"/><outlinePr summaryBelow="false" summaryRight="0"/><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:B3"/><sheetViews><sheetView workbookViewId="0"><selection activeCell="A1"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15" outlineLevelRow="9" x14ac:dyDescent="0.25"/><cols><col min="1" max="1" width="8.5" customWidth="1"/><col min="3" max="16384" width="4" hidden="1"/><col min="2" max="2" style="1"/><col min="0" max="3" width="1"/><col min="5" max="4" width="1"/><col min="2" max="2" width="-1"/></cols><sheetData><row r="1" spans="1:2" ht="18.75" x14ac:dyDescent="0.25"><c r="A1"><v>1</v></c></row><row r="2" outlineLevel="9" hidden="true" collapsed="1" customHeight="1"><c r="A2"><v>2</v></c></row><row r="3" outlineLevel="x" hidden="0" ht="abc"><c r="A3"><v>3</v></c></row></sheetData></worksheet>"#,
+        "",
+        &[],
+    );
+    let mut reader = reader(&sheet);
+    assert!(reader.tables("S").unwrap().is_empty());
+    let mut rows = reader.worksheet("S").unwrap();
+    let layout = rows.layout().unwrap();
+    assert!(layout.outline_summary_above());
+    assert_eq!(layout.row_outline_levels(), 7);
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width())).collect();
+    assert_eq!(widths, [(1, 1, 8.5), (3, 16_384, 4.0)]);
+    assert_eq!((layout.column_width(1), layout.column_width(2), layout.column_width(9_000)), (Some(8.5), None, Some(4.0)));
+    let mut seen = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        seen.push((row.number(), row.outline_level(), row.is_hidden(), row.is_collapsed(), row.height()));
+    }
+    assert_eq!(seen, [(1, 0, false, false, Some(18.75)), (2, 7, true, true, None), (3, 0, false, false, None)]);
+}
+
+#[test]
+fn rejects_damaged_table_parts() {
+    for (table_xml, expected) in [
+        (r#"<worksheet/>"#, "not a table"),
+        (r#""#, "not a table"),
+        (r#"<table name="T"/>"#, "no valid cell range"),
+        (r#"<table name="T" ref="C3:A1"/>"#, "no valid cell range"),
+        (r#"<table name="T" ref="A1:B2"><tableColumns>"#, "unexpected end"),
+        (r#"<!DOCTYPE t [<!ENTITY a "b">]><table name="T" ref="A1:B2"/>"#, "document type"),
+    ] {
+        let err = reader(&sheet_with_table(table_xml)).tables_at(0).unwrap_err();
+        assert!(matches!(&err, Error::Malformed { part, .. } if part == "xl/tables/table1.xml"), "{err}");
+        assert!(err.to_string().contains(expected), "{err}");
+    }
+
+    let columns = r#"<tableColumn name="c"/>"#.repeat(16_385);
+    let wide = sheet_with_table(&format!(r#"<table name="T" ref="A1:B2"><tableColumns>{columns}</tableColumns></table>"#));
+    assert!(reader(&wide).tables_at(0).unwrap_err().to_string().contains("more than 16384 columns"));
+
+    let rels = format!(r#"<Relationships>{}</Relationships>"#, TABLE_REL.repeat(4_097));
+    let many = single_sheet(
+        r#"<worksheet><sheetData/></worksheet>"#,
+        "",
+        &[("xl/worksheets/_rels/sheet1.xml.rels", rels.as_str()), ("xl/tables/table1.xml", r#"<table name="T" ref="A1"/>"#)],
+    );
+    assert!(matches!(reader(&many).tables_at(0), Err(Error::LimitExceeded(_))));
+
+    let dangling = single_sheet(
+        r#"<worksheet><sheetData/></worksheet>"#,
+        "",
+        &[("xl/worksheets/_rels/sheet1.xml.rels", format!("<Relationships>{TABLE_REL}</Relationships>").as_str())],
+    );
+    let mut reader = reader(&dangling);
+    assert!(matches!(reader.tables_at(0), Err(Error::Malformed { .. })));
+    assert!(reader.worksheet_at(0).unwrap().next_row().unwrap().is_none());
+
+    let cols = r#"<col min="1" max="1" width="1"/>"#.repeat(16_385);
+    let sheet = single_sheet(&format!(r#"<worksheet><cols>{cols}</cols><sheetData/></worksheet>"#), "", &[]);
+    assert!(reader_rows_error_at_layout(&sheet).contains("more than 16384 column ranges"));
+}
+
+fn reader_rows_error_at_layout(bytes: &[u8]) -> String {
+    let mut reader = reader(bytes);
+    let mut rows = reader.worksheet("S").unwrap();
+    rows.layout().unwrap_err().to_string()
+}
