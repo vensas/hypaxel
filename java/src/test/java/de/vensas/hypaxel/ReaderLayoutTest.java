@@ -492,4 +492,50 @@ class ReaderLayoutTest {
         assertEquals(List.of("1:3:0:false:false:15.0", "2:3:1:false:false:15.0", "3:3:2:true:false:15.0", "4:3:1:false:true:30.0",
                 "6:0:0:false:false:45.0", "7:2:0:false:false:15.0", "8:2:0:false:false:15.0"), rowSummaries(xlsx, include));
     }
+
+    /**
+     * {@code testdata/reader/excel-totals.xlsx} is an inventory list saved by Excel for Mac: one
+     * table over 1,000 rows with a totals row.
+     */
+    @Test
+    void readsATableWithATotalsRowSavedByExcel() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "excel-totals.xlsx"));
+        ExcelTable expected = ExcelTable.builder(1, 1, 1002, 11).name("Table1")
+                .columns("SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening",
+                        "Sold", "Closing", "Reorder", "Status")
+                .totalsRow(true).build();
+        try (XlsxReader reader = XlsxReader.open(xlsx)) {
+            assertEquals(List.of("Inventory"), reader.sheetNames());
+            assertEquals(List.of(expected), reader.tables(0));
+            try (SheetReader sheet = reader.worksheet(0)) {
+                assertFalse(sheet.outlineSummaryAbove());
+                List<ColumnWidth> widths = sheet.columnWidths();
+                assertEquals(11, widths.size());
+                assertEquals(new ColumnWidth(1, 1, 11.6640625, false), widths.get(0));
+                assertEquals(new ColumnWidth(11, 11, 13.1640625, false), widths.get(10));
+
+                int count = 0;
+                Row totals = null;
+                for (Row row = sheet.nextRow(); row != null; row = sheet.nextRow()) {
+                    count++;
+                    assertEquals(0, row.outlineLevel());
+                    assertFalse(row.hidden());
+                    assertTrue(row.height().isEmpty());
+                    if (row.number() == 1002) {
+                        totals = row.copy();
+                    }
+                }
+                assertEquals(1002, count);
+                assertEquals(6, totals.cellCount());
+                assertEquals(List.of(1, 5, 6, 8, 10, 11), List.of(totals.column(0), totals.column(1), totals.column(2),
+                        totals.column(3), totals.column(4), totals.column(5)));
+                assertEquals("Total", totals.getString(1));
+                assertEquals(21.085, totals.getNumber(5));
+                assertEquals(33.736, totals.getNumber(6));
+                assertEquals(99696, totals.getNumber(8));
+                assertEquals(34500, totals.getNumber(10));
+                assertEquals(1000, totals.getNumber(11));
+            }
+        }
+    }
 }

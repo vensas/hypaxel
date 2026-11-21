@@ -3,6 +3,7 @@ package hypaxel
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -479,5 +480,74 @@ func TestReadWorkbookSavedByLibreOffice(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rows, wantRows) {
 		t.Errorf("rows:\n got %+v\nwant %+v", rows, wantRows)
+	}
+}
+
+// excel-totals.xlsx is an inventory list saved by Excel for Mac: one table over 1,000 rows with
+// a totals row.
+func TestReadTableWithTotalsRowSavedByExcel(t *testing.T) {
+	r, err := OpenReader("../testdata/reader/excel-totals.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if names := r.SheetNames(); !reflect.DeepEqual(names, []string{"Inventory"}) {
+		t.Errorf("sheets: %v", names)
+	}
+
+	tables, err := r.TablesAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTables := []Table{{
+		FirstRow: 1, FirstColumn: 1, LastRow: 1002, LastColumn: 11, Name: "Table1",
+		Columns: []string{"SKU", "Item", "Group", "Vendor", "Cost", "Price",
+			"Opening", "Sold", "Closing", "Reorder", "Status"},
+		Style: TableStyleMedium(2), TotalsRow: true,
+	}}
+	if !reflect.DeepEqual(tables, wantTables) {
+		t.Errorf("tables:\n got %+v\nwant %+v", tables, wantTables)
+	}
+
+	rows, err := r.RowsAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	layout, err := rows.Layout()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.OutlineSummaryAbove || len(layout.ColumnWidths) != 11 {
+		t.Fatalf("layout: %+v", layout)
+	}
+	first, last := layout.ColumnWidths[0], layout.ColumnWidths[10]
+	if first != (ColumnWidth{FirstColumn: 1, LastColumn: 1, Width: 11.6640625}) || last != (ColumnWidth{FirstColumn: 11, LastColumn: 11, Width: 13.1640625}) {
+		t.Errorf("column widths: first %+v, last %+v", first, last)
+	}
+
+	count := 0
+	var totals []string
+	for rows.Next() {
+		row := rows.Row()
+		count++
+		if _, hasHeight := row.Height(); row.OutlineLevel() != 0 || row.Hidden() || hasHeight {
+			t.Errorf("row %d has unexpected properties", row.Index())
+		}
+		if row.Index() == 1002 {
+			for column, v := range row.Cells() {
+				totals = append(totals, strconv.Itoa(column)+"="+v.String())
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1002 {
+		t.Errorf("rows: got %d, want 1002", count)
+	}
+	want := []string{"1=Total", "5=21.085", "6=33.736", "8=99696", "10=34500", "11=1000"}
+	if !reflect.DeepEqual(totals, want) {
+		t.Errorf("totals row:\n got %v\nwant %v", totals, want)
 	}
 }

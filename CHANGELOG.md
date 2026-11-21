@@ -91,8 +91,8 @@ Python, Node.js, .NET, Java, Go and PHP).
     `hashCode` and `toString`); `Row.outlineLevel`, `hidden`, `collapsed`, `height`;
     `SheetReader.columnWidths`, `columnWidth`, `outlineSummaryAbove`, `rowOutlineLevels`;
     `ColumnWidth`.
-  - Checked against the same workbook saved by Excel for Mac and by LibreOffice Calc
-    (`testdata/reader/`), in every implementation.
+  - Checked against the same workbook saved by Excel for Mac and by LibreOffice Calc, and against
+    an Excel workbook whose table has a totals row (`testdata/reader/`), in every implementation.
   - Go: `TableStyleMedium(2)` is now the zero `TableStyle`, so a table written with it compares
     equal to the table read back.
   - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table and

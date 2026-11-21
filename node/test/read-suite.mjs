@@ -479,4 +479,56 @@ export function defineReadSuite(label, api) {
     assert.deepEqual(scan({ includeEmptyRows: true }, { skipEmpty: true }).map((r) => r[0]), [1, 4])
     assert.deepEqual(await readRecords(bytes, 0, { includeEmptyRows: true }), [{ first: 4 }])
   })
+
+  test('reads a table with a totals row saved by excel', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/excel-totals.xlsx', import.meta.url))
+    const book = openWorkbookSync(bytes)
+    assert.deepEqual(book.sheetNames, ['Inventory'])
+    assert.deepEqual(book.tables(), [
+      {
+        firstRow: 1,
+        firstColumn: 1,
+        lastRow: 1002,
+        lastColumn: 11,
+        options: {
+          name: 'Table1',
+          columns: [
+            'SKU',
+            'Item',
+            'Group',
+            'Vendor',
+            'Cost',
+            'Price',
+            'Opening',
+            'Sold',
+            'Closing',
+            'Reorder',
+            'Status',
+          ],
+          style: 'TableStyleMedium2',
+          headerRow: true,
+          autofilter: true,
+          rowStripes: true,
+          columnStripes: false,
+          firstColumn: false,
+          lastColumn: false,
+          totalsRow: true,
+        },
+      },
+    ])
+
+    const rows = book.rows()
+    const { columnWidths, outlineSummaryAbove } = rows.layout()
+    assert.equal(columnWidths.length, 11)
+    assert.deepEqual(columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.6640625, hidden: false })
+    assert.deepEqual(columnWidths[10], { firstColumn: 11, lastColumn: 11, width: 13.1640625, hidden: false })
+    assert.equal(outlineSummaryAbove, false)
+    const data = []
+    for (const row of rows) {
+      assert.deepEqual([rows.outlineLevel, rows.hidden, rows.height], [0, false, undefined])
+      data.push(row)
+    }
+    assert.equal(data.length, 1002)
+    assert.deepEqual(data.at(-1), ['Total', null, null, null, 21.085, 33.736, null, 99696, null, 34500, 1000])
+  })
 }

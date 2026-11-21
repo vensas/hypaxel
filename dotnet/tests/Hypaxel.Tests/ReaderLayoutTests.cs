@@ -533,6 +533,53 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void ReadsTableWithTotalsRowSavedByExcel()
+    {
+        using var reader = XlsxReader.Open(TestData("excel-totals.xlsx"));
+        Assert.Equal(["Inventory"], reader.SheetNames);
+
+        var table = Assert.Single(reader.GetTables(0));
+        Assert.Equal(
+            [
+                "SKU", "Item", "Group", "Vendor", "Cost", "Price",
+                "Opening", "Sold", "Closing", "Reorder", "Status",
+            ],
+            table.Columns);
+        Assert.Equal(new ExcelTable(1, 1, 1002, 11) { Name = "Table1", HasTotalsRow = true }, table with { Columns = null });
+
+        using var rows = reader.OpenWorksheet(0);
+        Assert.False(rows.OutlineSummaryAbove);
+        Assert.Equal(11, rows.ColumnWidths.Count);
+        Assert.Equal(new ColumnWidth(1, 1, 11.6640625), rows.ColumnWidths[0]);
+        Assert.Equal(new ColumnWidth(11, 11, 13.1640625), rows.ColumnWidths[10]);
+
+        var count = 0;
+        var totals = new List<(int Column, ExcelValue Value)>();
+        while (rows.Read())
+        {
+            var row = rows.Row;
+            count++;
+            Assert.Equal((0, false, (double?)null), (row.OutlineLevel, row.Hidden, row.Height));
+            if (row.Number == 1002)
+            {
+                totals.AddRange(row.Cells.Select(c => (c.Column, c.Value)));
+            }
+        }
+
+        Assert.Equal(1002, count);
+        Assert.Equal(
+            [
+                (1, ExcelValue.FromString("Total")),
+                (5, ExcelValue.FromNumber(21.085)),
+                (6, ExcelValue.FromNumber(33.736)),
+                (8, ExcelValue.FromNumber(99696)),
+                (10, ExcelValue.FromNumber(34500)),
+                (11, ExcelValue.FromNumber(1000)),
+            ],
+            totals);
+    }
+
+    [Fact]
     public void ReturnsTablesFromTopToBottomThenLeftToRight()
     {
         string Table(string range) => $"""<table xmlns="{Main}" ref="{range}"/>""";

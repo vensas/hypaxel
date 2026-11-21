@@ -720,3 +720,36 @@ fn reads_tables_rows_and_layout_saved_by_libreoffice() {
         ]
     );
 }
+
+/// `testdata/reader/excel-totals.xlsx` is an inventory list saved by Excel for Mac: one table
+/// over 1,000 rows with a totals row.
+#[test]
+fn reads_a_table_with_a_totals_row_saved_by_excel() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/reader/excel-totals.xlsx");
+    let mut reader = XlsxReader::open(path).unwrap();
+    assert_eq!(reader.sheet_names().collect::<Vec<_>>(), ["Inventory"]);
+
+    let columns = ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"];
+    let expected = Table { totals_row: true, ..Table::new(1, 1, 1002, 11).name("Table1").columns(columns) };
+    assert_eq!(reader.tables_at(0).unwrap(), [expected]);
+
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    assert!(!layout.outline_summary_above());
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(widths.len(), 11);
+    assert_eq!((widths[0], widths[10]), ((1, 1, 11.6640625, false), (11, 11, 13.1640625, false)));
+
+    let mut count = 0;
+    let mut totals = Vec::new();
+    while let Some(row) = rows.next_row().unwrap() {
+        count += 1;
+        assert_eq!((row.outline_level(), row.is_hidden(), row.height()), (0, false, None));
+        if row.number() == 1002 {
+            totals = row.cells().map(|c| (c.column(), c.value().to_string())).collect();
+        }
+    }
+    assert_eq!(count, 1002);
+    let totals: Vec<_> = totals.iter().map(|(column, value)| (*column, value.as_str())).collect();
+    assert_eq!(totals, [(1, "Total"), (5, "21.085"), (6, "33.736"), (8, "99696"), (10, "34500"), (11, "1000")]);
+}

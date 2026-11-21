@@ -348,3 +348,27 @@ def test_tables_with_a_totals_row_cannot_be_written():
     ws.write_rows([["a"], [1], [2]])
     with pytest.raises((XlsxError, ValueError), match="totals row"):
         ws.add_table(1, 1, 3, 1, columns=["a"], totals_row=True)
+
+
+def test_reads_a_table_with_a_totals_row_saved_by_excel():
+    with hypaxel.open_workbook(os.path.join(TESTDATA, "excel-totals.xlsx")) as wb:
+        assert wb.sheet_names == ["Inventory"]
+        assert wb.tables() == [{
+            "name": "Table1", "first_row": 1, "first_col": 1, "last_row": 1002, "last_col": 11,
+            "columns": ["SKU", "Item", "Group", "Vendor", "Cost", "Price",
+                        "Opening", "Sold", "Closing", "Reorder", "Status"],
+            "style": "TableStyleMedium2", "header_row": True, "autofilter": True, "row_stripes": True,
+            "column_stripes": False, "first_column": False, "last_column": False, "totals_row": True,
+        }]
+
+        rows = wb.rows()
+        widths = rows.column_widths
+        assert len(widths) == 11
+        assert (widths[0], widths[-1]) == ((1, 1, 11.6640625, False), (11, 11, 13.1640625, False))
+        assert rows.outline_summary_above is False
+        data = []
+        for row in rows:
+            assert (rows.outline_level, rows.hidden, rows.height) == (0, False, None)
+            data.append(row)
+        assert len(data) == 1002
+        assert data[-1] == ["Total", None, None, None, 21.085, 33.736, None, 99696, None, 34500, 1000]
