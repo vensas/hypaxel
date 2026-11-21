@@ -347,6 +347,10 @@ func (rel *relationship) is(kind string) bool {
 	return rel.kind[strings.LastIndexByte(rel.kind, '/')+1:] == kind
 }
 
+// maxRelationships is the most relationships to other parts that one part may have. Links to
+// external targets are not kept and do not count.
+const maxRelationships = 65_536
+
 func (r *Reader) relationships(part string) ([]relationship, error) {
 	if r.find(part) == nil {
 		return nil, nil
@@ -378,6 +382,9 @@ func (r *Reader) relationships(part string) ([]relationship, error) {
 		kind, ok2 := decodedAttr(x.attrs, "Type")
 		target, ok3 := decodedAttr(x.attrs, "Target")
 		if ok1 && ok2 && ok3 {
+			if len(rels) >= maxRelationships {
+				return nil, partError(part, ErrLimitExceeded, "the part has more than %d relationships", maxRelationships)
+			}
 			rels = append(rels, relationship{id: id, kind: kind, target: resolvePart(base, target)})
 		}
 	}

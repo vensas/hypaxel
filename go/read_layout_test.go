@@ -658,6 +658,30 @@ func TestReadTablesBoundsMemory(t *testing.T) {
 	}
 }
 
+func TestReadBoundsRelationships(t *testing.T) {
+	const sheet = `<worksheet><sheetData/></worksheet>`
+	const table = `<table displayName="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns></table>`
+	const open = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+	external := `<Relationship Id="x" Type="t/hyperlink" Target="https://example.com" TargetMode="External"/>`
+	rels := open + strings.Repeat(external, 70_000) + tableRel + `</Relationships>`
+	links := singleSheet(t, sheet, "", "xl/worksheets/_rels/sheet1.xml.rels", rels, "xl/tables/t.xml", table)
+	tables, err := openBytes(t, links).Tables("S")
+	noErr(t, err)
+	if len(tables) != 1 {
+		t.Errorf("got %d tables behind 70,000 external links, want 1", len(tables))
+	}
+
+	internal := `<Relationship Id="x" Type="t/other" Target="other.xml"/>`
+	rels = open + strings.Repeat(internal, 65_537) + `</Relationships>`
+	flood := singleSheet(t, sheet, "", "xl/worksheets/_rels/sheet1.xml.rels", rels)
+	_, err = openBytes(t, flood).Tables("S")
+	wantErr(t, err, ErrLimitExceeded)
+	var re *ReadError
+	if !errors.As(err, &re) || re.Part != "xl/worksheets/_rels/sheet1.xml.rels" || !strings.Contains(re.Message, "more than 65536 relationships") {
+		t.Errorf("got %v", err)
+	}
+}
+
 func TestLayoutOnSheetWithoutRowsVerifiesTheEntry(t *testing.T) {
 	sheet := `<worksheet><cols><col min="1" max="1" width="9"/></cols><sheetData/>` + strings.Repeat(`<mergeCell ref="A1:B2"/>`, 20_000) + `</worksheet>`
 	data := singleSheet(t, sheet, "")
@@ -669,10 +693,10 @@ func TestLayoutOnSheetWithoutRowsVerifiesTheEntry(t *testing.T) {
 			rows, err := openBytes(t, damaged, WithConcurrentInflate(concurrent)).Rows("S")
 			noErr(t, err)
 			if withLayout {
-				layout, err := rows.Layout()
-				noErr(t, err)
-				if len(layout.ColumnWidths) != 1 {
-					t.Errorf("layout: %+v", layout)
+				for range 2 {
+					if _, err := rows.Layout(); !errors.Is(err, ErrMalformed) || !errors.Is(err, zip.ErrChecksum) {
+						t.Errorf("concurrent %v: Layout() = %v, want a checksum error", concurrent, err)
+					}
 				}
 			}
 			if rows.Next() {
@@ -681,18 +705,16 @@ func TestLayoutOnSheetWithoutRowsVerifiesTheEntry(t *testing.T) {
 			if err := rows.Err(); !errors.Is(err, ErrMalformed) || !errors.Is(err, zip.ErrChecksum) {
 				t.Errorf("concurrent %v, layout %v: Err() = %v, want a checksum error", concurrent, withLayout, err)
 			}
-			if withLayout {
-				if _, err := rows.Layout(); err != nil {
-					t.Errorf("Layout after the end: %v", err)
-				}
-			}
 		}
 	}
 
 	rows, err := openBytes(t, data).Rows("S")
 	noErr(t, err)
-	_, err = rows.Layout()
+	layout, err := rows.Layout()
 	noErr(t, err)
+	if len(layout.ColumnWidths) != 1 {
+		t.Errorf("layout: %+v", layout)
+	}
 	if rows.rc != nil {
 		t.Error("Layout at the end of the rows left the entry open")
 	}

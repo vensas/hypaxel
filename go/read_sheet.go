@@ -116,7 +116,8 @@ func (r *Rows) Next() bool {
 
 // Layout returns the column widths and outline settings of the sheet. They precede the rows in
 // the file, so Layout can be called before the first Next and reads nothing extra. An error
-// while reading them stops the Rows, and Err reports it as well. Once read, the layout stays
+// while reading them stops the Rows, and Err reports it as well. On a sheet without rows that
+// includes a damaged worksheet entry, which is verified at its end. Once read, the layout stays
 // available, also after the last row, after Close and after an error in a later row. Layout
 // returns [ErrRowsClosed] if the Rows was closed before the layout was read.
 func (r *Rows) Layout() (*SheetLayout, error) {
@@ -126,6 +127,9 @@ func (r *Rows) Layout() (*SheetLayout, error) {
 			r.finish()
 		} else if r.state == rowsDone {
 			r.finish()
+			if r.err != nil {
+				r.layoutRead, r.layoutErr = false, r.err
+			}
 		}
 	}
 	switch {

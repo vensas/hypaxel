@@ -430,7 +430,7 @@ return rows.Err()
   rows without references, out-of-order cells, rich text, inline strings, phonetic runs, CDATA,
   and Excel's `_xHHHH_` escapes.
 - **Safety:** document type declarations are rejected (no entity expansion), every XML token is
-  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, every sheet to 4,096 tables holding 64 MiB of table and column names, ZIP entries must match
+  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, every sheet to 4,096 tables holding 64 MiB of table and column names, every part to 65,536 relationships to other parts, ZIP entries must match
   their declared size and CRC-32, and `WithMaxSharedStringsBytes` caps the shared string table.
   Damaged input returns an error, never a panic or a hang; the reader is fuzz-tested.
 
