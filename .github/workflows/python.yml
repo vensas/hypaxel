@@ -5,9 +5,9 @@ name: Python
 # limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    paths: ["python/**", "rust/hypaxel/**", ".github/workflows/python.yml"]
+    paths: ["python/**", "rust/hypaxel/**", ".github/workflows/python.yml", "testdata/**"]
   pull_request:
-    paths: ["python/**", "rust/hypaxel/**", ".github/workflows/python.yml"]
+    paths: ["python/**", "rust/hypaxel/**", ".github/workflows/python.yml", "testdata/**"]
 
 defaults:
   run:

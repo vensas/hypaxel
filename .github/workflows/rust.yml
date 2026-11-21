@@ -5,9 +5,9 @@ name: Rust
 # limited to forks, whose pushes do not trigger workflows here.
 on:
   push:
-    paths: ["rust/**", ".github/workflows/rust.yml"]
+    paths: ["rust/**", ".github/workflows/rust.yml", "testdata/**"]
   pull_request:
-    paths: ["rust/**", ".github/workflows/rust.yml"]
+    paths: ["rust/**", ".github/workflows/rust.yml", "testdata/**"]
 
 defaults:
   run:
