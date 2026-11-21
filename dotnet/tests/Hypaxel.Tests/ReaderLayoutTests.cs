@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using static Hypaxel.Tests.XlsxReaderTests;
 
 namespace Hypaxel.Tests;
@@ -5,6 +7,9 @@ namespace Hypaxel.Tests;
 public class ReaderLayoutTests
 {
     private const string Main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    private static readonly string[] InventoryColumns =
+        ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"];
     private const string TableRelType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 
     private static XlsxReader Reader(byte[] bytes) => new(new MemoryStream(bytes));
@@ -49,8 +54,9 @@ public class ReaderLayoutTests
         Assert.Equal(3, tables.Count);
 
         var first = tables[0];
-        Assert.Equal(full.Columns, first.Columns);
-        Assert.Equal(full, first with { Columns = full.Columns });
+        Assert.Equal(full, first);
+        Assert.Equal(full.GetHashCode(), first.GetHashCode());
+        Assert.Equal(first, reader.GetTables("data")[0]);
 
         var second = tables[1];
         Assert.Equal((1, 4, 3, 5), (second.FirstRow, second.FirstColumn, second.LastRow, second.LastColumn));
@@ -96,8 +102,7 @@ public class ReaderLayoutTests
         });
         using var copied = Reader(copy);
         var again = Assert.Single(copied.GetTables(0));
-        Assert.Equal(table.Columns, again.Columns);
-        Assert.Equal(table, again with { Columns = table.Columns });
+        Assert.Equal(table, again);
     }
 
     [Fact]
@@ -556,10 +561,8 @@ public class ReaderLayoutTests
 
         var tables = reader.GetTables("Orders");
         Assert.Equal(2, tables.Count);
-        Assert.Equal(["Product", "Units & more", "Price"], tables[0].Columns);
-        Assert.Equal(orders, tables[0] with { Columns = null });
-        Assert.Equal(["Column1", "Column2"], tables[1].Columns);
-        Assert.Equal(plain, tables[1] with { Columns = null });
+        Assert.Equal(orders with { Columns = ["Product", "Units & more", "Price"] }, tables[0]);
+        Assert.Equal(plain with { Columns = ["Column1", "Column2"] }, tables[1]);
         Assert.Empty(reader.GetTables("Plain"));
 
         using var rows = reader.OpenWorksheet("Orders");
@@ -621,13 +624,7 @@ public class ReaderLayoutTests
         Assert.Equal(["Inventory"], reader.SheetNames);
 
         var table = Assert.Single(reader.GetTables(0));
-        Assert.Equal(
-            [
-                "SKU", "Item", "Group", "Vendor", "Cost", "Price",
-                "Opening", "Sold", "Closing", "Reorder", "Status",
-            ],
-            table.Columns);
-        Assert.Equal(new ExcelTable(1, 1, 1002, 11) { Name = "Table1", HasTotalsRow = true }, table with { Columns = null });
+        Assert.Equal(new ExcelTable(1, 1, 1002, 11) { Name = "Table1", Columns = InventoryColumns, HasTotalsRow = true }, table);
 
         using var rows = reader.OpenWorksheet(0);
         Assert.False(rows.OutlineSummaryAbove);
@@ -668,15 +665,10 @@ public class ReaderLayoutTests
         Assert.Equal(["Inventory"], reader.SheetNames);
 
         var table = Assert.Single(reader.GetTables(0));
-        Assert.Equal(
-            [
-                "SKU", "Item", "Group", "Vendor", "Cost", "Price",
-                "Opening", "Sold", "Closing", "Reorder", "Status",
-            ],
-            table.Columns);
         var expected = new ExcelTable(1, 1, 903, 11)
         {
             Name = "Table1",
+            Columns = InventoryColumns,
             Style = TableStyle.None,
             ShowHeaderRow = true,
             ShowAutoFilter = false,
@@ -686,7 +678,7 @@ public class ReaderLayoutTests
             HighlightLastColumn = true,
             HasTotalsRow = true,
         };
-        Assert.Equal(expected, table with { Columns = null });
+        Assert.Equal(expected, table);
 
         using var rows = reader.OpenWorksheet(0);
         Assert.False(rows.OutlineSummaryAbove);
@@ -735,5 +727,153 @@ public class ReaderLayoutTests
         Assert.Equal(
             [(1, 1), (1, 3), (5, 1), (5, 4)],
             reader.GetTables(0).Select(t => (t.FirstRow, t.FirstColumn)).ToList());
+    }
+
+    [Fact]
+    public void ComparesTablesByTheirColumnNames()
+    {
+        var a = new ExcelTable(1, 1, 2, 2) { Name = "T", Columns = ["x", "y"] };
+        var b = new ExcelTable(1, 1, 2, 2) { Name = "T", Columns = new List<string> { "x", "y" } };
+        Assert.Equal(a, b);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+        Assert.NotEqual(a, b with { Columns = ["x", "Y"] });
+        Assert.NotEqual(a, b with { Columns = ["x"] });
+        Assert.NotEqual(a, b with { Columns = null });
+        Assert.Equal(a with { Columns = null }, b with { Columns = null });
+        Assert.NotEqual(a with { Columns = null }, a with { Columns = [] });
+        Assert.NotEqual(a, a with { HasTotalsRow = true });
+        Assert.False(a.Equals(null));
+    }
+
+    private const string PageMargins = """<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>""";
+
+    /// <summary>A package of uncompressed parts, so that the worksheet's CRC-32 can be patched.</summary>
+    private static byte[] StoredSingleSheet(string sheetXml)
+    {
+        const string workbook = """<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>""";
+        const string rels = """<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>""";
+        var stream = new MemoryStream();
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, content) in new[] { ("_rels/.rels", RootRels), ("xl/workbook.xml", workbook), ("xl/_rels/workbook.xml.rels", rels), ("xl/worksheets/sheet1.xml", sheetXml) })
+            {
+                using var entry = zip.CreateEntry(name, CompressionLevel.NoCompression).Open();
+                entry.Write(Encoding.UTF8.GetBytes(content));
+            }
+        }
+
+        return stream.ToArray();
+    }
+
+    /// <summary>Flips the CRC-32 of the worksheet in its local and its central header.</summary>
+    private static byte[] WithBadSheetCrc(byte[] package)
+    {
+        var bytes = (byte[])package.Clone();
+        var name = "xl/worksheets/sheet1.xml"u8.ToArray();
+        var patched = 0;
+        for (var i = 0; i + 4 <= bytes.Length; i++)
+        {
+            int crcAt, nameAt;
+            if (bytes[i] == 'P' && bytes[i + 1] == 'K' && bytes[i + 2] == 3 && bytes[i + 3] == 4)
+            {
+                (crcAt, nameAt) = (i + 14, i + 30);
+            }
+            else if (bytes[i] == 'P' && bytes[i + 1] == 'K' && bytes[i + 2] == 1 && bytes[i + 3] == 2)
+            {
+                (crcAt, nameAt) = (i + 16, i + 46);
+            }
+            else
+            {
+                continue;
+            }
+
+            if (nameAt + name.Length <= bytes.Length && bytes.AsSpan(nameAt, name.Length).SequenceEqual(name))
+            {
+                bytes[crcAt] ^= 0xFF;
+                patched++;
+            }
+        }
+
+        Assert.Equal(2, patched);
+        return bytes;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VerifiesTheWholeSheetEntry(bool background)
+    {
+        var options = new XlsxReaderOptions { BackgroundDecompression = background };
+        foreach (var sheet in new[]
+        {
+            $"""<worksheet xmlns="{Main}"><cols><col min="1" max="1" width="9"/></cols><sheetData/>{PageMargins}</worksheet>""",
+            $"""<worksheet xmlns="{Main}"><sheetData><row r="1"><c><v>1</v></c></row></sheetData>{PageMargins}</worksheet>""",
+        })
+        {
+            var good = StoredSingleSheet(sheet);
+            using (var reader = new XlsxReader(new MemoryStream(good), options))
+            {
+                using var rows = reader.OpenWorksheet(0);
+                _ = rows.ColumnWidths;
+                while (rows.Read())
+                {
+                }
+            }
+
+            using (var reader = new XlsxReader(new MemoryStream(WithBadSheetCrc(good)), options))
+            {
+                using var rows = reader.OpenWorksheet(0);
+                var e = Assert.Throws<XlsxReadException>(() =>
+                {
+                    _ = rows.ColumnWidths;
+                    while (rows.Read())
+                    {
+                    }
+                });
+                Assert.Contains("CRC-32", e.Message);
+            }
+        }
+
+        var empty = WithBadSheetCrc(StoredSingleSheet($"""<worksheet xmlns="{Main}"><sheetData/>{PageMargins}</worksheet>"""));
+        using (var reader = new XlsxReader(new MemoryStream(empty), options))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            Assert.Contains("CRC-32", Assert.Throws<XlsxReadException>(() => rows.ColumnWidths).Message);
+            Assert.Contains("CRC-32", Assert.Throws<XlsxReadException>(() => rows.GetColumnWidth(1)).Message);
+            Assert.Contains("CRC-32", Assert.Throws<XlsxReadException>(() => rows.Read()).Message);
+        }
+
+        using (var reader = new XlsxReader(new MemoryStream(empty), options))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            Assert.Contains("CRC-32", Assert.Throws<XlsxReadException>(() => rows.Read()).Message);
+            Assert.Contains("CRC-32", Assert.Throws<XlsxReadException>(() => rows.OutlineSummaryAbove).Message);
+        }
+    }
+
+    [Fact]
+    public void RemembersLayoutFailures()
+    {
+        var many = string.Concat(Enumerable.Repeat("""<col min="1" max="1" width="3"/>""", 16385));
+        var bytes = SingleSheet($"""<worksheet xmlns="{Main}"><cols>{many}</cols><sheetData><row><c><v>1</v></c></row></sheetData></worksheet>""");
+        using (var reader = Reader(bytes))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            for (var i = 0; i < 2; i++)
+            {
+                Assert.Contains("16384 column ranges", Assert.Throws<XlsxReadException>(() => rows.ColumnWidths).Message);
+            }
+
+            Assert.Contains("16384 column ranges", Assert.Throws<XlsxReadException>(() => rows.RowOutlineLevels).Message);
+            Assert.Contains("16384 column ranges", Assert.Throws<XlsxReadException>(() => rows.Read()).Message);
+        }
+
+        using (var reader = Reader(bytes))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            Assert.Contains("16384 column ranges", Assert.Throws<XlsxReadException>(() => rows.Read()).Message);
+            Assert.Contains("16384 column ranges", Assert.Throws<XlsxReadException>(() => rows.Read()).Message);
+            Assert.Contains("16384 column ranges", Assert.Throws<XlsxReadException>(() => rows.IsColumnHidden(1)).Message);
+        }
     }
 }

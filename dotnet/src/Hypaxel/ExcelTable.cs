@@ -124,6 +124,83 @@ public sealed record ExcelTable
     /// write totals rows and rejects a table that has one. Default: false.
     /// </summary>
     public bool HasTotalsRow { get; init; }
+
+    /// <summary>
+    /// Compares every property; <see cref="Columns"/> is compared name by name (ordinal), so a table read back
+    /// from a file equals the table that was written. A null <see cref="Columns"/> equals only null.
+    /// </summary>
+    public bool Equals(ExcelTable? other) =>
+        other is not null
+        && FirstRow == other.FirstRow
+        && FirstColumn == other.FirstColumn
+        && LastRow == other.LastRow
+        && LastColumn == other.LastColumn
+        && string.Equals(Name, other.Name, StringComparison.Ordinal)
+        && ColumnsEqual(Columns, other.Columns)
+        && Style == other.Style
+        && ShowHeaderRow == other.ShowHeaderRow
+        && ShowAutoFilter == other.ShowAutoFilter
+        && ShowRowStripes == other.ShowRowStripes
+        && ShowColumnStripes == other.ShowColumnStripes
+        && HighlightFirstColumn == other.HighlightFirstColumn
+        && HighlightLastColumn == other.HighlightLastColumn
+        && HasTotalsRow == other.HasTotalsRow;
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(FirstRow);
+        hash.Add(FirstColumn);
+        hash.Add(LastRow);
+        hash.Add(LastColumn);
+        hash.Add(Name, StringComparer.Ordinal);
+        if (Columns is { } columns)
+        {
+            hash.Add(columns.Count);
+            foreach (var column in columns)
+            {
+                hash.Add(column, StringComparer.Ordinal);
+            }
+        }
+        else
+        {
+            hash.Add(-1);
+        }
+
+        hash.Add(Style);
+        hash.Add(ShowHeaderRow);
+        hash.Add(ShowAutoFilter);
+        hash.Add(ShowRowStripes);
+        hash.Add(ShowColumnStripes);
+        hash.Add(HighlightFirstColumn);
+        hash.Add(HighlightLastColumn);
+        hash.Add(HasTotalsRow);
+        return hash.ToHashCode();
+    }
+
+    private static bool ColumnsEqual(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a is null || b is null || a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 /// <summary>A validated table, kept until its worksheet completes.</summary>

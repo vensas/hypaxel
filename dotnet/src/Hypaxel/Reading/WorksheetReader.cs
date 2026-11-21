@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using Hypaxel.Internal.Reading;
 
@@ -10,7 +11,9 @@ namespace Hypaxel;
 /// </summary>
 /// <remarks>
 /// Rows that are missing from the file or only carry formatting are skipped; <see cref="XlsxRow.Number"/>
-/// tells where a row is. With <see cref="XlsxReaderOptions.IncludeEmptyRows"/>, rows that the file stores
+/// tells where a row is. When the rows end, the rest of the worksheet part is read without parsing so that
+/// its size and CRC-32 are verified; if reading the layout fails, the layout members and <see cref="Read"/>
+/// report that failure from then on. With <see cref="XlsxReaderOptions.IncludeEmptyRows"/>, rows that the file stores
 /// without values are returned as well. The reader is forward-only: enumerating it a second time continues where the
 /// previous enumeration stopped.
 /// </remarks>
@@ -41,6 +44,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     private readonly List<ColumnWidth> _columnWidths = [];
     private State _state;
     private bool _layoutUnread;
+    private ExceptionDispatchInfo? _layoutError;
     private int _previousRow;
     private bool _outlineSummaryAbove;
     private int _rowOutlineLevels;
@@ -166,9 +170,10 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
             switch (_state)
             {
                 case State.Done:
+                    _layoutError?.Throw();
                     return false;
                 case State.BeforeData:
-                    FindSheetData();
+                    ReadLayoutCore();
                     break;
                 default:
                 {
@@ -245,6 +250,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
                     else if (token is XmlToken.End or XmlToken.Eof)
                     {
                         _state = State.Done;
+                        _xml.Drain();
                     }
 
                     break;
@@ -274,10 +280,28 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 
     private void ReadLayout()
     {
+        _layoutError?.Throw();
         ObjectDisposedException.ThrowIf(_layoutUnread, this);
-        if (_state == State.BeforeData)
+        ReadLayoutCore();
+    }
+
+    private void ReadLayoutCore()
+    {
+        _layoutError?.Throw();
+        if (_state != State.BeforeData)
+        {
+            return;
+        }
+
+        try
         {
             FindSheetData();
+        }
+        catch (Exception e) when (e is XlsxReadException or IOException)
+        {
+            _state = State.Done;
+            _layoutError = ExceptionDispatchInfo.Capture(e);
+            throw;
         }
     }
 
@@ -344,7 +368,14 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
             var name = _xml.Name;
             if (name.SequenceEqual("sheetData"u8))
             {
-                _state = token == XmlToken.Start ? State.InData : State.Done;
+                if (token == XmlToken.Empty)
+                {
+                    _xml.Drain();
+                    _state = State.Done;
+                    return;
+                }
+
+                _state = State.InData;
                 return;
             }
 
