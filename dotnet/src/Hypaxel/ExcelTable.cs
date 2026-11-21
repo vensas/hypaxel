@@ -118,6 +118,12 @@ public sealed record ExcelTable
 
     /// <summary>Highlights the last column. Default: false.</summary>
     public bool HighlightLastColumn { get; init; }
+
+    /// <summary>
+    /// The last row of the range is the table's totals row. Reported by the reader; the writer cannot
+    /// write totals rows and rejects a table that has one. Default: false.
+    /// </summary>
+    public bool HasTotalsRow { get; init; }
 }
 
 /// <summary>A validated table, kept until its worksheet completes.</summary>
@@ -149,6 +155,11 @@ internal sealed class TableDefinition
         if (table.ShowHeaderRow && range.FirstRow == range.LastRow)
         {
             throw new ArgumentException("A table with a header row needs at least one data row.", nameof(table));
+        }
+
+        if (table.HasTotalsRow)
+        {
+            throw new ArgumentException("Tables with a totals row can be read but not written.", nameof(table));
         }
 
         string name;

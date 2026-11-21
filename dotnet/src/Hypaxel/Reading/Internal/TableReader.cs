@@ -46,6 +46,8 @@ internal static class TableReader
                 {
                     Name = Text(attributes, "displayName"u8) ?? Text(attributes, "name"u8),
                     ShowHeaderRow = !XmlAttributes.TryGet(attributes, "headerRowCount"u8, out var header) || !Trim(header).SequenceEqual("0"u8),
+                    HasTotalsRow = XmlAttributes.TryGet(attributes, "totalsRowCount"u8, out var totals)
+                        && uint.TryParse(Trim(totals), NumberStyles.None, CultureInfo.InvariantCulture, out var totalsRows) && totalsRows > 0,
                 };
                 descend = true;
             }

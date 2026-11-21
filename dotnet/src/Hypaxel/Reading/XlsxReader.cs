@@ -206,6 +206,7 @@ public sealed class XlsxReader : IDisposable
     /// </summary>
     /// <remarks>
     /// Tables live in their own parts, which are read on each call; reading rows does not touch them.
+    /// They are returned from top to bottom, then left to right, whatever order the file lists them in.
     /// A table style that is not one of Excel's built-in styles is reported as <see cref="TableStyle.None"/>.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">There is no sheet at this position.</exception>
@@ -242,7 +243,7 @@ public sealed class XlsxReader : IDisposable
             tables.Add(TableReader.Parse(xml));
         }
 
-        return tables;
+        return [.. tables.OrderBy(t => t.FirstRow).ThenBy(t => t.FirstColumn)];
     }
 
     /// <summary>Number of entries in the shared string table (loaded with the first worksheet).</summary>

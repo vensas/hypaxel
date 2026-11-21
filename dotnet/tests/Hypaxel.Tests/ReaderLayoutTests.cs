@@ -107,7 +107,7 @@ public class ReaderLayoutTests
         {
             var options = new WorksheetOptions { RowOutlineLevels = 2, OutlineSummaryAbove = true }
                 .SetColumnWidths(12.5, 30)
-                .SetColumn(4, ColumnDefinition.WithWidth(7));
+                .SetColumn(4, ColumnDefinition.WithWidth(7) with { Hidden = true });
             var sheet = w.AddWorksheet("Grouped", options);
             sheet.BeginRow(new RowOptions { Collapsed = true, Height = 24.5 });
             sheet.AddRow("North", 300);
@@ -126,8 +126,9 @@ public class ReaderLayoutTests
         Assert.True(rows.OutlineSummaryAbove);
         Assert.Equal(2, rows.RowOutlineLevels);
         Assert.Equal(
-            [new ColumnWidth(1, 1, 12.5), new ColumnWidth(2, 2, 30), new ColumnWidth(4, 4, 7)],
+            [new ColumnWidth(1, 1, 12.5), new ColumnWidth(2, 2, 30), new ColumnWidth(4, 4, 7, Hidden: true)],
             rows.ColumnWidths);
+        Assert.Equal((false, false, true, false), (rows.IsColumnHidden(2), rows.IsColumnHidden(3), rows.IsColumnHidden(4), rows.IsColumnHidden(0)));
         Assert.Equal(30, rows.GetColumnWidth(2));
         Assert.Null(rows.GetColumnWidth(3));
         Assert.Null(rows.GetColumnWidth(0));
@@ -188,7 +189,7 @@ public class ReaderLayoutTests
                 <col min="4" max="4" hidden="1"/>
                 <col min="0" max="2" width="5"/>
                 <col min="7" max="6" width="5"/>
-                <col min="5" max="99999" width="1e1"/>
+                <col min="5" max="99999" width="1e1" hidden="true"/>
                 <col min="6" max="6" width="-1"/>
                 <col min="6" max="6" width="NaN"/>
               </cols>
@@ -206,8 +207,10 @@ public class ReaderLayoutTests
         Assert.True(rows.OutlineSummaryAbove);
         Assert.Equal(7, rows.RowOutlineLevels);
         Assert.Equal(
-            [new ColumnWidth(1, 16384, 9.5), new ColumnWidth(2, 3, 20), new ColumnWidth(5, 16384, 10)],
+            [new ColumnWidth(1, 16384, 9.5), new ColumnWidth(2, 3, 20), new ColumnWidth(5, 16384, 10, Hidden: true)],
             rows.ColumnWidths);
+        Assert.False(rows.IsColumnHidden(9));
+        Assert.True(rows.ColumnWidths[2].Hidden);
         Assert.Equal(9.5, rows.GetColumnWidth(3));
         Assert.Equal(9.5, rows.GetColumnWidth(16384));
         Assert.Null(rows.GetColumnWidth(16385));
@@ -273,7 +276,8 @@ public class ReaderLayoutTests
         var tables = reader.GetTables(0);
         Assert.Equal(3, tables.Count);
 
-        var first = tables[0];
+        var first = tables[2];
+        Assert.True(first.HasTotalsRow);
         Assert.Equal("Sales_2024", first.Name);
         Assert.Equal((2, 2, 10, 4), (first.FirstRow, first.FirstColumn, first.LastRow, first.LastColumn));
         Assert.Equal(["Region & \nCountry", "Net", "Größe _x0041_"], first.Columns);
@@ -285,7 +289,8 @@ public class ReaderLayoutTests
         Assert.True(first.HighlightFirstColumn);
         Assert.False(first.HighlightLastColumn);
 
-        var second = tables[1];
+        var second = tables[0];
+        Assert.False(second.HasTotalsRow);
         Assert.Equal("OnlyName", second.Name);
         Assert.Equal((1, 1, 1, 1), (second.FirstRow, second.FirstColumn, second.LastRow, second.LastColumn));
         Assert.Equal([""], second.Columns);
@@ -294,7 +299,7 @@ public class ReaderLayoutTests
         Assert.False(second.ShowAutoFilter);
         Assert.False(second.ShowRowStripes);
 
-        var third = tables[2];
+        var third = tables[1];
         Assert.Null(third.Name);
         Assert.Empty(third.Columns!);
         Assert.Equal(TableStyle.Medium(28), third.Style);
@@ -446,5 +451,94 @@ public class ReaderLayoutTests
 
         var empty = SheetWithTables("<sheetData/>");
         Assert.Empty(RowsOf(empty, includeEmptyRows: true));
+    }
+
+    private static string TestData(string name)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var path = Path.Combine(dir.FullName, "testdata", "reader", name);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        throw new FileNotFoundException($"testdata/reader/{name} was not found above {AppContext.BaseDirectory}.");
+    }
+
+    private static void AssertSavedWorkbook(string file, ExcelTable orders, ExcelTable plain, double? defaultHeight, bool secondRowCollapsed)
+    {
+        using var reader = XlsxReader.Open(TestData(file), new XlsxReaderOptions { IncludeEmptyRows = true });
+        Assert.Equal(["Orders", "Plain"], reader.SheetNames);
+
+        var tables = reader.GetTables("Orders");
+        Assert.Equal(2, tables.Count);
+        Assert.Equal(["Product", "Units & more", "Price"], tables[0].Columns);
+        Assert.Equal(orders, tables[0] with { Columns = null });
+        Assert.Equal(["Column1", "Column2"], tables[1].Columns);
+        Assert.Equal(plain, tables[1] with { Columns = null });
+        Assert.Empty(reader.GetTables("Plain"));
+
+        using var rows = reader.OpenWorksheet("Orders");
+        Assert.True(rows.OutlineSummaryAbove);
+        Assert.Equal(2, rows.RowOutlineLevels);
+        Assert.Equal(
+            [new ColumnWidth(1, 1, 14), new ColumnWidth(2, 2, 22.5), new ColumnWidth(4, 4, 6, Hidden: true)],
+            rows.ColumnWidths);
+        Assert.True(rows.IsColumnHidden(4));
+
+        Assert.Equal(
+            [
+                (1, 3, 0, false, false, defaultHeight),
+                (2, 3, 1, false, secondRowCollapsed, defaultHeight),
+                (3, 3, 2, true, false, defaultHeight),
+                (4, 3, 1, false, true, 30.0),
+                (6, 0, 0, false, false, 45.0),
+                (7, 2, 0, false, false, defaultHeight),
+                (8, 2, 0, false, false, defaultHeight),
+            ],
+            rows.Select(r => (r.Number, r.Count, r.OutlineLevel, r.Hidden, r.Collapsed, r.Height)).ToList());
+    }
+
+    [Fact]
+    public void ReadsTablesRowsAndLayoutSavedByExcel()
+    {
+        var orders = new ExcelTable(1, 1, 4, 3)
+        {
+            Name = "Orders",
+            Style = TableStyle.Dark(3),
+            ShowRowStripes = false,
+            ShowColumnStripes = true,
+            HighlightFirstColumn = true,
+            HighlightLastColumn = true,
+        };
+        var plain = new ExcelTable(7, 1, 8, 2) { Name = "Table2", Style = TableStyle.None, ShowHeaderRow = false, ShowAutoFilter = false };
+        AssertSavedWorkbook("excel.xlsx", orders, plain, defaultHeight: null, secondRowCollapsed: true);
+    }
+
+    [Fact]
+    public void ReadsTablesRowsAndLayoutSavedByLibreOffice()
+    {
+        var orders = new ExcelTable(1, 1, 4, 3) { Name = "Orders", Style = TableStyle.None, ShowRowStripes = false };
+        var plain = new ExcelTable(7, 1, 8, 2)
+        {
+            Name = "Table2",
+            Style = TableStyle.None,
+            ShowHeaderRow = false,
+            ShowAutoFilter = false,
+            ShowRowStripes = false,
+        };
+        AssertSavedWorkbook("libreoffice.xlsx", orders, plain, defaultHeight: 15.0, secondRowCollapsed: false);
+    }
+
+    [Fact]
+    public void ReturnsTablesFromTopToBottomThenLeftToRight()
+    {
+        string Table(string range) => $"""<table xmlns="{Main}" ref="{range}"/>""";
+        using var reader = Reader(SheetWithTables("<sheetData/>", Table("D5:E6"), Table("A5:B6"), Table("C1:D2"), Table("A1:B2")));
+        Assert.Equal(
+            [(1, 1), (1, 3), (5, 1), (5, 4)],
+            reader.GetTables(0).Select(t => (t.FirstRow, t.FirstColumn)).ToList());
     }
 }

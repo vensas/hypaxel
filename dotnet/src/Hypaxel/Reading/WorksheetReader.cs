@@ -115,6 +115,22 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         }
     }
 
+    /// <summary>True if a 1-based column is hidden.</summary>
+    /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    public bool IsColumnHidden(int column)
+    {
+        ReadLayout();
+        foreach (var width in _columnWidths)
+        {
+            if (column >= width.FirstColumn && column <= width.LastColumn)
+            {
+                return width.Hidden;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>The width of a 1-based column in characters of the default font; null if the sheet leaves it at the default.</summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
     public double? GetColumnWidth(int column)
@@ -261,6 +277,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     {
         uint first = 0, last = 0;
         double? width = null;
+        var hidden = false;
         var attributes = new XmlAttributes(raw);
         while (attributes.MoveNext())
         {
@@ -277,6 +294,10 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
             {
                 width = TableReader.ParseMeasure(attributes.Value);
             }
+            else if (name.SequenceEqual("hidden"u8))
+            {
+                hidden = TableReader.IsTrue(attributes.Value);
+            }
         }
 
         last = Math.Min(last, CellReference.MaxColumns);
@@ -290,7 +311,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
             throw _xml.Malformed("The sheet defines more than 16384 column ranges.");
         }
 
-        _columnWidths.Add(new ColumnWidth((int)first, (int)last, width.GetValueOrDefault()));
+        _columnWidths.Add(new ColumnWidth((int)first, (int)last, width.GetValueOrDefault(), hidden));
     }
 
     private static uint ParseColumnBound(ReadOnlySpan<byte> raw) =>
@@ -865,4 +886,5 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 /// <param name="FirstColumn">1-based first column of the run.</param>
 /// <param name="LastColumn">1-based last column of the run.</param>
 /// <param name="Width">Width in characters of the default font, as in <see cref="ColumnDefinition.Width"/>.</param>
-public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double Width);
+/// <param name="Hidden">True if the columns are hidden.</param>
+public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double Width, bool Hidden = false);

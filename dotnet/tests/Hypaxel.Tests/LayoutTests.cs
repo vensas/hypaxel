@@ -228,6 +228,7 @@ public class LayoutTests
             Assert.Throws<ArgumentException>(() => s.AddTable(T(3, 2) with { Columns = ["a"] }));                // column count
             Assert.Throws<ArgumentException>(() => s.AddTable(T(3, 2) with { Columns = ["a", "A"] }));           // duplicate column
             Assert.Throws<ArgumentException>(() => s.AddTable(T(3, 2) with { Columns = ["a", ""] }));            // empty column
+            Assert.Contains("totals row", Assert.Throws<ArgumentException>(() => s.AddTable(T(3, 1) with { Columns = ["a"], HasTotalsRow = true })).Message);
             Assert.Throws<ArgumentException>(() => s.AddTable(T(3, 1) with { Columns = ["a"], Name = "A1" }));
             Assert.Throws<ArgumentException>(() => s.AddTable(T(3, 1) with { Columns = ["a"], Name = "my table" }));
             Assert.Throws<ArgumentOutOfRangeException>(() => TableStyle.Medium(29));
