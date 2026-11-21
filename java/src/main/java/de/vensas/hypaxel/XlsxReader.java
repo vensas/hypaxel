@@ -207,7 +207,7 @@ public final class XlsxReader implements Closeable {
         checkIndex(index);
         SharedStringTable strings = sharedStrings();
         XmlReader xml = workbook.openSheet(index);
-        return new SheetReader(workbook.sheets().get(index), new SheetParser(xml, strings, workbook.styles(), workbook.date1904()));
+        return new SheetReader(workbook.sheets().get(index), new SheetParser(xml, strings, workbook.styles(), workbook.date1904(), options.includeEmptyRows()));
     }
 
     private SharedStringTable sharedStrings() throws IOException {

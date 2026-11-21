@@ -374,4 +374,53 @@ class ReaderLayoutTest {
             assertEquals(List.of(), rows.columnWidths());
         }
     }
+
+    private static List<String> rowSummaries(byte[] xlsx, ReadOptions options) throws IOException {
+        List<String> seen = new java.util.ArrayList<>();
+        try (XlsxReader reader = XlsxReader.open(xlsx, options); SheetReader rows = reader.worksheet(0)) {
+            for (Row row : rows) {
+                assertEquals(row.cellCount() == 0 ? 0 : row.column(row.cellCount() - 1), row.lastColumn());
+                assertEquals(row.lastColumn(), row.values().size());
+                assertEquals(row.lastColumn(), row.toList().size());
+                seen.add(row.number() + ":" + row.cellCount() + ":" + row.outlineLevel() + ":" + row.hidden() + ":" + row.collapsed()
+                        + ":" + (row.height().isPresent() ? row.height().getAsDouble() : "-"));
+            }
+        }
+        return seen;
+    }
+
+    @Test
+    void returnsRowsWithoutValuesOnRequest() throws IOException {
+        ReadOptions include = ReadOptions.builder().includeEmptyRows(true).build();
+        assertFalse(ReadOptions.DEFAULT.includeEmptyRows());
+        assertTrue(include.includeEmptyRows());
+
+        byte[] written = Xlsx.write(writer -> {
+            Worksheet s = writer.addWorksheet("Data", SheetOptions.builder().rowOutlineLevels(1).build());
+            s.addRow("first");
+            s.beginRow(RowOptions.builder().height(40).build()).endRow();
+            s.skipRows(2);
+            s.addRow(5);
+            s.beginRow(RowOptions.builder().outlineLevel(1).hidden().build()).endRow();
+        });
+        assertEquals(List.of("1:1:0:false:false:-", "5:1:0:false:false:-"), rowSummaries(written, ReadOptions.DEFAULT));
+        assertEquals(List.of("1:1:0:false:false:-", "2:0:0:false:false:40.0", "5:1:0:false:false:-", "6:0:1:true:false:-"),
+                rowSummaries(written, include));
+
+        byte[] other = singleSheet("<worksheet " + NS + "><sheetData><row r=\"2\" ht=\"30\"/>"
+                + "<row r=\"3\" hidden=\"1\" collapsed=\"1\"><c r=\"A3\" s=\"1\"/></row>"
+                + "<row><c><v>1</v></c></row><row/></sheetData></worksheet>", "");
+        assertEquals(List.of("4:1:0:false:false:-"), rowSummaries(other, ReadOptions.DEFAULT));
+        assertEquals(List.of("2:0:0:false:false:30.0", "3:0:0:true:true:-", "4:1:0:false:false:-", "5:0:0:false:false:-"),
+                rowSummaries(other, include));
+
+        try (XlsxReader reader = XlsxReader.open(other, include); SheetReader rows = reader.worksheet(0)) {
+            Row empty = rows.nextRow().copy();
+            rows.nextRow();
+            assertEquals(2, empty.number());
+            assertEquals(0, empty.cellCount());
+            assertEquals(OptionalDouble.of(30), empty.height());
+            assertEquals(4, rows.stream().filter(r -> r.cellCount() > 0).findFirst().orElseThrow().number());
+        }
+    }
 }

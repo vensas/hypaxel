@@ -53,7 +53,10 @@ public final class Row {
         return Double.isNaN(buffer.height) ? OptionalDouble.empty() : OptionalDouble.of(buffer.height);
     }
 
-    /** Returns the number of cells with a value; always at least one. */
+    /**
+     * Returns the number of cells with a value. It is zero only for a row without values, which is
+     * returned with {@link ReadOptions.Builder#includeEmptyRows(boolean)}.
+     */
     public int cellCount() {
         return buffer.count;
     }

@@ -62,6 +62,7 @@ public final class SheetParser {
     private final int sharedStringCount;
     private final DateStyles styles;
     private final boolean date1904;
+    private final boolean includeEmptyRows;
     private final RowBuffer row;
     private final ByteBuilder scratch = new ByteBuilder(64);
     private int state = BEFORE_DATA;
@@ -70,8 +71,9 @@ public final class SheetParser {
     private boolean outlineSummaryAbove;
     private int rowOutlineLevels;
 
-    public SheetParser(XmlReader xml, SharedStringTable sharedStrings, DateStyles styles, boolean date1904) {
+    public SheetParser(XmlReader xml, SharedStringTable sharedStrings, DateStyles styles, boolean date1904, boolean includeEmptyRows) {
         this.xml = xml;
+        this.includeEmptyRows = includeEmptyRows;
         this.sharedStringCount = sharedStrings.size();
         this.styles = styles;
         this.date1904 = date1904;
@@ -112,7 +114,8 @@ public final class SheetParser {
 
     /**
      * Reads the next row that contains at least one value into {@link #row()}. Rows that are
-     * missing from the file or only carry formatting are skipped. Returns false at the end.
+     * missing from the file or only carry formatting are skipped, unless rows without values were
+     * requested: then every row the file stores is read. Returns false at the end.
      */
     public boolean next() throws IOException {
         while (true) {
@@ -172,7 +175,7 @@ public final class SheetParser {
                 throw xml.malformed("row number " + number + " is outside 1..1048576");
             }
             previousRow = number;
-            if (!start) {
+            if (!start && !includeEmptyRows) {
                 continue;
             }
             row.number = number;
@@ -180,8 +183,13 @@ public final class SheetParser {
             row.hidden = hidden;
             row.collapsed = collapsed;
             row.height = height;
-            readCells();
-            if (row.count > 0) {
+            if (start) {
+                readCells();
+            } else {
+                row.count = 0;
+                row.text.clear();
+            }
+            if (includeEmptyRows || row.count > 0) {
                 return true;
             }
         }

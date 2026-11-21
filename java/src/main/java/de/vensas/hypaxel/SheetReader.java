@@ -26,7 +26,8 @@ import java.util.stream.StreamSupport;
  * }</pre>
  *
  * <p>Rows that are missing from the file or only carry formatting are skipped; {@link Row#number()}
- * tells where a row is. The worksheet is decompressed and parsed as it is read, so memory stays
+ * tells where a row is. With {@link ReadOptions.Builder#includeEmptyRows(boolean)}, rows that the
+ * file stores without values are returned as well, with no cells. The worksheet is decompressed and parsed as it is read, so memory stays
  * bounded by the widest row. Close the reader (or read it to the end) to release the decompressor
  * early. Instances are not thread-safe.
  */
@@ -92,8 +93,9 @@ public final class SheetReader implements Closeable, Iterable<Row> {
     }
 
     /**
-     * Reads the next row that contains at least one value, or returns null at the end of the
-     * sheet. The returned row is reused: it is only valid until the next call.
+     * Reads the next row that contains at least one value (or, with
+     * {@link ReadOptions.Builder#includeEmptyRows(boolean)}, the next row the file stores), or
+     * returns null at the end of the sheet. The returned row is reused: it is only valid until the next call.
      *
      * @throws XlsxException if the worksheet is damaged ({@link XlsxException.Kind#MALFORMED}) or
      *     exceeds a limit

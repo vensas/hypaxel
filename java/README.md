@@ -91,7 +91,7 @@ try (XlsxReader reader = XlsxReader.open(Path.of("orders.xlsx"))) {
 
     try (SheetReader rows = reader.worksheet("Orders")) {          // or worksheet(0)
         for (Row row = rows.nextRow(); row != null; row = rows.nextRow()) {
-            // row.number() is the 1-based Excel row; rows without values are skipped.
+            // row.number() is the 1-based Excel row; rows without values are skipped by default.
             String customer = row.getString(1);                     // 1-based columns
             double amount = row.getNumber(3);                       // NaN if not a number
             LocalDateTime created = row.getLocalDateTime(4);        // null if not a date
@@ -148,13 +148,16 @@ try (SheetReader rows = reader.worksheet("Orders")) {
 Tables are stored in their own parts and are read only when `tables` is called; reading rows does
 not touch them. A table style that is not one of Excel's built-in styles reads as
 `TableStyle.NONE`. Row properties are reported for the rows that are returned, that is rows with at
-least one value.
+least one value. To also get the rows that the file stores without a value (a spacer row with a
+height, an empty hidden row), open the workbook with
+`ReadOptions.builder().includeEmptyRows(true).build()`: they come back with `cellCount() == 0` and
+their number and properties. Rows that the file does not store are never returned.
 
 **`XlsxReader`**
 
 | Method | Purpose |
 | --- | --- |
-| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats |
+| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats. `ReadOptions`: `maxSharedStringsBytes` (default 1 GiB), `includeEmptyRows` (default false) |
 | `sheets()`, `sheetNames()` | Sheets in workbook order: name, `SheetVisibility` (`VISIBLE`, `HIDDEN`, `VERY_HIDDEN`), `SheetKind` (`WORKSHEET`, `CHARTSHEET`, `OTHER`) |
 | `worksheet(name)` | Sheet by name: exact match first, then ignoring case |
 | `worksheet(index)` | Sheet by 0-based position |
@@ -166,7 +169,7 @@ least one value.
 
 | Method | Purpose |
 | --- | --- |
-| `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back |
+| `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back; with `includeEmptyRows`, every row the file stores |
 | `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`) the sheet defines, explicit and auto-fitted, in file order |
 | `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width |
 | `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
