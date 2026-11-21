@@ -108,6 +108,8 @@ Python, Node.js, .NET, Java, Go and PHP).
     layout is reported again by every later layout call and by the next row call, in every
     implementation; in Node.js this includes a sheet that cannot be opened, which used to end
     silently after the first error.
+  - Table names are decoded like column names, so a name that looks like an Excel escape (such
+    as `T_x0041_`, which Excel stores as `T_x005f_x0041_`) reads back as written.
   - .NET: `ExcelTable` compares `Columns` by their names, so a table read back equals the one
     that was written.
   - Asking for the layout of a worksheet reader that was closed before the layout was read is an
