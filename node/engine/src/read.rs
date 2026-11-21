@@ -2,8 +2,8 @@
 //! compact binary batch, decoded by `RowDecoder` in `node/ts/core.ts`. As with writing, a whole
 //! batch of rows crosses the JavaScript boundary in one call.
 //!
-//! Batch format (little-endian). The first batch of a sheet starts with its layout, then one row
-//! follows another:
+//! Batch format (little-endian). The first batch of a sheet holds its layout; in the batches after
+//! it one row follows another:
 //!
 //! - `LAYOUT` `u8` flags (bit 0: summary rows above their groups), `u8` row outline levels, `u32`
 //!   count, then per column width `u32` first column, `u32` last column, `f64` width, `u8` hidden
@@ -419,12 +419,16 @@ impl RowStream {
     }
 
     /// Appends rows to `out` until it holds at least [`BATCH_BYTES`] or the sheet ends. Returns
-    /// false once the sheet has ended and nothing was appended.
+    /// false once the sheet has ended and nothing was appended. The first batch holds only the
+    /// layout, so that it arrives even if the first row cannot be read.
     pub fn next_batch(&mut self, out: &mut Vec<u8>) -> Result<bool> {
         let start = out.len();
-        if let Err(e) = self.open(out) {
-            self.state = StreamState::Done;
-            return Err(e);
+        if matches!(self.state, StreamState::Pending { .. }) {
+            if let Err(e) = self.open(out) {
+                self.state = StreamState::Done;
+                return Err(e);
+            }
+            return Ok(true);
         }
         let StreamState::Open(rows) = &mut self.state else { return Ok(false) };
         while out.len() - start < BATCH_BYTES {
@@ -573,11 +577,17 @@ mod tests {
     fn batch(bytes: Vec<u8>) -> Vec<u8> {
         let book = Workbook::open_bytes(bytes, &ReadConfig::default()).unwrap();
         let mut rows = book.rows(0).unwrap();
-        let mut out = Vec::new();
-        assert!(rows.next_batch(&mut out).unwrap());
+        let out = read_all(&mut rows).unwrap();
         assert!(rows.done());
         assert!(!rows.next_batch(&mut out.clone()).unwrap());
         out
+    }
+
+    /// The layout batch and every row batch of a sheet.
+    fn read_all(rows: &mut RowStream) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        while rows.next_batch(&mut out)? {}
+        Ok(out)
     }
 
     #[test]
@@ -587,24 +597,18 @@ mod tests {
         let path = dir.join("book.xlsx");
         std::fs::write(&path, workbook(true)).unwrap();
         let book = Workbook::open_path(&path, &ReadConfig::default()).unwrap();
-        let mut early = book.rows(0).unwrap();
-        let mut out = Vec::new();
-        assert!(early.next_batch(&mut out).unwrap());
+        let out = read_all(&mut book.rows(0).unwrap()).unwrap();
+        assert!(out.len() > EMPTY_LAYOUT);
 
         let replacement = dir.join("other.xlsx");
         std::fs::write(&replacement, b"not a workbook").unwrap();
         std::fs::rename(&replacement, &path).unwrap();
-        let mut late = book.rows(0).unwrap();
-        let mut again = Vec::new();
-        let replaced = late.next_batch(&mut again);
+        let replaced = read_all(&mut book.rows(0).unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
-        let mut last = Vec::new();
-        let deleted = book.rows(0).unwrap().next_batch(&mut last);
+        let deleted = read_all(&mut book.rows(0).unwrap());
 
-        assert!(replaced.unwrap());
-        assert_eq!(again, out);
-        assert!(deleted.unwrap());
-        assert_eq!(last, out);
+        assert_eq!(replaced.unwrap(), out);
+        assert_eq!(deleted.unwrap(), out);
     }
 
     #[test]
@@ -749,9 +753,7 @@ mod tests {
         let bytes = writer.finish().unwrap();
 
         let config = ReadConfig { include_empty_rows: Some(true), ..Default::default() };
-        let mut rows = Workbook::open_bytes(bytes.clone(), &config).unwrap().rows(0).unwrap();
-        let mut out = Vec::new();
-        assert!(rows.next_batch(&mut out).unwrap());
+        let out = read_all(&mut Workbook::open_bytes(bytes.clone(), &config).unwrap().rows(0).unwrap()).unwrap();
         let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
         assert_eq!((c.u8(), c.u8(), c.f64()), (TAG_ROW_PROPS, PROP_HEIGHT, 40.0));
         assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 0));
@@ -761,6 +763,35 @@ mod tests {
         let out = batch(bytes);
         let mut c = Cursor { data: &out, pos: EMPTY_LAYOUT };
         assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 2, 1));
+    }
+
+    #[test]
+    fn sends_the_layout_before_a_row_that_cannot_be_read() {
+        use std::io::Write;
+
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, content) in [
+            ("_rels/.rels", r#"<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>"#),
+            ("xl/workbook.xml", r#"<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>"#),
+            (
+                "xl/_rels/workbook.xml.rels",
+                r#"<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                r#"<worksheet><cols><col min="1" max="1" width="9"/></cols><sheetData><row r="1"><c><v>1,5</v></c></row></sheetData></worksheet>"#,
+            ),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(content.as_bytes()).unwrap();
+        }
+        let book = Workbook::open_bytes(zip.finish().unwrap().into_inner(), &ReadConfig::default()).unwrap();
+        let mut rows = book.rows(0).unwrap();
+        let mut out = Vec::new();
+        assert!(rows.next_batch(&mut out).unwrap());
+        let mut c = Cursor { data: &out, pos: 0 };
+        assert_eq!((c.u8(), c.u8(), c.u8(), c.u32()), (TAG_LAYOUT, 0, 0, 1));
+        assert!(rows.next_batch(&mut out).unwrap_err().to_string().contains("invalid number"));
     }
 
     #[test]

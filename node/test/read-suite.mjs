@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { test as nodeTest } from 'node:test'
 
 import ExcelJS from 'exceljs'
+import JSZip from 'jszip'
 
 /** A workbook written by ExcelJS: shared strings, built-in date formats, errors and cached formula results. */
 export async function excelJsWorkbook({ date1904 = false } = {}) {
@@ -572,5 +573,25 @@ export function defineReadSuite(label, api) {
     assert.equal(data.length, 903)
     assert.equal(data[1][6], 250)
     assert.deepEqual(data.at(-1), ['Total', null, null, null, 21.20421754, 33.92674806, null, 90058, null, 31060, 901])
+  })
+
+  test('returns the layout of a sheet whose first row cannot be read', async () => {
+    const zip = new JSZip()
+    zip.file('_rels/.rels', '<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    zip.file('xl/workbook.xml', '<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>')
+    zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+    zip.file(
+      'xl/worksheets/sheet1.xml',
+      '<worksheet><cols><col min="2" max="3" width="9.5"/></cols><sheetData><row r="1"><c><v>1,5</v></c></row></sheetData></worksheet>',
+    )
+    const bytes = await zip.generateAsync({ type: 'uint8array' })
+
+    const rows = openWorkbookSync(bytes).rows()
+    assert.equal(rows.layout().columnWidth(3), 9.5)
+    assert.throws(() => rows.next(), /invalid number/)
+
+    const later = openWorkbookSync(bytes).rows()
+    assert.equal((await later.layoutAsync()).columnWidth(2), 9.5)
+    await assert.rejects(later.nextAsync(), /invalid number/)
   })
 }
