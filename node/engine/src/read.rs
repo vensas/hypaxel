@@ -6,7 +6,7 @@
 //! follows another:
 //!
 //! - `LAYOUT` `u8` flags (bit 0: summary rows above their groups), `u8` row outline levels, `u32`
-//!   count, then per column width `u32` first column, `u32` last column, `f64` width
+//!   count, then per column width `u32` first column, `u32` last column, `f64` width, `u8` hidden
 //! - `ROW_PROPS`, only before a row that is grouped, hidden, collapsed or has a height: `u8` flags
 //!   (bits 0–2 outline level, bit 3 hidden, bit 4 collapsed, bit 5 a height follows), `f64` height
 //! - `ROW` `u32` row number, `u32` width (the 1-based column of the last cell with a value),
@@ -219,6 +219,7 @@ pub struct TableEntry {
     pub column_stripes: bool,
     pub highlight_first_column: bool,
     pub highlight_last_column: bool,
+    pub totals_row: bool,
 }
 
 impl From<Table> for TableEntry {
@@ -237,6 +238,7 @@ impl From<Table> for TableEntry {
             column_stripes: t.column_stripes,
             highlight_first_column: t.first_column_highlight,
             highlight_last_column: t.last_column_highlight,
+            totals_row: t.totals_row,
         }
     }
 }
@@ -377,6 +379,7 @@ fn put_layout(out: &mut Vec<u8>, layout: &SheetLayout) {
         put_u32(out, column.first_column());
         put_u32(out, column.last_column());
         out.extend_from_slice(&column.width().to_le_bytes());
+        out.push(column.is_hidden() as u8);
     }
 }
 
@@ -716,6 +719,7 @@ mod tests {
                 column_stripes: false,
                 highlight_first_column: false,
                 highlight_last_column: false,
+                totals_row: false,
             }
         );
         assert_eq!((tables[1].name.as_str(), tables[1].style.as_str(), tables[1].header_row), ("Table2", "none", false));
@@ -724,7 +728,7 @@ mod tests {
         let out = batch(bytes);
         let mut c = Cursor { data: &out, pos: 0 };
         assert_eq!((c.u8(), c.u8(), c.u8(), c.u32()), (TAG_LAYOUT, 1, 2, 1));
-        assert_eq!((c.u32(), c.u32(), c.f64()), (1, 1, 12.5));
+        assert_eq!((c.u32(), c.u32(), c.f64(), c.u8()), (1, 1, 12.5, 0));
         assert_eq!((c.u8(), c.u32(), c.u32()), (TAG_ROW, 1, 1));
         assert_eq!((c.u8(), c.str()), (TAG_STRING, "Name".to_string()));
         assert_eq!((c.u8(), c.u8(), c.f64()), (TAG_ROW_PROPS, 2 | PROP_HIDDEN | PROP_COLLAPSED | PROP_HEIGHT, 20.5));

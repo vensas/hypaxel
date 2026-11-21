@@ -147,6 +147,11 @@ export interface TableOptions {
   columnStripes?: boolean
   firstColumn?: boolean
   lastColumn?: boolean
+  /**
+   * Whether the last row of the range is a totals row. Set on tables that were read; a table with
+   * a totals row cannot be written.
+   */
+  totalsRow?: boolean
 }
 
 /** @internal Options as the engines take them: no style objects, autofit flattened. */
@@ -217,6 +222,7 @@ export interface EngineTable {
   columnStripes: boolean
   highlightFirstColumn: boolean
   highlightLastColumn: boolean
+  totalsRow: boolean
 }
 
 /** @internal The rows of one sheet, in batches decoded by `SheetRows` in `read.ts`. */

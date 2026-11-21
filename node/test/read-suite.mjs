@@ -1,6 +1,7 @@
 // Reader tests every engine must pass. `read.test.mjs` runs them on the native engine and
 // `wasm.test.mjs` on the WebAssembly engine.
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { test as nodeTest } from 'node:test'
 
 import ExcelJS from 'exceljs'
@@ -289,6 +290,7 @@ export function defineReadSuite(label, api) {
       columnStripes: true,
       firstColumn: true,
       lastColumn: true,
+      totalsRow: false,
     }
     sheet.addTable(1, 1, 4, 3, full)
     sheet.addTable(7, 1, 8, 2, { headerRow: false, style: 'none' })
@@ -315,6 +317,7 @@ export function defineReadSuite(label, api) {
           columnStripes: false,
           firstColumn: false,
           lastColumn: false,
+          totalsRow: false,
         },
       },
     ])
@@ -325,9 +328,10 @@ export function defineReadSuite(label, api) {
     assert.equal(rows.rowNumber, 0)
     const layout = rows.layout()
     assert.deepEqual(layout.columnWidths, [
-      { firstColumn: 1, lastColumn: 1, width: 12.5 },
-      { firstColumn: 2, lastColumn: 2, width: 30 },
+      { firstColumn: 1, lastColumn: 1, width: 12.5, hidden: false },
+      { firstColumn: 2, lastColumn: 2, width: 30, hidden: false },
     ])
+    assert.equal(layout.columnHidden(2), false)
     assert.deepEqual([layout.columnWidth(2), layout.columnWidth(3)], [30, undefined])
     assert.deepEqual([layout.outlineSummaryAbove, layout.rowOutlineLevels], [true, 2])
     const seen = []
@@ -366,8 +370,80 @@ export function defineReadSuite(label, api) {
     for (let i = 0; i < 3; i++) target.writeRow([i, i, i])
     const [table] = tables
     target.addTable(table.firstRow, table.firstColumn, table.lastRow, table.lastColumn, table.options)
+    assert.throws(() => target.addTable(6, 1, 8, 3, { ...table.options, name: 'Totals', totalsRow: true }), /totals row/)
     assert.deepEqual(openWorkbookSync(copy.finish()).tables(), [table])
   })
+
+  for (const producer of ['excel', 'libreoffice']) {
+    test(`reads tables, rows and layout saved by ${producer}`, async () => {
+      // LibreOffice drops table styles and stores a height on every row.
+      const styled = producer === 'excel'
+      const height = styled ? undefined : 15
+      const bytes = await readFile(new URL(`../../testdata/reader/${producer}.xlsx`, import.meta.url))
+      const book = openWorkbookSync(bytes, { includeEmptyRows: true })
+      assert.deepEqual(book.sheetNames, ['Orders', 'Plain'])
+      assert.deepEqual(book.tables('Orders'), [
+        {
+          firstRow: 1,
+          firstColumn: 1,
+          lastRow: 4,
+          lastColumn: 3,
+          options: {
+            name: 'Orders',
+            columns: ['Product', 'Units & more', 'Price'],
+            style: styled ? 'TableStyleDark3' : 'none',
+            headerRow: true,
+            autofilter: true,
+            rowStripes: false,
+            columnStripes: styled,
+            firstColumn: styled,
+            lastColumn: styled,
+            totalsRow: false,
+          },
+        },
+        {
+          firstRow: 7,
+          firstColumn: 1,
+          lastRow: 8,
+          lastColumn: 2,
+          options: {
+            name: 'Table2',
+            columns: ['Column1', 'Column2'],
+            style: 'none',
+            headerRow: false,
+            autofilter: false,
+            rowStripes: styled,
+            columnStripes: false,
+            firstColumn: false,
+            lastColumn: false,
+            totalsRow: false,
+          },
+        },
+      ])
+      assert.deepEqual(book.tables('Plain'), [])
+
+      const rows = book.rows('Orders')
+      const layout = rows.layout()
+      assert.deepEqual(layout.columnWidths, [
+        { firstColumn: 1, lastColumn: 1, width: 14, hidden: false },
+        { firstColumn: 2, lastColumn: 2, width: 22.5, hidden: false },
+        { firstColumn: 4, lastColumn: 4, width: 6, hidden: true },
+      ])
+      assert.deepEqual([layout.columnHidden(4), layout.outlineSummaryAbove, layout.rowOutlineLevels], [true, true, 2])
+      const seen = []
+      for (const row of rows) seen.push([rows.rowNumber, row.length, rows.outlineLevel, rows.hidden, rows.collapsed, rows.height])
+      assert.deepEqual(seen, [
+        [1, 3, 0, false, false, height],
+        [2, 3, 1, false, styled, height],
+        [3, 3, 2, true, false, height],
+        [4, 3, 1, false, true, 30],
+        [5, 0, 0, false, false, undefined],
+        [6, 0, 0, false, false, 45],
+        [7, 2, 0, false, false, height],
+        [8, 2, 0, false, false, height],
+      ])
+    })
+  }
 
   test('reports rows without values on request', async () => {
     const writer = new Writer()

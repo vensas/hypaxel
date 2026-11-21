@@ -47,6 +47,7 @@ pub struct NativeTable {
     pub column_stripes: bool,
     pub highlight_first_column: bool,
     pub highlight_last_column: bool,
+    pub totals_row: bool,
 }
 
 /// An open workbook. Created with `openPath` or `openBytes`.
@@ -109,6 +110,7 @@ impl NativeWorkbook {
                 column_stripes: t.column_stripes,
                 highlight_first_column: t.highlight_first_column,
                 highlight_last_column: t.highlight_last_column,
+                totals_row: t.totals_row,
             })
             .collect())
     }

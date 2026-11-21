@@ -178,16 +178,18 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
 - **Tables:** `workbook.tables('Orders')` returns the sheet's Excel tables as
   `{ firstRow, firstColumn, lastRow, lastColumn, options }`, where `options` holds everything
   `addTable` takes (`name`, `columns`, `style`, `headerRow`, `autofilter`, `rowStripes`,
-  `columnStripes`, `firstColumn`, `lastColumn`). Tables are stored apart from the rows and are
-  read only when you ask. A custom (non-built-in) table style reads as `'none'`.
+  `columnStripes`, `firstColumn`, `lastColumn`, `totalsRow`), from top to bottom, then left to
+  right. Tables are stored apart from the rows and are read only when you ask. A custom
+  (non-built-in) table style reads as `'none'`. `totalsRow` tells whether the last row of the
+  range is a totals row; such a table can be read but not written.
 - **Rows and columns:** the object returned by `workbook.rows()` describes the row it returned
   last: `rowNumber`, `outlineLevel`, `hidden`, `collapsed` and `height` (`undefined` when the row
   stores no height). Rows that the file stores without values (a spacer row with a height, an
   empty hidden row) come back as `[]` with default properties; open the workbook with
   `includeEmptyRows: true` to get their properties as well (such rows after the last value are
   then returned too, and `skipEmpty: true` still drops them). `rows.layout()` (or `await rows.layoutAsync()`) gives the sheet's
-  `columnWidths` (`{ firstColumn, lastColumn, width }`, explicit and auto-fitted alike),
-  `columnWidth(column)`, `outlineSummaryAbove` and `rowOutlineLevels`. They can be read before
+  `columnWidths` (`{ firstColumn, lastColumn, width, hidden }`, explicit and auto-fitted alike),
+  `columnWidth(column)`, `columnHidden(column)`, `outlineSummaryAbove` and `rowOutlineLevels`. They can be read before
   the first row; the layout arrives with the first batch of rows.
 
   ```ts

@@ -148,6 +148,7 @@ pub struct NativeTableOptions {
     pub column_stripes: Option<bool>,
     pub first_column: Option<bool>,
     pub last_column: Option<bool>,
+    pub totals_row: Option<bool>,
 }
 
 impl From<NativeTableOptions> for TableConfig {
@@ -162,6 +163,7 @@ impl From<NativeTableOptions> for TableConfig {
             column_stripes: o.column_stripes,
             first_column: o.first_column,
             last_column: o.last_column,
+            totals_row: o.totals_row,
         }
     }
 }

@@ -74,6 +74,7 @@ export interface ColumnWidth {
   readonly lastColumn: number
   /** Width in characters of the default font. */
   readonly width: number
+  readonly hidden: boolean
 }
 
 /** Worksheet settings stored ahead of the rows. See {@link SheetRows.layout}. */
@@ -91,6 +92,11 @@ export class SheetLayout {
   /** The width of a 1-based column, or `undefined` if the sheet leaves it at the default. */
   columnWidth(column: number): number | undefined {
     return this.columnWidths.find((c) => c.firstColumn <= column && column <= c.lastColumn)?.width
+  }
+
+  /** True if a 1-based column is hidden. */
+  columnHidden(column: number): boolean {
+    return this.columnWidths.find((c) => c.firstColumn <= column && column <= c.lastColumn)?.hidden ?? false
   }
 }
 
@@ -325,9 +331,14 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     const count = view.getUint32(3, true)
     const widths: ColumnWidth[] = []
     let p = 7
-    for (let i = 0; i < count; i++, p += 16) {
+    for (let i = 0; i < count; i++, p += 17) {
       widths.push(
-        Object.freeze({ firstColumn: view.getUint32(p, true), lastColumn: view.getUint32(p + 4, true), width: view.getFloat64(p + 8, true) }),
+        Object.freeze({
+          firstColumn: view.getUint32(p, true),
+          lastColumn: view.getUint32(p + 4, true),
+          width: view.getFloat64(p + 8, true),
+          hidden: view.getUint8(p + 16) === 1,
+        }),
       )
     }
     this.#layout = new SheetLayout(Object.freeze(widths), view.getUint8(1) === 1, view.getUint8(2))
@@ -628,8 +639,9 @@ export class Workbook {
   }
 
   /**
-   * The Excel tables of a sheet (default: the first). Tables are stored apart from the rows and
-   * are read on each call; reading rows does not load them.
+   * The Excel tables of a sheet (default: the first), from top to bottom, then left to right.
+   * Tables are stored apart from the rows and are read on each call; reading rows does not load
+   * them.
    */
   tables(sheet: SheetRef = 0): ReadTable[] {
     const engine = this.#open()
@@ -650,6 +662,7 @@ export class Workbook {
           columnStripes: t.columnStripes,
           firstColumn: t.highlightFirstColumn,
           lastColumn: t.highlightLastColumn,
+          totalsRow: t.totalsRow,
         }),
       }),
     )
