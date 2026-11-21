@@ -1,0 +1,77 @@
+{
+  "id": "java-read-1m-inline",
+  "language": "java",
+  "group": "Reading",
+  "title": "Java: reading 1,000,000 rows, inline strings",
+  "dataset": "The 1M-row write benchmark dataset (10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean), written by Hypaxel with inline strings (40.7 MB)",
+  "method": "Each reader streams the first worksheet and visits every cell with its typed accessors; all must produce the same checksum (10,000,000 cells, sum of all numbers and date serials, 42,833,558 characters of text, 500,000 TRUEs). Time: mean of 5 runs after 2 warm-ups in one JVM. Allocated: bytes allocated by the reading thread per run. Peak RSS: a separate single read in a fresh JVM with default settings. The machine was otherwise idle.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores, 64 GB",
+    "os": "macOS 26.6",
+    "runtime": "OpenJDK 24.0.1"
+  },
+  "versions": [
+    "FastExcel reader 0.20.2 (ReadableWorkbook, Aalto StAX)",
+    "Apache POI 6.0.0 (XSSFReader with a SAX handler and ReadOnlySharedStringsTable)"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "alloc",
+      "label": "Allocated",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "rss",
+      "label": "Peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel XlsxReader",
+      "subject": true,
+      "values": {
+        "time": 0.69,
+        "alloc": 322,
+        "rss": 354
+      }
+    },
+    {
+      "label": "FastExcel ReadableWorkbook",
+      "subject": false,
+      "values": {
+        "time": 2.7,
+        "alloc": 3907,
+        "rss": 733
+      }
+    },
+    {
+      "label": "Apache POI XSSFReader + SAX",
+      "subject": false,
+      "values": {
+        "time": 3.22,
+        "alloc": 1267,
+        "rss": 627
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel's allocation on the inline file is the String of each text cell, which the benchmark asks for. Numbers, booleans and dates allocate nothing.",
+    "All three readers stream with bounded live memory: each completes with -Xmx16m on the inline file and with -Xmx96m on the shared one, whose string table must be held. The RSS differences come from garbage that the JVM lets accumulate between collections under default settings.",
+    "FastExcel did not read number formats (its default); Hypaxel and the POI handler detect date formats.",
+    "About 25% of Hypaxel's time is inflate and CRC-32 verification in the JDK."
+  ],
+  "reproduce": "cd java\n./mvnw -q -DskipTests install\n./mvnw -q -f benchmarks/pom.xml package\n./benchmarks/read.sh 1000000",
+  "sourcePath": "java/benchmarks"
+}

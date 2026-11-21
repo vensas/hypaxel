@@ -6,9 +6,9 @@ Hypaxel writes `.xlsx` files as a forward-only stream. Rows are converted, seria
 in native code as you write them, so memory stays flat whether you export 10 rows or 10 million.
 It can stream a download to the browser while your query is still running.
 
-- **Fast:** writes 100k rows × 10 columns in 0.1 s, about **50x faster than XlsxWriter** and
-  **95x faster than openpyxl**. DataFrames are about **30x faster** than `pandas.to_excel` and
-  `polars.write_excel`, with 10–30x less memory.
+- **Fast:** writes 100k rows × 10 columns in 0.07 s, about **50x faster than XlsxWriter** and
+  **90x faster than openpyxl**. DataFrames are about **30x faster** than `pandas.to_excel` and
+  `polars.write_excel`, with 9–34x less memory.
 - **Streaming:** sync and async generators that plug into FastAPI/Starlette, Django and Flask
   streaming responses.
 - **Data you already have:** tuples and lists, dicts, dataclasses, named tuples, pydantic models,
@@ -19,9 +19,9 @@ It can stream a download to the browser while your query is still running.
 - **Styles and layout:** fonts, fills, borders, alignment, number formats, merged cells, frozen
   panes, auto filters, Excel tables, row grouping, auto-fit columns, formulas, hidden sheets, tab colors.
 - **Valid output:** checked with the Office Open XML schema validator and read back with openpyxl.
-- **Fast reading:** `iter_rows` reads 100k rows × 10 columns in 0.13 s, about **27x faster than
+- **Fast reading:** `iter_rows` reads 100k rows × 10 columns in 0.13 s, about **26x faster than
   openpyxl** and 3.5x faster than python-calamine, in bounded memory. `read_dataframe` builds a
-  pandas DataFrame 3.5–4x faster than `pandas.read_excel(engine="calamine")`, and a polars one
+  pandas DataFrame 4–4.5x faster than `pandas.read_excel(engine="calamine")`, and a polars one
   faster than fastexcel. See [Reading](#reading).
 
 Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md). The [.NET version](../dotnet/README.md) uses the same design.
@@ -215,47 +215,69 @@ ws.add_table(1, 1, ws.row, 2, columns=["Region", "Revenue"], name="Regions", sty
 ## Performance
 
 The same 10-column dataset as the .NET and Rust benchmarks (int, 2× str, 2× float, datetime,
-bool, int, unique str, float). Python 3.13, Linux, Xeon 2.1 GHz. Run it yourself with
-`python benchmarks/bench.py 100000`.
+bool, int, unique str, float). Python 3.13, macOS 26.6, Apple M1 Max, XlsxWriter 3.3.3, openpyxl
+3.1.5, pandas 3.1.1, polars 2.1.0. Peak Python memory is measured with `tracemalloc` in a separate,
+untimed run; the workbook is written to memory, so the figures include the output. Run it yourself
+with `python benchmarks/bench.py 100000`.
 
 | 100,000 rows | seconds | rows/s | peak Python memory |
 | --- | ---: | ---: | ---: |
-| **hypaxel** `write_rows` | **0.10** | **~1,000,000** | 5 MB (the output itself) |
-| **hypaxel** `stream_rows` | **0.09** | **~1,080,000** | 11 MB |
-| xlsxwriter (constant_memory) | 5.15 | 19,400 | 7 MB |
-| openpyxl (write_only) | 9.48 | 10,500 | 7 MB |
-| **hypaxel** pandas DataFrame* | **0.27** | 371,000 | 16 MB |
-| pandas.to_excel (xlsxwriter)* | 8.68 | 11,500 | 147 MB |
-| **hypaxel** polars DataFrame* | **0.21** | 475,000 | 8 MB |
-| polars.write_excel* | 6.15 | 16,300 | 265 MB |
+| **hypaxel** `write_rows` | **0.07** | **~1,380,000** | 5 MB (the output itself) |
+| **hypaxel** `stream_rows` | **0.08** | **~1,310,000** | 11 MB |
+| xlsxwriter (constant_memory) | 3.74 | 26,700 | 7 MB |
+| openpyxl (write_only) | 6.35 | 15,800 | 7 MB |
+| **hypaxel** pandas DataFrame* | **0.20** | 509,000 | 16 MB |
+| pandas.to_excel (xlsxwriter)* | 6.82 | 14,700 | 147 MB |
+| **hypaxel** polars DataFrame* | **0.17** | 581,000 | 8 MB |
+| polars.write_excel* | 4.86 | 20,600 | 268 MB |
 
 \* includes building the DataFrame from the row list.
 
-Hypaxel writes 1M rows in about 0.9 s (`write_rows`) and 2.5–3.4 s from a DataFrame, scaling
-linearly.
+| 1,000,000 rows | seconds | rows/s | peak Python memory |
+| --- | ---: | ---: | ---: |
+| **hypaxel** `write_rows` | **0.74** | **~1,360,000** | 53 MB (the output itself) |
+| **hypaxel** `stream_rows` | **0.73** | **~1,370,000** | 106 MB |
+| xlsxwriter (constant_memory) | 37.94 | 26,400 | 60 MB |
+| openpyxl (write_only) | 63.97 | 15,600 | 66 MB |
+| **hypaxel** pandas DataFrame* | **2.03** | 493,000 | 163 MB |
+| pandas.to_excel (xlsxwriter)* | 69.87 | 14,300 | 1,446 MB |
+| **hypaxel** polars DataFrame* | **2.22** | 450,000 | 53 MB |
+| polars.write_excel* | 50.77 | 19,700 | 2,550 MB |
+
+Hypaxel's own memory stays flat: what grows is the output buffer (53 MB at 1M rows), which a
+streaming response sends instead of keeping.
 
 ### Reading
 
 The same 10 columns plus a header row, saved with a shared string table as Excel does. Every reader
 runs in its own process; peak RSS covers the whole process (Python, modules and native memory);
-imports are not timed. All readers return the same 1,000,010 non-empty cells. Python 3.13, macOS,
+imports are not timed. All readers return the same non-empty cells. Python 3.13, macOS 26.6,
 Apple M1 Max, openpyxl 3.1.5, python-calamine 0.9.1, fastexcel 0.21.0, pandas 3.1.1, polars 2.1.0.
 Run it yourself with `python benchmarks/read_bench.py 100000`.
 
-| 100,000 rows | seconds | peak RSS |
+| 100,000 rows (5.5 MB) | seconds | peak RSS |
 | --- | ---: | ---: |
 | **hypaxel** `iter_rows` | **0.13** | **27 MB** |
-| python-calamine `iter_rows` | 0.47 | 105 MB |
-| openpyxl (read_only) | 3.58 | 63 MB |
-| **hypaxel** `read_dataframe` (pandas) | **0.20** | 182 MB |
-| pandas.read_excel (calamine) | 0.74 | 315 MB |
-| pandas.read_excel (openpyxl) | 4.36 | 201 MB |
-| **hypaxel** `read_dataframe` (polars) | **0.18** | 143 MB |
-| fastexcel `to_polars` | 0.24 | 188 MB |
+| python-calamine `iter_rows` | 0.45 | 105 MB |
+| openpyxl (read_only) | 3.39 | 63 MB |
+| **hypaxel** `read_dataframe` (pandas) | **0.17** | 179 MB |
+| pandas.read_excel (calamine) | 0.71 | 314 MB |
+| pandas.read_excel (openpyxl) | 4.16 | 198 MB |
+| **hypaxel** `read_dataframe` (polars) | **0.18** | 142 MB |
+| fastexcel `to_polars` | 0.23 | 187 MB |
 
-At 1M rows (55 MB file) `iter_rows` takes 1.35 s with a 68 MB peak, against 4.7 s and 862 MB for
-python-calamine. `read_dataframe` takes 1.9 s (pandas) and 2.0 s (polars), against 8.3 s for
-`pandas.read_excel(engine="calamine")` and 2.5 s for fastexcel.
+| 1,000,000 rows (55 MB) | seconds | peak RSS |
+| --- | ---: | ---: |
+| **hypaxel** `iter_rows` | **1.30** | **68 MB** |
+| python-calamine `iter_rows` | 4.46 | 862 MB |
+| openpyxl (read_only) | not run | not run |
+| **hypaxel** `read_dataframe` (pandas) | **1.79** | 920 MB |
+| pandas.read_excel (calamine) | 8.10 | 2,266 MB |
+| pandas.read_excel (openpyxl) | not run | not run |
+| **hypaxel** `read_dataframe` (polars) | **1.84** | 799 MB |
+| fastexcel `to_polars` | 2.45 | 928 MB |
+
+openpyxl is skipped at 1M rows because it is too slow at that size.
 
 ## Notes and limits
 

@@ -1,0 +1,172 @@
+{
+  "id": "dotnet-read-1m-time",
+  "language": "dotnet",
+  "group": "Reading",
+  "title": ".NET reading: 1,000,000 rows, time",
+  "dataset": "1,000,000 rows × 10 columns, written by the Hypaxel writer with inline or shared strings, read cell by cell",
+  "method": "Times come from one --read-quick stopwatch run per runtime, which runs every reader with one warm-up and then the best of three runs. Every reader produces the same checksum (10,000,000 cells, the sum of all numbers including date serials, 42,833,558 string characters, 500,000 TRUEs). The machine was otherwise idle.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores, 64 GB",
+    "os": "macOS 26.6",
+    "runtime": ".NET 8.0.19, 9.0.0, 10.0.13 and 11.0.0"
+  },
+  "versions": [
+    "Sylvan.Data.Excel 0.5.8",
+    "ExcelDataReader 3.9.0",
+    "MiniExcel 1.47.1"
+  ],
+  "metrics": [
+    {
+      "id": "net8",
+      "label": ".NET 8",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net9",
+      "label": ".NET 9",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net10",
+      "label": ".NET 10",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net11",
+      "label": ".NET 11",
+      "unit": "s",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "net10",
+  "rows": [
+    {
+      "label": "Hypaxel, TryGetText/TryGetDouble (inline)",
+      "subject": true,
+      "values": {
+        "net8": 0.71,
+        "net9": 0.77,
+        "net10": 0.72,
+        "net11": 0.72
+      }
+    },
+    {
+      "label": "Hypaxel, GetValue (ExcelValue) (inline)",
+      "subject": true,
+      "values": {
+        "net8": 0.78,
+        "net9": 0.83,
+        "net10": 0.76,
+        "net11": 0.76
+      }
+    },
+    {
+      "label": "Hypaxel, BackgroundDecompression (inline)",
+      "subject": true,
+      "values": {
+        "net8": 0.58,
+        "net9": 0.55,
+        "net10": 0.51,
+        "net11": 0.51
+      }
+    },
+    {
+      "label": "Sylvan.Data.Excel (inline)",
+      "subject": false,
+      "values": {
+        "net8": 2.1,
+        "net9": 2.01,
+        "net10": 1.87,
+        "net11": 1.91
+      }
+    },
+    {
+      "label": "ExcelDataReader (inline)",
+      "subject": false,
+      "values": {
+        "net8": 5.02,
+        "net9": 4.69,
+        "net10": 4.26,
+        "net11": 4.55
+      }
+    },
+    {
+      "label": "MiniExcel (inline)",
+      "subject": false,
+      "values": {
+        "net8": 8.79,
+        "net9": 7.79,
+        "net10": 6.89,
+        "net11": 7.13
+      }
+    },
+    {
+      "label": "Hypaxel, TryGetText/TryGetDouble (shared)",
+      "subject": true,
+      "values": {
+        "net8": 0.76,
+        "net9": 0.82,
+        "net10": 0.79,
+        "net11": 0.8
+      }
+    },
+    {
+      "label": "Hypaxel, GetValue (ExcelValue) (shared)",
+      "subject": true,
+      "values": {
+        "net8": 0.81,
+        "net9": 0.86,
+        "net10": 0.81,
+        "net11": 0.82
+      }
+    },
+    {
+      "label": "Hypaxel, BackgroundDecompression (shared)",
+      "subject": true,
+      "values": {
+        "net8": 0.61,
+        "net9": 0.59,
+        "net10": 0.55,
+        "net11": 0.56
+      }
+    },
+    {
+      "label": "Sylvan.Data.Excel (shared)",
+      "subject": false,
+      "values": {
+        "net8": 2.08,
+        "net9": 2.02,
+        "net10": 1.91,
+        "net11": 1.96
+      }
+    },
+    {
+      "label": "ExcelDataReader (shared)",
+      "subject": false,
+      "values": {
+        "net8": 4.99,
+        "net9": 4.69,
+        "net10": 4.35,
+        "net11": 4.57
+      }
+    },
+    {
+      "label": "MiniExcel (shared)",
+      "subject": false,
+      "values": {
+        "net8": 13.85,
+        "net9": 12.73,
+        "net10": 12.0,
+        "net11": 12.25
+      }
+    }
+  ],
+  "notes": [
+    "Inline and shared name the file: the same dataset written by the Hypaxel writer with inline strings or with shared strings."
+  ],
+  "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --read-quick 1000000                    # all readers, both files\ndotnet run -c Release -f net10.0 -- --read-quick 1000000 Sylvan shared      # one reader, one file",
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}

@@ -1,0 +1,100 @@
+{
+  "id": "dotnet-1m",
+  "language": "dotnet",
+  "title": ".NET: 1,000,000 rows, time",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, written to a MemoryStream",
+  "method": "--quick stopwatch runner: a single timed run after one warm-up. ClosedXML is not run at 1M rows.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores",
+    "os": "macOS 26.6",
+    "runtime": ".NET 8.0.19, 9.0.0, 10.0.13 and 11.0.0"
+  },
+  "versions": [
+    "SpreadCheetah 1.29.0"
+  ],
+  "metrics": [
+    {
+      "id": "net8",
+      "label": ".NET 8",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net9",
+      "label": ".NET 9",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net10",
+      "label": ".NET 10",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "net11",
+      "label": ".NET 11",
+      "unit": "s",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "net10",
+  "rows": [
+    {
+      "label": "Hypaxel, typed Write",
+      "subject": true,
+      "values": {
+        "net8": 1.18,
+        "net9": 0.82,
+        "net10": 0.73,
+        "net11": 0.71
+      }
+    },
+    {
+      "label": "Hypaxel, AddRowAsync",
+      "subject": true,
+      "values": {
+        "net8": 1.21,
+        "net9": 0.86,
+        "net10": 0.78,
+        "net11": 0.79
+      }
+    },
+    {
+      "label": "Hypaxel, object mapping",
+      "subject": true,
+      "values": {
+        "net8": 1.17,
+        "net9": 0.81,
+        "net10": 0.79,
+        "net11": 0.74
+      }
+    },
+    {
+      "label": "Hypaxel, shared strings",
+      "subject": true,
+      "values": {
+        "net8": 1.36,
+        "net9": 1.03,
+        "net10": 0.89,
+        "net11": 0.91
+      }
+    },
+    {
+      "label": "SpreadCheetah",
+      "subject": false,
+      "values": {
+        "net8": 1.22,
+        "net9": 0.83,
+        "net10": 0.75,
+        "net11": 0.74
+      }
+    }
+  ],
+  "notes": [
+    "At 1M rows Hypaxel and SpreadCheetah allocate less than 1 MB on every version; shared strings allocate 88 MB.",
+    "The file is about 50 MB (53 MB with shared strings), or about 39 MB (41 MB) on .NET 8, whose compression produces smaller output."
+  ],
+  "reproduce": "cd dotnet/benchmarks/Hypaxel.Benchmarks\ndotnet run -c Release -f net10.0 -- --quick 1000000",
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}

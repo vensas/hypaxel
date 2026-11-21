@@ -8,7 +8,7 @@ export 10 rows or a million, and a download can start while your query is still 
 [reads](#reading) workbooks the same way: one row at a time, with memory bounded by the shared
 string table plus one row.
 
-- **Fast:** writes 100k rows × 10 columns in about 0.12 s, **3 to 4x faster than FastExcel**
+- **Fast:** writes 100k rows × 10 columns in about 0.11 s, **2.5 to 3.7x faster than FastExcel**
   and **9x faster than Apache POI's streaming writer (SXSSF)**; reads 1M rows × 10 columns in
   about 0.7 s, **about 4x faster than FastExcel's reader** and **5 to 7x faster than POI's event
   API** (see [Performance](#performance)).
@@ -487,46 +487,45 @@ Writing 10 columns per row (int, 2 strings, 2 doubles, `BigDecimal`, `LocalDateT
 long, unique string) to a stream that discards the bytes.
 
 Measured on an Apple M1 Max (10 cores, macOS 26.6) with OpenJDK 24.0.1 against FastExcel 0.20.2
-and Apache POI 6.0.0. The machine was running other work at the time (load average about 10), so
-treat differences of a few percent as noise.
+and Apache POI 6.0.0, on an otherwise idle machine.
 
 **100k rows** (JMH 1.37: average time per workbook, 2 forks, 5 warm-up and 5 measured iterations
 of 2 s; allocation from the JMH GC profiler)
 
 | Case | Time | Allocated | File |
 | --- | ---: | ---: | ---: |
-| Hypaxel, typed `write` | 118 ms | 0.17 MB | 3.9 MB |
-| Hypaxel, `writeRows` with a `RowWriter` | 118 ms | 0.17 MB | 3.9 MB |
-| Hypaxel, object mapping | 123 ms | 0.17 MB | 3.9 MB |
-| Hypaxel, `addRow(Object...)` | 123 ms | 14.6 MB | 3.9 MB |
-| Hypaxel, shared strings | 135 ms | 3.9 MB | 4.1 MB |
-| Hypaxel, compression level 6 | 324 ms | 0.37 MB | 3.0 MB |
-| FastExcel, compression level 1 | 352 ms | 261 MB | 6.9 MB |
-| FastExcel, default settings | 443 ms | 262 MB | 5.9 MB |
-| Apache POI SXSSF | 1,057 ms | 501 MB | 5.6 MB |
+| Hypaxel, typed `write` | 113 ms | 0.17 MB | 3.9 MB |
+| Hypaxel, `writeRows` with a `RowWriter` | 113 ms | 0.17 MB | 3.9 MB |
+| Hypaxel, object mapping | 118 ms | 0.17 MB | 3.9 MB |
+| Hypaxel, `addRow(Object...)` | 117 ms | 14.6 MB | 3.9 MB |
+| Hypaxel, shared strings | 127 ms | 3.9 MB | 4.1 MB |
+| Hypaxel, compression level 6 | 307 ms | 0.37 MB | 3.0 MB |
+| FastExcel, compression level 1 | 288 ms | 260 MB | 6.9 MB |
+| FastExcel, default settings | 416 ms | 266 MB | 5.9 MB |
+| Apache POI SXSSF | 969 ms | 501 MB | 5.6 MB |
 
 **1M rows** (stopwatch runner: mean of 5 runs after 2 warm-ups, bytes allocated by the writing
 thread per run. Peak RSS is from a separate single run in a fresh JVM with default settings that
-creates the rows on demand; creating the rows without writing anything peaks at 314 MB.)
+creates the rows on demand; creating the rows without writing anything peaks at 315 MB.)
 
 | Case | Time | Allocated | Peak RSS | File |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, typed `write` | 1.20 s | 0.16 MB | 325 MB | 38.8 MB |
-| Hypaxel, `writeRows` with a `RowWriter` | 1.21 s | 0.16 MB | 331 MB | 38.8 MB |
-| Hypaxel, object mapping | 1.25 s | 0.17 MB | 326 MB | 38.8 MB |
-| Hypaxel, `addRow(Object...)` | 1.31 s | 137 MB | 467 MB | 38.8 MB |
-| Hypaxel, shared strings | 1.50 s | 30 MB | 366 MB | 41.0 MB |
-| Hypaxel, compression level 6 | 3.24 s | 0.35 MB | 324 MB | 29.9 MB |
-| FastExcel, compression level 1 | 3.01 s | 2,503 MB | 1,097 MB | 69.3 MB |
-| FastExcel, default settings | 4.22 s | 2,487 MB | 1,064 MB | 60.7 MB |
-| Apache POI SXSSF | 9.77 s | 4,712 MB | 866 MB | 56.9 MB |
+| Hypaxel, typed `write` | 1.14 s | 0.16 MB | 326 MB | 38.8 MB |
+| Hypaxel, `writeRows` with a `RowWriter` | 1.13 s | 0.16 MB | 333 MB | 38.8 MB |
+| Hypaxel, object mapping | 1.18 s | 0.17 MB | 327 MB | 38.8 MB |
+| Hypaxel, `addRow(Object...)` | 1.18 s | 137 MB | 467 MB | 38.8 MB |
+| Hypaxel, shared strings | 1.29 s | 30 MB | 367 MB | 41.0 MB |
+| Hypaxel, compression level 6 | 3.09 s | 0.35 MB | 324 MB | 29.9 MB |
+| FastExcel, compression level 1 | 2.84 s | 2,503 MB | 1,073 MB | 69.3 MB |
+| FastExcel, default settings | 4.11 s | 2,487 MB | 1,066 MB | 60.7 MB |
+| Apache POI SXSSF | 9.50 s | 4,648 MB | 865 MB | 56.9 MB |
 
 How to read this:
 
-- Hypaxel's default is deflate level 1. At the same level it is about 2.5 to 3x faster than
+- Hypaxel's default is deflate level 1. At the same level it is about 2.5x faster than
   FastExcel. FastExcel's own default is a higher level, which makes its files smaller than at
   level 1 but still larger than Hypaxel's.
-- At level 6 Hypaxel is slower than FastExcel at level 1 (3.24 s against 3.01 s at 1M rows) and
+- At level 6 Hypaxel is slower than FastExcel at level 1 (3.09 s against 2.84 s at 1M rows) and
   produces a file less than half the size. About 70% of Hypaxel's time at level 1 is spent in
   the JDK's `Deflater`, so the compression level decides most of the run time.
 - Peak RSS is dominated by the JVM and by how much garbage accumulates between collections, not
@@ -560,16 +559,15 @@ text, 500,000 `TRUE`s).
 
 Measured on an Apple M1 Max (10 cores, 64 GB, macOS 26.6) with OpenJDK 24.0.1 against
 FastExcel reader 0.20.2 (`ReadableWorkbook`, Aalto StAX) and Apache POI 6.0.0 (`XSSFReader` with
-a SAX handler and `ReadOnlySharedStringsTable`, the event API as POI documents it). The machine
-was running other work at the time (load average about 12), so treat differences of a few percent
-as noise. Time: mean of 5 runs after 2 warm-ups in one JVM. Allocated: bytes allocated by the
+a SAX handler and `ReadOnlySharedStringsTable`, the event API as POI documents it), on an
+otherwise idle machine. Time: mean of 5 runs after 2 warm-ups in one JVM. Allocated: bytes allocated by the
 reading thread per run. Peak RSS: a separate single read in a fresh JVM with default settings.
 
 | Reader | Inline strings | Allocated | Peak RSS | Shared strings | Allocated | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **Hypaxel** `XlsxReader` | **0.70 s** | **322 MB** | **354 MB** | **0.69 s** | **74 MB** | **155 MB** |
-| FastExcel `ReadableWorkbook` | 2.69 s | 3,913 MB | 732 MB | 2.97 s | 4,068 MB | 1,015 MB |
-| Apache POI `XSSFReader` + SAX | 3.27 s | 1,267 MB | 616 MB | 4.65 s | 7,886 MB | 827 MB |
+| **Hypaxel** `XlsxReader` | **0.69 s** | **322 MB** | **354 MB** | **0.68 s** | **74 MB** | **157 MB** |
+| FastExcel `ReadableWorkbook` | 2.70 s | 3,907 MB | 733 MB | 2.87 s | 4,074 MB | 1,013 MB |
+| Apache POI `XSSFReader` + SAX | 3.22 s | 1,267 MB | 627 MB | 4.59 s | 7,941 MB | 826 MB |
 
 How to read this:
 

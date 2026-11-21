@@ -1,0 +1,112 @@
+[
+  {
+    "language": "dotnet",
+    "value": "~0.7–0.8 s",
+    "label": "1M rows on .NET 9+",
+    "comparison": "~19–24x faster than ClosedXML",
+    "memory": "< 1 MB allocated",
+    "memoryKind": "allocated"
+  },
+  {
+    "language": "rust",
+    "value": "~0.7 s",
+    "label": "1M rows",
+    "comparison": "~8–9x faster than rust_xlsxwriter",
+    "memory": "7.1 MB peak",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "python",
+    "value": "~0.75 s",
+    "label": "1M rows",
+    "comparison": "~50x faster than XlsxWriter, ~85x faster than openpyxl",
+    "memory": "53 MB Python heap (the output)",
+    "memoryKind": "peakHeap"
+  },
+  {
+    "language": "nodejs",
+    "value": "~1.2 s",
+    "label": "1M rows",
+    "comparison": "~6x faster than ExcelJS's streaming writer",
+    "memory": "101 MB peak (most of it Node.js)",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "nodejs",
+    "title": "Browsers",
+    "value": "~0.5 s",
+    "label": "300k rows in Chrome (WebAssembly)",
+    "comparison": "~11–14x faster than SheetJS, ~19x faster than ExcelJS",
+    "memory": "2.4 MB WebAssembly memory",
+    "memoryKind": "wasmMemory"
+  },
+  {
+    "language": "go",
+    "value": "~0.85 s",
+    "label": "1M rows",
+    "comparison": "~4.5–5x faster than excelize's StreamWriter",
+    "memory": "21 MB peak",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "java",
+    "value": "~1.1 s",
+    "label": "1M rows",
+    "comparison": "~2.5–3.5x faster than FastExcel, ~8–9x faster than Apache POI SXSSF",
+    "memory": "0.16 MB allocated",
+    "memoryKind": "allocated"
+  },
+  {
+    "language": "php",
+    "value": "~3.9 s",
+    "label": "1M rows (~2.9 s with JIT)",
+    "comparison": "~11–13x faster than OpenSpout, ~40x faster than PhpSpreadsheet",
+    "memory": "4.0 MB peak",
+    "memoryKind": "peakHeap"
+  },
+  {
+    "language": "dotnet",
+    "group": "Reading",
+    "value": "~0.7–0.8 s",
+    "label": "1M rows (~0.5–0.6 s with background decompression)",
+    "comparison": "~2.6x faster than Sylvan.Data.Excel, ~6x faster than ExcelDataReader, 9–15x faster than MiniExcel",
+    "memory": "49 / 141 MB peak",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "rust",
+    "group": "Reading",
+    "value": "~0.72–0.75 s",
+    "label": "1M rows",
+    "comparison": "~2.8x faster than calamine's cell reader, 15–115x less memory than calamine's Range",
+    "memory": "7 / 57 MB peak",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "python",
+    "group": "Reading",
+    "value": "~1.3 s",
+    "label": "1M rows",
+    "comparison": "~26x faster than openpyxl (100k rows), ~3.4x faster than python-calamine with ~13x less memory",
+    "memory": "68 MB peak",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "go",
+    "group": "Reading",
+    "value": "~1.1–1.2 s",
+    "label": "1M rows, files ~40% larger (a reference on every cell)",
+    "comparison": "~10–14x faster than excelize's Rows and xlsxreader",
+    "memory": "21 / 74 MB peak",
+    "memoryKind": "peakRss"
+  },
+  {
+    "language": "java",
+    "group": "Reading",
+    "value": "~0.7 s",
+    "label": "1M rows",
+    "comparison": "~4x faster than the FastExcel reader, ~5–7x faster than POI's streaming XSSFReader",
+    "memory": "354 / 157 MB peak",
+    "memoryKind": "peakRss"
+  }
+]

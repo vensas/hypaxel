@@ -283,8 +283,8 @@ and data validation.
 Writing 10 columns (int, 2× string, 2× double, decimal, DateTime, bool, long, unique string) to a
 `MemoryStream`, on each supported .NET version.
 
-Measured on an Apple M1 Max (10 cores, macOS 26.6) with .NET 8.0.34, 9.0.23, 10.0.15 and 11.0.0,
-against SpreadCheetah 1.29.0 and ClosedXML 0.105.1. 100k rows use BenchmarkDotNet 0.15.8 (ShortRun,
+Measured on an Apple M1 Max (10 cores, macOS 26.6) with .NET 8.0.19, 9.0.0, 10.0.13 and 11.0.0,
+against SpreadCheetah 1.29.0 and ClosedXML 0.105.1, on an otherwise idle machine. 100k rows use BenchmarkDotNet 0.15.8 (ShortRun,
 in-process toolchain); 1M rows use the `--quick` stopwatch runner, which times a single run after
 one warm-up.
 
@@ -292,41 +292,41 @@ one warm-up.
 
 | Library | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, typed `Write` | 122 ms | 78 ms | 78 ms | 74 ms |
-| Hypaxel, `AddRowAsync` | 127 ms | 87 ms | 76 ms | 75 ms |
-| Hypaxel, object mapping | 118 ms | 78 ms | 80 ms | 75 ms |
-| Hypaxel, shared strings | 159 ms | 97 ms | 89 ms | 90 ms |
-| SpreadCheetah | 123 ms | 79 ms | 75 ms | 74 ms |
-| ClosedXML | 2,369 ms | 1,910 ms | 1,845 ms | 1,773 ms |
+| Hypaxel, typed `Write` | 116 ms | 85 ms | 73 ms | 71 ms |
+| Hypaxel, `AddRowAsync` | 123 ms | 89 ms | 77 ms | 75 ms |
+| Hypaxel, object mapping | 116 ms | 83 ms | 78 ms | 74 ms |
+| Hypaxel, shared strings | 132 ms | 101 ms | 85 ms | 84 ms |
+| SpreadCheetah | 120 ms | 85 ms | 74 ms | 72 ms |
+| ClosedXML | 2,192 ms | 1,967 ms | 1,749 ms | 1,729 ms |
 
 **100k rows, allocated**
 
 | Library | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, typed `Write` | 208 KB | 12 KB | 12 KB | 14 KB |
-| Hypaxel, `AddRowAsync` | 208 KB | 12 KB | 12 KB | 14 KB |
-| Hypaxel, object mapping | 212 KB | 15 KB | 15 KB | 17 KB |
-| Hypaxel, shared strings | 11.0 MB | 10.1 MB | 10.1 MB | 10.1 MB |
-| SpreadCheetah | 84 KB | 15 KB | 16 KB | 18 KB |
+| Hypaxel, typed `Write` | 8.8 KB | 12 KB | 13 KB | 14 KB |
+| Hypaxel, `AddRowAsync` | 8.8 KB | 12 KB | 12 KB | 14 KB |
+| Hypaxel, object mapping | 11 KB | 15 KB | 15 KB | 17 KB |
+| Hypaxel, shared strings | 10.1 MB | 10.1 MB | 10.1 MB | 10.1 MB |
+| SpreadCheetah | 11 KB | 15 KB | 16 KB | 18 KB |
 | ClosedXML | 1,190 MB | 1,098 MB | 1,103 MB | 1,087 MB |
 
 **1M rows, time**
 
 | Library | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
 | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, typed `Write` | 1.21 s | 0.80 s | 0.78 s | 0.73 s |
-| Hypaxel, `AddRowAsync` | 1.23 s | 0.83 s | 0.77 s | 0.76 s |
-| Hypaxel, object mapping | 1.26 s | 0.82 s | 0.81 s | 0.75 s |
-| Hypaxel, shared strings | 1.42 s | 1.12 s | 1.00 s | 0.99 s |
-| SpreadCheetah | 1.41 s | 0.85 s | 0.76 s | 0.74 s |
+| Hypaxel, typed `Write` | 1.18 s | 0.82 s | 0.73 s | 0.71 s |
+| Hypaxel, `AddRowAsync` | 1.21 s | 0.86 s | 0.78 s | 0.79 s |
+| Hypaxel, object mapping | 1.17 s | 0.81 s | 0.79 s | 0.74 s |
+| Hypaxel, shared strings | 1.36 s | 1.03 s | 0.89 s | 0.91 s |
+| SpreadCheetah | 1.22 s | 0.83 s | 0.75 s | 0.74 s |
 
 At 1M rows Hypaxel and SpreadCheetah allocate less than 1 MB on every version; shared strings
-allocate 88 MB (96 MB on .NET 8). The file is about 50 MB (53 MB with shared strings), or about
+allocate 88 MB. The file is about 50 MB (53 MB with shared strings), or about
 39 MB (41 MB) on .NET 8, whose compression produces smaller output. ClosedXML is not run at 1M rows.
 
-Hypaxel and SpreadCheetah are within measurement noise of each other; both are roughly 20 to 25
+Hypaxel and SpreadCheetah are within measurement noise of each other; both are roughly 19 to 24
 times faster than ClosedXML and allocate a small fraction of its memory. .NET 8 is the slowest
-target and allocates more per workbook.
+target.
 
 Allocations stay constant as rows grow (except with shared strings, whose table grows with the
 number of distinct values). Memory per concurrent export is therefore bounded by the buffers:
@@ -363,57 +363,63 @@ read cell by cell. Every reader must produce the same checksum (10,000,000 cells
 numbers including date serials, 42,833,558 string characters, 500,000 `TRUE`s), and all of them do.
 
 Measured on an Apple M1 Max (10 cores, 64 GB, macOS 26.6) with .NET 8.0.19, 9.0.0, 10.0.13 and
-11.0.0, against Sylvan.Data.Excel 0.5.8, ExcelDataReader 3.9.0 and MiniExcel 1.47.1. Each reader runs
-in its own process with the `--read-quick` stopwatch runner: one warm-up, then the best of three runs.
-Allocations are for one run; peak RSS is the whole process (`/usr/bin/time -l`), including the
-runtime. The machine was otherwise idle.
+11.0.0, against Sylvan.Data.Excel 0.5.8, ExcelDataReader 3.9.0 and MiniExcel 1.47.1. Times come from
+one `--read-quick` stopwatch run per runtime, which runs every reader with one warm-up and then the
+best of three runs. Allocations are for one run. Peak RSS comes from a separate process per reader
+(`--read-quick 1000000 <reader> <inline|shared>` under `/usr/bin/time -l`) and covers the whole
+process, including the runtime. The machine was otherwise idle.
 
 **1M rows, time**
 
 | Reader | File | .NET 8 | .NET 9 | .NET 10 | .NET 11 |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 0.74 s | 0.80 s | 0.76 s | 0.73 s |
-| Hypaxel, `GetValue` (`ExcelValue`) | inline | 0.82 s | 0.86 s | 0.80 s | 0.79 s |
-| Hypaxel, `BackgroundDecompression` | inline | 0.59 s | 0.56 s | 0.52 s | 0.51 s |
-| Sylvan.Data.Excel | inline | 2.19 s | 2.04 s | 1.87 s | 1.94 s |
-| ExcelDataReader | inline | 5.24 s | 4.82 s | 4.26 s | 4.60 s |
-| MiniExcel | inline | 9.24 s | 8.10 s | 6.94 s | 7.28 s |
-| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 0.80 s | 0.86 s | 0.81 s | 0.82 s |
-| Hypaxel, `GetValue` (`ExcelValue`) | shared | 0.87 s | 0.89 s | 0.83 s | 0.85 s |
-| Hypaxel, `BackgroundDecompression` | shared | 0.64 s | 0.60 s | 0.56 s | 0.58 s |
-| Sylvan.Data.Excel | shared | 2.18 s | 2.07 s | 1.92 s | 1.99 s |
-| ExcelDataReader | shared | 5.29 s | 4.88 s | 4.40 s | 4.64 s |
-| MiniExcel | shared | 14.77 s | 13.71 s | 12.49 s | 12.84 s |
+| Hypaxel, `TryGetText`/`TryGetDouble` | inline | 0.71 s | 0.77 s | 0.72 s | 0.72 s |
+| Hypaxel, `GetValue` (`ExcelValue`) | inline | 0.78 s | 0.83 s | 0.76 s | 0.76 s |
+| Hypaxel, `BackgroundDecompression` | inline | 0.58 s | 0.55 s | 0.51 s | 0.51 s |
+| Sylvan.Data.Excel | inline | 2.10 s | 2.01 s | 1.87 s | 1.91 s |
+| ExcelDataReader | inline | 5.02 s | 4.69 s | 4.26 s | 4.55 s |
+| MiniExcel | inline | 8.79 s | 7.79 s | 6.89 s | 7.13 s |
+| Hypaxel, `TryGetText`/`TryGetDouble` | shared | 0.76 s | 0.82 s | 0.79 s | 0.80 s |
+| Hypaxel, `GetValue` (`ExcelValue`) | shared | 0.81 s | 0.86 s | 0.81 s | 0.82 s |
+| Hypaxel, `BackgroundDecompression` | shared | 0.61 s | 0.59 s | 0.55 s | 0.56 s |
+| Sylvan.Data.Excel | shared | 2.08 s | 2.02 s | 1.91 s | 1.96 s |
+| ExcelDataReader | shared | 4.99 s | 4.69 s | 4.35 s | 4.57 s |
+| MiniExcel | shared | 13.85 s | 12.73 s | 12.00 s | 12.25 s |
 
 **1M rows, memory (.NET 10)**
 
 | Reader | Inline: allocated | Inline: peak RSS | Shared: allocated | Shared: peak RSS |
 | --- | ---: | ---: | ---: | ---: |
 | Hypaxel, `TryGetText`/`TryGetDouble` | 0.1 MB | 49 MB | 92 MB | 141 MB |
-| Hypaxel, `GetValue` (`ExcelValue`) | 153 MB | 55 MB | 92 MB | 141 MB |
-| Hypaxel, `BackgroundDecompression` | 0.6 MB | 51 MB | 92 MB | 137 MB |
-| Sylvan.Data.Excel | 154 MB | 75 MB | 85 MB | 156 MB |
-| ExcelDataReader | 1,937 MB | 77 MB | 1,717 MB | 158 MB |
-| MiniExcel | 10,649 MB | 81 MB | 10,157 MB | 84 MB |
+| Hypaxel, `GetValue` (`ExcelValue`) | 153 MB | 55 MB | 92 MB | 135 MB |
+| Hypaxel, `BackgroundDecompression` | 0.6 MB | 51 MB | 92 MB | 144 MB |
+| Sylvan.Data.Excel | 154 MB | 75 MB | 85 MB | 155 MB |
+| ExcelDataReader | 1,937 MB | 76 MB | 1,717 MB | 157 MB |
+| MiniExcel | 10,649 MB | 81 MB | 10,157 MB | 82 MB |
 
-The other runtimes are within a few MB of these figures. With inline strings, the only allocations are
-the strings you ask for: the 153 MB are the 3M cell strings, and reading text as a span
-allocates nothing. With shared strings, the 92 MB are the shared string table (1M distinct
+Allocations are the same on the other runtimes, except MiniExcel's (10.0 to 13.3 GB per read);
+peak RSS was measured on .NET 10 only. With inline strings, the only allocations are the strings
+you ask for: the 153 MB are the 3M cell strings, and reading text as a span allocates nothing.
+With shared strings, the 92 MB are the shared string table (1M distinct
 strings), which is loaded once and then read without allocating. By design, nothing else grows with
 the number of rows: the row buffers are sized by the widest row.
 
 **Background decompression.** `XlsxReaderOptions.BackgroundDecompression` inflates and checks each
-worksheet (and the shared string table) on a thread-pool thread while the calling thread parses. Measured on .NET 10, interleaved
-with the default on the same files:
+worksheet (and the shared string table) on a thread-pool thread while the calling thread parses. From the .NET 10 run above: the best of
+three runs and the CPU time of that run, summed over all threads:
 
-| | Default | `BackgroundDecompression` |
-| --- | ---: | ---: |
-| One reader, inline: time / CPU time | 0.77 s / 0.76 s | 0.53 s / 0.92 s |
-| One reader, shared: time / CPU time | 0.83 s / 0.84 s | 0.58 s / 0.97 s |
-| 4 readers at once (10 cores), inline: total time | 0.80–0.84 s | 0.56–0.59 s |
-| 10 readers at once (10 cores), inline: total time | 1.14–1.15 s | 1.54–1.56 s |
+| Mode | File | Time | CPU time |
+| --- | --- | ---: | ---: |
+| Default | inline | 0.72 s | 0.74 s |
+| `BackgroundDecompression` | inline | 0.51 s | 0.87 s |
+| Default | shared | 0.79 s | 0.79 s |
+| `BackgroundDecompression` | shared | 0.55 s | 0.92 s |
 
-It saves about 30% of the time when cores are idle, but costs about 20% more CPU. When every core
+With several readers at once on the 10 cores (inline file, one process per reader, each reporting its
+best of three), a read takes 0.76–0.77 s by default and 0.53–0.54 s with it for 4 readers, but
+0.84–0.89 s and 0.92–1.05 s for 10 readers.
+
+It saves about 30% of the time when cores are idle, but costs 15 to 20% more CPU. When every core
 is busy, as on a server reading many uploads at once, it makes the total slower. That is why it is
 off by default. Each open worksheet holds 1 MiB of buffers (four 256 KiB chunks) while it is on.
 

@@ -1,0 +1,105 @@
+{
+  "id": "python-read",
+  "language": "python",
+  "group": "Reading",
+  "title": "Python reading: 100,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, plus a header row, saved with a shared string table as Excel does (5.5 MB file)",
+  "method": "benchmarks/read_bench.py. Every reader runs in its own process; peak RSS covers the whole process (Python, modules and native memory); imports are not timed. All readers return the same non-empty cells.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Python 3.13"
+  },
+  "versions": [
+    "openpyxl 3.1.5",
+    "python-calamine 0.9.1",
+    "fastexcel 0.21.0",
+    "pandas 3.1.1",
+    "polars 2.1.0"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rss",
+      "label": "Peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel iter_rows",
+      "subject": true,
+      "values": {
+        "time": 0.13,
+        "rss": 27
+      }
+    },
+    {
+      "label": "python-calamine iter_rows",
+      "subject": false,
+      "values": {
+        "time": 0.45,
+        "rss": 105
+      }
+    },
+    {
+      "label": "openpyxl (read_only)",
+      "subject": false,
+      "values": {
+        "time": 3.39,
+        "rss": 63
+      }
+    },
+    {
+      "label": "Hypaxel read_dataframe (pandas)",
+      "subject": true,
+      "values": {
+        "time": 0.17,
+        "rss": 179
+      }
+    },
+    {
+      "label": "pandas.read_excel (calamine)",
+      "subject": false,
+      "values": {
+        "time": 0.71,
+        "rss": 314
+      }
+    },
+    {
+      "label": "pandas.read_excel (openpyxl)",
+      "subject": false,
+      "values": {
+        "time": 4.16,
+        "rss": 198
+      }
+    },
+    {
+      "label": "Hypaxel read_dataframe (polars)",
+      "subject": true,
+      "values": {
+        "time": 0.18,
+        "rss": 142
+      }
+    },
+    {
+      "label": "fastexcel to_polars",
+      "subject": false,
+      "values": {
+        "time": 0.23,
+        "rss": 187
+      }
+    }
+  ],
+  "notes": [],
+  "reproduce": "python benchmarks/read_bench.py 100000",
+  "sourcePath": "python/benchmarks"
+}

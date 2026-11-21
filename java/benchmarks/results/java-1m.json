@@ -1,0 +1,146 @@
+{
+  "id": "java-1m",
+  "language": "java",
+  "title": "Java: 1,000,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, written to a discarding stream",
+  "method": "Stopwatch runner: mean of 5 runs after 2 warm-ups, bytes allocated by the writing thread per run. Peak RSS from a separate single run in a fresh JVM with default settings that creates the rows on demand; creating the rows without writing anything peaks at 315 MB.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores",
+    "os": "macOS 26.6",
+    "runtime": "OpenJDK 24.0.1"
+  },
+  "versions": [
+    "FastExcel 0.20.2",
+    "Apache POI 6.0.0"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "alloc",
+      "label": "Allocated",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "rss",
+      "label": "Peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    },
+    {
+      "id": "file",
+      "label": "File",
+      "unit": "MB",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel, typed write",
+      "subject": true,
+      "values": {
+        "time": 1.14,
+        "alloc": 0.16,
+        "rss": 326,
+        "file": 38.8
+      }
+    },
+    {
+      "label": "Hypaxel, writeRows with a RowWriter",
+      "subject": true,
+      "values": {
+        "time": 1.13,
+        "alloc": 0.16,
+        "rss": 333,
+        "file": 38.8
+      }
+    },
+    {
+      "label": "Hypaxel, object mapping",
+      "subject": true,
+      "values": {
+        "time": 1.18,
+        "alloc": 0.17,
+        "rss": 327,
+        "file": 38.8
+      }
+    },
+    {
+      "label": "Hypaxel, addRow(Object...)",
+      "subject": true,
+      "values": {
+        "time": 1.18,
+        "alloc": 137,
+        "rss": 467,
+        "file": 38.8
+      }
+    },
+    {
+      "label": "Hypaxel, shared strings",
+      "subject": true,
+      "values": {
+        "time": 1.29,
+        "alloc": 30,
+        "rss": 367,
+        "file": 41
+      }
+    },
+    {
+      "label": "Hypaxel, compression level 6",
+      "subject": true,
+      "values": {
+        "time": 3.09,
+        "alloc": 0.35,
+        "rss": 324,
+        "file": 29.9
+      }
+    },
+    {
+      "label": "FastExcel, compression level 1",
+      "subject": false,
+      "values": {
+        "time": 2.84,
+        "alloc": 2503,
+        "rss": 1073,
+        "file": 69.3
+      }
+    },
+    {
+      "label": "FastExcel, default settings",
+      "subject": false,
+      "values": {
+        "time": 4.11,
+        "alloc": 2487,
+        "rss": 1066,
+        "file": 60.7
+      }
+    },
+    {
+      "label": "Apache POI SXSSF",
+      "subject": false,
+      "values": {
+        "time": 9.5,
+        "alloc": 4648,
+        "rss": 865,
+        "file": 56.9
+      }
+    }
+  ],
+  "notes": [
+    "At the same deflate level Hypaxel is about 2.5x faster than FastExcel. FastExcel's own default is a higher level, which makes its files smaller than at level 1 but still larger than Hypaxel's.",
+    "At level 6 Hypaxel is slower than FastExcel at level 1 and produces a file less than half the size. About 70% of Hypaxel's time at level 1 is spent in the JDK's Deflater, so the compression level decides most of the run time.",
+    "Peak RSS is dominated by the JVM and by garbage between collections, not by what a writer keeps alive. All three writers stream; FastExcel was flushed every 100 rows and POI used a 100-row window.",
+    "Allocation does not grow with the row count for the typed, RowWriter and object-mapping paths. addRow(Object...) boxes its arguments, and shared strings keep every distinct string.",
+    "FastExcel needs a style per date cell to show dates as dates; that call is part of its loop."
+  ],
+  "reproduce": "cd java\n./mvnw -q -DskipTests install\n./mvnw -q -f benchmarks/pom.xml package\n./benchmarks/run.sh 1000000",
+  "sourcePath": "java/benchmarks"
+}

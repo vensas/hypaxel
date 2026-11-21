@@ -40,6 +40,27 @@ Python, Node.js, .NET, Java, Go and PHP).
 - Read benchmarks against each ecosystem's readers: calamine (Rust); openpyxl, python-calamine,
   pandas and fastexcel (Python); Sylvan.Data.Excel, ExcelDataReader and MiniExcel (.NET);
   excelize, xlsxreader and tealeg/xlsx (Go); FastExcel and Apache POI (Java).
+- Benchmark results as JSON: every table in an implementation's Performance section is published
+  in `<implementation>/benchmarks/results/<id>.json`, and the root README's "At a glance" figures
+  in `benchmarks/highlights.json` (format in `benchmarks/README.md`). Memory metrics name what they
+  measure (`allocated`, `peakRss`, `peakHeap`, `wasmMemory`). `scripts/check_benchmarks.py`, run in
+  CI, checks the files against the README tables.
+- Rust: peak memory for writing 1M rows, against rust_xlsxwriter, with a `write_bench` example
+  that runs each case in its own process.
+- README "At a glance": memory figures next to the write and read timings.
+
+### Changed
+
+- Benchmarks: every published figure was re-measured, one implementation after another, on the
+  same Apple M1 Max (macOS 26.6) on an otherwise idle machine. Rust and Python writing were
+  previously measured on a Linux Xeon, and some figures came from runs on a busy machine. Python
+  also gains 1M-row write and read tables. The comparison ratios in the READMEs follow the new
+  figures; notably rust_xlsxwriter is ~8–9x slower than Hypaxel on this machine (was ~11–14x on
+  the Xeon).
+- .NET: the `--read-quick` read benchmark also prints the CPU time of the best run, summed over all
+  threads.
+- .NET README: the background decompression table lists time and CPU time in separate columns;
+  the figures for several concurrent readers moved to the text.
 
 ### Fixed
 

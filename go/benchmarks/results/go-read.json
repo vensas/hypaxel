@@ -1,0 +1,120 @@
+{
+  "id": "go-read",
+  "language": "go",
+  "group": "Reading",
+  "title": "Go: reading 1,000,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean. Written by Hypaxel with a cell reference on every cell, as Excel writes them (about 40% larger files than the other languages' read benchmarks), read cell by cell",
+  "method": "Each reader runs in its own process, best of three, on an otherwise idle machine. Every reader must return the same checksum (rows, cells, sum of numbers, dates as Unix seconds, string bytes, TRUE count), which the harness verifies. The inline-strings file is 70.7 MB, the shared-strings file 71.5 MB.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores",
+    "os": "macOS 26.6",
+    "runtime": "Go 1.27.4"
+  },
+  "versions": [
+    "excelize 2.11.1",
+    "thedatashed/xlsxreader 1.2.8",
+    "tealeg/xlsx 3.3.13"
+  ],
+  "metrics": [
+    {
+      "id": "tInline",
+      "label": "Inline strings",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rssInline",
+      "label": "Peak RSS (inline)",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    },
+    {
+      "id": "tShared",
+      "label": "Shared strings",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rssShared",
+      "label": "Peak RSS (shared)",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "tInline",
+  "rows": [
+    {
+      "label": "Hypaxel, Rows.Next",
+      "subject": true,
+      "values": {
+        "tInline": 1.14,
+        "rssInline": 21,
+        "tShared": 1.18,
+        "rssShared": 74
+      }
+    },
+    {
+      "label": "Hypaxel, Rows.All",
+      "subject": true,
+      "values": {
+        "tInline": 1.14,
+        "rssInline": 21,
+        "tShared": 1.18,
+        "rssShared": 73
+      }
+    },
+    {
+      "label": "excelize, Rows with RawCellValue",
+      "subject": false,
+      "values": {
+        "tInline": 14.72,
+        "rssInline": 22,
+        "tShared": 16.54,
+        "rssShared": 142
+      }
+    },
+    {
+      "label": "excelize, Rows (formatted values)",
+      "subject": false,
+      "values": {
+        "tInline": 66.34,
+        "rssInline": 23,
+        "tShared": 67.41,
+        "rssShared": 142
+      }
+    },
+    {
+      "label": "xlsxreader, ReadRows",
+      "subject": false,
+      "values": {
+        "tInline": 13.79,
+        "rssInline": 22,
+        "tShared": 12.26,
+        "rssShared": 163
+      }
+    },
+    {
+      "label": "tealeg/xlsx, OpenFile",
+      "subject": false,
+      "values": {
+        "tInline": null,
+        "rssInline": null,
+        "tShared": null,
+        "rssShared": null
+      }
+    }
+  ],
+  "notes": [
+    "tealeg/xlsx, which loads the whole sheet, was not run at 1M rows. At 100k rows it takes 2.21 s and peaks at 694 MB, against 0.12 s and 19 MB for Hypaxel.",
+    "Per 100k rows, Hypaxel allocates 5.3 MB in 102k allocations (one string per row holding its inline text) with inline strings, and 15 MB in 1.6k allocations with shared strings (mostly the table itself); excelize allocates 0.97 GB in 20M allocations.",
+    "With GOMAXPROCS=1 there is no core to overlap decompression with, so the reader inflates on the caller's goroutine and takes about 2.0 to 2.1 s (GOMAXPROCS=1 go run ./cmd/bench read 1000000).",
+    "Formatted excelize values only match on cell counts and text, because numbers and dates come back as display text.",
+    "xlsxreader truncates date-times instead of rounding them, so about half of the dates come back one second early; the harness allows for that.",
+    "xlsxreader and tealeg/xlsx 3.3.13 cannot read cells without references. tealeg's ValueOnly option crashes on inline strings, so it runs with default options.",
+    "The worksheet XML tokenizer runs at 470 MB/s, 7x faster than encoding/xml's RawToken (66 MB/s) on the same input (go test -bench Tokenize in go/)."
+  ],
+  "reproduce": "cd go/tests\ngo test -run '^$' -bench Read -benchmem                                  # every reader, 100,000 rows\ngo run ./cmd/bench read 1000000                                          # time and peak RSS",
+  "sourcePath": "go/tests"
+}

@@ -1,0 +1,77 @@
+{
+  "id": "java-read-1m-shared",
+  "language": "java",
+  "group": "Reading",
+  "title": "Java: reading 1,000,000 rows, shared strings",
+  "dataset": "The 1M-row write benchmark dataset (10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean), written by Hypaxel with a shared string table (43.0 MB, 1M distinct strings)",
+  "method": "Each reader streams the first worksheet and visits every cell with its typed accessors; all must produce the same checksum (10,000,000 cells, sum of all numbers and date serials, 42,833,558 characters of text, 500,000 TRUEs). Time: mean of 5 runs after 2 warm-ups in one JVM. Allocated: bytes allocated by the reading thread per run. Peak RSS: a separate single read in a fresh JVM with default settings. The machine was otherwise idle.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores, 64 GB",
+    "os": "macOS 26.6",
+    "runtime": "OpenJDK 24.0.1"
+  },
+  "versions": [
+    "FastExcel reader 0.20.2 (ReadableWorkbook, Aalto StAX)",
+    "Apache POI 6.0.0 (XSSFReader with a SAX handler and ReadOnlySharedStringsTable)"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "alloc",
+      "label": "Allocated",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "rss",
+      "label": "Peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel XlsxReader",
+      "subject": true,
+      "values": {
+        "time": 0.68,
+        "alloc": 74,
+        "rss": 157
+      }
+    },
+    {
+      "label": "FastExcel ReadableWorkbook",
+      "subject": false,
+      "values": {
+        "time": 2.87,
+        "alloc": 4074,
+        "rss": 1013
+      }
+    },
+    {
+      "label": "Apache POI XSSFReader + SAX",
+      "subject": false,
+      "values": {
+        "time": 4.59,
+        "alloc": 7941,
+        "rss": 826
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel creates shared strings once, when the table is loaded. Numbers, booleans and dates allocate nothing.",
+    "All three readers stream with bounded live memory: each completes with -Xmx16m on the inline file and with -Xmx96m on the shared one, whose string table must be held. The RSS differences come from garbage that the JVM lets accumulate between collections under default settings.",
+    "FastExcel did not read number formats (its default); Hypaxel and the POI handler detect date formats.",
+    "About 25% of Hypaxel's time is inflate and CRC-32 verification in the JDK."
+  ],
+  "reproduce": "cd java\n./mvnw -q -DskipTests install\n./mvnw -q -f benchmarks/pom.xml package\n./benchmarks/read.sh 1000000",
+  "sourcePath": "java/benchmarks"
+}

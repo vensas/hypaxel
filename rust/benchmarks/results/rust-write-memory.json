@@ -1,0 +1,82 @@
+{
+  "id": "rust-write-memory",
+  "language": "rust",
+  "title": "Rust: peak memory writing 1,000,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean; each row is generated as it is written, and the workbook is written to a file",
+  "method": "examples/write_bench.rs. Each case runs in its own process; peak RSS from /usr/bin/time -l, median of three runs (all three within 0.1 MB, or 0.6 MB with shared strings). The first row only generates the rows, without writing them; that memory is included in every other figure.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Rust 1.100, --release"
+  },
+  "versions": [
+    "rust_xlsxwriter 0.102"
+  ],
+  "metrics": [
+    {
+      "id": "rss",
+      "label": "Peak RSS (1M)",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "rss",
+  "rows": [
+    {
+      "label": "rows only, nothing written",
+      "subject": false,
+      "values": {
+        "rss": 6.3
+      }
+    },
+    {
+      "label": "Hypaxel (tuples)",
+      "subject": true,
+      "values": {
+        "rss": 7.1
+      }
+    },
+    {
+      "label": "Hypaxel (serde records)",
+      "subject": true,
+      "values": {
+        "rss": 7.2
+      }
+    },
+    {
+      "label": "Hypaxel (shared strings)",
+      "subject": true,
+      "values": {
+        "rss": 127
+      }
+    },
+    {
+      "label": "Hypaxel (deflate level 6)",
+      "subject": true,
+      "values": {
+        "rss": 7.2
+      }
+    },
+    {
+      "label": "rust_xlsxwriter 0.102 (constant memory)",
+      "subject": false,
+      "values": {
+        "rss": 7.8
+      }
+    },
+    {
+      "label": "rust_xlsxwriter 0.102",
+      "subject": false,
+      "values": {
+        "rss": 1504
+      }
+    }
+  ],
+  "notes": [
+    "Hypaxel's memory does not grow with the row count. Shared strings grow with the number of distinct strings, here one per row.",
+    "rust_xlsxwriter's constant-memory mode stays low by writing the worksheet to a temporary file and zipping it on save; its default mode keeps the worksheet in memory."
+  ],
+  "reproduce": "cargo run --release -p hypaxel --example write_bench -- hypaxel 1000000 out.xlsx   # or baseline, hypaxel-serde, hypaxel-shared, hypaxel-level6, rust_xlsxwriter, rust_xlsxwriter-constant-memory",
+  "sourcePath": "rust/hypaxel/examples/write_bench.rs"
+}

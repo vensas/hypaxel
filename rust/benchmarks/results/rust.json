@@ -1,0 +1,97 @@
+{
+  "id": "rust",
+  "language": "rust",
+  "title": "Rust: 100,000 and 1,000,000 rows",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, written to a Vec<u8>",
+  "method": "Criterion for 100k rows; a stopwatch run for 1M rows.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Rust 1.100, --release"
+  },
+  "versions": [
+    "rust_xlsxwriter 0.102"
+  ],
+  "metrics": [
+    {
+      "id": "t100k",
+      "label": "100k rows",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "t1m",
+      "label": "1M rows",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "file",
+      "label": "File (1M)",
+      "unit": "MB",
+      "lowerIsBetter": true
+    }
+  ],
+  "chartMetric": "t100k",
+  "rows": [
+    {
+      "label": "Hypaxel (tuples)",
+      "subject": true,
+      "values": {
+        "t100k": 67,
+        "t1m": 0.69,
+        "file": 50
+      }
+    },
+    {
+      "label": "Hypaxel (serde records)",
+      "subject": true,
+      "values": {
+        "t100k": 70,
+        "t1m": 0.7,
+        "file": 50
+      }
+    },
+    {
+      "label": "Hypaxel (shared strings)",
+      "subject": true,
+      "values": {
+        "t100k": 77,
+        "t1m": 0.87,
+        "file": 53
+      }
+    },
+    {
+      "label": "Hypaxel (deflate level 6)",
+      "subject": true,
+      "values": {
+        "t100k": 185,
+        "t1m": 1.87,
+        "file": 31
+      }
+    },
+    {
+      "label": "rust_xlsxwriter 0.102 (constant memory)",
+      "subject": false,
+      "values": {
+        "t100k": 541,
+        "t1m": 5.3,
+        "file": 57
+      }
+    },
+    {
+      "label": "rust_xlsxwriter 0.102",
+      "subject": false,
+      "values": {
+        "t100k": 551,
+        "t1m": 6.1,
+        "file": 59
+      }
+    }
+  ],
+  "notes": [
+    "About two thirds of the time is deflate (zlib-rs, level 1): without compression 1M rows take 0.25 s. The rest is generating about 330 MB of XML at roughly 25 ns per cell."
+  ],
+  "reproduce": "cargo bench -p hypaxel                          # Criterion, 10k and 100k rows\nHYPAXEL_QUICK=1000000 cargo bench -p hypaxel    # stopwatch run, 1M rows",
+  "sourcePath": "rust/hypaxel/benches"
+}

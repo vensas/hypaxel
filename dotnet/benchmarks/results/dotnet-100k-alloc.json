@@ -1,0 +1,114 @@
+{
+  "id": "dotnet-100k-alloc",
+  "language": "dotnet",
+  "title": ".NET: 100,000 rows, allocated memory",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean, written to a MemoryStream",
+  "method": "BenchmarkDotNet memory diagnoser, ShortRun, in-process toolchain.",
+  "environment": {
+    "hardware": "Apple M1 Max, 10 cores",
+    "os": "macOS 26.6",
+    "runtime": ".NET 8.0.19, 9.0.0, 10.0.13 and 11.0.0"
+  },
+  "versions": [
+    "SpreadCheetah 1.29.0",
+    "ClosedXML 0.105.1",
+    "BenchmarkDotNet 0.15.8"
+  ],
+  "metrics": [
+    {
+      "id": "net8",
+      "label": ".NET 8",
+      "unit": "KB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "net9",
+      "label": ".NET 9",
+      "unit": "KB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "net10",
+      "label": ".NET 10",
+      "unit": "KB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    },
+    {
+      "id": "net11",
+      "label": ".NET 11",
+      "unit": "KB",
+      "lowerIsBetter": true,
+      "memoryKind": "allocated"
+    }
+  ],
+  "chartMetric": "net10",
+  "rows": [
+    {
+      "label": "Hypaxel, typed Write",
+      "subject": true,
+      "values": {
+        "net8": 8.8,
+        "net9": 12,
+        "net10": 13,
+        "net11": 14
+      }
+    },
+    {
+      "label": "Hypaxel, AddRowAsync",
+      "subject": true,
+      "values": {
+        "net8": 8.8,
+        "net9": 12,
+        "net10": 12,
+        "net11": 14
+      }
+    },
+    {
+      "label": "Hypaxel, object mapping",
+      "subject": true,
+      "values": {
+        "net8": 11,
+        "net9": 15,
+        "net10": 15,
+        "net11": 17
+      }
+    },
+    {
+      "label": "Hypaxel, shared strings",
+      "subject": true,
+      "values": {
+        "net8": 10100,
+        "net9": 10100,
+        "net10": 10100,
+        "net11": 10100
+      }
+    },
+    {
+      "label": "SpreadCheetah",
+      "subject": false,
+      "values": {
+        "net8": 11,
+        "net9": 15,
+        "net10": 16,
+        "net11": 18
+      }
+    },
+    {
+      "label": "ClosedXML",
+      "subject": false,
+      "values": {
+        "net8": 1190000,
+        "net9": 1098000,
+        "net10": 1103000,
+        "net11": 1087000
+      }
+    }
+  ],
+  "notes": [
+    "Allocations stay constant as rows grow, except with shared strings, whose table grows with the number of distinct values."
+  ],
+  "sourcePath": "dotnet/benchmarks/Hypaxel.Benchmarks"
+}

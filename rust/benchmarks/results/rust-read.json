@@ -1,0 +1,64 @@
+{
+  "id": "rust-read",
+  "language": "rust",
+  "group": "Reading",
+  "title": "Rust reading: 1,000,000 rows, inline strings",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean; 1M rows with inline strings (49 MB file)",
+  "method": "examples/read_bench.rs. The file is written by Hypaxel and read cell by cell, with a checksum over all values that every reader must match. Each run is in its own process; best of three.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Rust 1.100, --release"
+  },
+  "versions": [
+    "calamine 0.38"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rss",
+      "label": "Peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel XlsxReader",
+      "subject": true,
+      "values": {
+        "time": 0.75,
+        "rss": 7
+      }
+    },
+    {
+      "label": "calamine worksheet_cells_reader",
+      "subject": false,
+      "values": {
+        "time": 2.14,
+        "rss": 7
+      }
+    },
+    {
+      "label": "calamine worksheet_range",
+      "subject": false,
+      "values": {
+        "time": 2.35,
+        "rss": 793
+      }
+    }
+  ],
+  "notes": [
+    "About a quarter of the time is inflate. Common cell shapes and plain shared string items are matched in a single pass over the buffer; anything else goes through the general pull parser.",
+    "Row buffers are reused, so reading allocates nothing per cell."
+  ],
+  "reproduce": "cargo run --release -p hypaxel --example read_bench -- generate data.xlsx 1000000 inline\ncargo run --release -p hypaxel --example read_bench -- hypaxel data.xlsx     # or calamine, calamine-stream",
+  "sourcePath": "rust/hypaxel/examples"
+}

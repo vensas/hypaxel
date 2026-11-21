@@ -1,0 +1,63 @@
+{
+  "id": "rust-read-shared",
+  "language": "rust",
+  "group": "Reading",
+  "title": "Rust reading: 1,000,000 rows, shared strings",
+  "dataset": "10 columns per row: integers, strings (one unique per row), floats, a date/time and a boolean; 1M rows with a shared string table (52 MB file)",
+  "method": "examples/read_bench.rs. The file is written by Hypaxel and read cell by cell, with a checksum over all values that every reader must match. Each run is in its own process; best of three.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Rust 1.100, --release"
+  },
+  "versions": [
+    "calamine 0.38"
+  ],
+  "metrics": [
+    {
+      "id": "time",
+      "label": "Time",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rss",
+      "label": "Peak RSS",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "time",
+  "rows": [
+    {
+      "label": "Hypaxel XlsxReader",
+      "subject": true,
+      "values": {
+        "time": 0.72,
+        "rss": 57
+      }
+    },
+    {
+      "label": "calamine worksheet_cells_reader",
+      "subject": false,
+      "values": {
+        "time": 2.02,
+        "rss": 63
+      }
+    },
+    {
+      "label": "calamine worksheet_range",
+      "subject": false,
+      "values": {
+        "time": 2.23,
+        "rss": 849
+      }
+    }
+  ],
+  "notes": [
+    "What stays in memory is the shared string table plus the current row; in this file the 1M unique strings are in the shared table."
+  ],
+  "reproduce": "cargo run --release -p hypaxel --example read_bench -- generate data.xlsx 1000000 shared\ncargo run --release -p hypaxel --example read_bench -- hypaxel data.xlsx     # or calamine, calamine-stream",
+  "sourcePath": "rust/hypaxel/examples"
+}
