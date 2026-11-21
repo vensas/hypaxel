@@ -265,4 +265,107 @@ export function defineReadSuite(label, api) {
     assert.deepEqual((await openWorkbook(web)).rows().toArray(), expected)
     await assert.rejects(openWorkbook(42), XlsxError)
   })
+
+  test('reads back tables, row properties, column widths and outline settings', async () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('Data', { columnWidths: [12.5, 30], rowOutlineLevels: 2, outlineSummaryAbove: true })
+    sheet.writeRow(['Product', 'Units & more', 'Line\nbreak'])
+    sheet.beginRow({ outlineLevel: 1 })
+    sheet.writeRow(['Widget', 3])
+    sheet.beginRow({ outlineLevel: 2, hidden: true })
+    sheet.writeRow(['Gadget', 5])
+    sheet.beginRow({ outlineLevel: 1, collapsed: true, height: 20.5 })
+    sheet.writeRow(['Gizmo'])
+    sheet.skipRows(2)
+    sheet.writeRow([1, 2])
+    sheet.writeRow([3, 4])
+    const full = {
+      name: 'Orders',
+      columns: ['Product', 'Units & more', 'Line\nbreak'],
+      style: 'TableStyleDark3',
+      headerRow: true,
+      autofilter: true,
+      rowStripes: false,
+      columnStripes: true,
+      firstColumn: true,
+      lastColumn: true,
+    }
+    sheet.addTable(1, 1, 4, 3, full)
+    sheet.addTable(7, 1, 8, 2, { headerRow: false, style: 'none' })
+    writer.addWorksheet('Plain').writeRow(['x'])
+    const bytes = writer.finish()
+
+    const book = openWorkbookSync(bytes)
+    const tables = book.tables('data')
+    assert.deepEqual(tables, book.tables())
+    assert.deepEqual(tables, [
+      { firstRow: 1, firstColumn: 1, lastRow: 4, lastColumn: 3, options: full },
+      {
+        firstRow: 7,
+        firstColumn: 1,
+        lastRow: 8,
+        lastColumn: 2,
+        options: {
+          name: 'Table2',
+          columns: ['Column1', 'Column2'],
+          style: 'none',
+          headerRow: false,
+          autofilter: false,
+          rowStripes: true,
+          columnStripes: false,
+          firstColumn: false,
+          lastColumn: false,
+        },
+      },
+    ])
+    assert.deepEqual(book.tables(1), [])
+    assert.throws(() => book.tables('Missing'), /no worksheet/)
+
+    const rows = book.rows('Data')
+    assert.equal(rows.rowNumber, 0)
+    const layout = rows.layout()
+    assert.deepEqual(layout.columnWidths, [
+      { firstColumn: 1, lastColumn: 1, width: 12.5 },
+      { firstColumn: 2, lastColumn: 2, width: 30 },
+    ])
+    assert.deepEqual([layout.columnWidth(2), layout.columnWidth(3)], [30, undefined])
+    assert.deepEqual([layout.outlineSummaryAbove, layout.rowOutlineLevels], [true, 2])
+    const seen = []
+    for (const row of rows) seen.push([rows.rowNumber, row.length, rows.outlineLevel, rows.hidden, rows.collapsed, rows.height])
+    assert.deepEqual(seen, [
+      [1, 3, 0, false, false, undefined],
+      [2, 2, 1, false, false, undefined],
+      [3, 2, 2, true, false, undefined],
+      [4, 1, 1, false, true, 20.5],
+      [5, 0, 0, false, false, undefined],
+      [6, 0, 0, false, false, undefined],
+      [7, 2, 0, false, false, undefined],
+      [8, 2, 0, false, false, undefined],
+    ])
+    assert.equal(rows.layout(), layout)
+
+    const compact = book.rows('Data', { skipEmpty: true })
+    const numbers = []
+    for await (const row of compact) numbers.push([compact.rowNumber, compact.outlineLevel, row.length])
+    assert.deepEqual(numbers.map((n) => n[0]), [1, 2, 3, 4, 7, 8])
+    assert.equal(numbers[2][1], 2)
+
+    const plain = book.rows('Plain')
+    const plainLayout = await plain.layoutAsync()
+    assert.deepEqual([plainLayout.columnWidths, plainLayout.outlineSummaryAbove, plainLayout.rowOutlineLevels], [[], false, 0])
+    assert.deepEqual(plain.toArray(), [['x']])
+    assert.equal(plain.layout(), plainLayout)
+
+    const closed = book.rows('Data')
+    closed.close()
+    assert.throws(() => closed.layout(), /closed before the sheet layout was read/)
+
+    const copy = new Writer()
+    const target = copy.addWorksheet('Copy')
+    target.writeRow(['Product', 'Units & more', 'Line\nbreak'])
+    for (let i = 0; i < 3; i++) target.writeRow([i, i, i])
+    const [table] = tables
+    target.addTable(table.firstRow, table.firstColumn, table.lastRow, table.lastColumn, table.options)
+    assert.deepEqual(openWorkbookSync(copy.finish()).tables(), [table])
+  })
 }

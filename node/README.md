@@ -175,6 +175,26 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
 - **Time zones:** like the writer, `dates: 'local'` (default) returns the cell's wall-clock time in
   the local time zone and `dates: 'utc'` in UTC, so a `Date` written and read with the same
   setting comes back unchanged.
+- **Tables:** `workbook.tables('Orders')` returns the sheet's Excel tables as
+  `{ firstRow, firstColumn, lastRow, lastColumn, options }`, where `options` holds everything
+  `addTable` takes (`name`, `columns`, `style`, `headerRow`, `autofilter`, `rowStripes`,
+  `columnStripes`, `firstColumn`, `lastColumn`). Tables are stored apart from the rows and are
+  read only when you ask. A custom (non-built-in) table style reads as `'none'`.
+- **Rows and columns:** the object returned by `workbook.rows()` describes the row it returned
+  last: `rowNumber`, `outlineLevel`, `hidden`, `collapsed` and `height` (`undefined` when the row
+  stores no height). `rows.layout()` (or `await rows.layoutAsync()`) gives the sheet's
+  `columnWidths` (`{ firstColumn, lastColumn, width }`, explicit and auto-fitted alike),
+  `columnWidth(column)`, `outlineSummaryAbove` and `rowOutlineLevels`. They can be read before
+  the first row; the layout arrives with the first batch of rows.
+
+  ```ts
+  const [table] = workbook.tables('Orders')                // table.options.name, .columns, .style, ...
+  const rows = workbook.rows('Orders')
+  const width = rows.layout().columnWidth(2)               // undefined = default width
+  for (const row of rows) {
+    const { outlineLevel, hidden } = rows
+  }
+  ```
 - **Records:** `readRecords` / `iterRecords` / `workbook.records()` key each row by the header row
   (`headerRow: 1`). Empty header cells become `column_<n>`, repeated names get the first free suffix of `_2`, `_3`, …, and
   rows without values are skipped. Missing cells are `null`.

@@ -202,6 +202,23 @@ export interface EngineSheetInfo {
   kind: string
 }
 
+/** @internal A table as the engines list it. */
+export interface EngineTable {
+  name: string
+  firstRow: number
+  firstColumn: number
+  lastRow: number
+  lastColumn: number
+  columns: string[]
+  style: string
+  headerRow: boolean
+  autofilter: boolean
+  rowStripes: boolean
+  columnStripes: boolean
+  highlightFirstColumn: boolean
+  highlightLastColumn: boolean
+}
+
 /** @internal The rows of one sheet, in batches decoded by `SheetRows` in `read.ts`. */
 export interface EngineRows {
   /** The next batch, or null or undefined at the end of the sheet. */
@@ -215,6 +232,7 @@ export interface EngineRows {
 export interface EngineWorkbook {
   sheets(): EngineSheetInfo[]
   readonly date1904: boolean
+  tables(index: number): EngineTable[]
   rows(index: number): EngineRows
   close(): void
 }

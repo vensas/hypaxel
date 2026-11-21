@@ -9,7 +9,7 @@ use std::fmt;
 
 mod read;
 
-pub use read::{BATCH_BYTES, ReadConfig, RowStream, SheetEntry, Workbook};
+pub use read::{BATCH_BYTES, ReadConfig, RowStream, SheetEntry, TableEntry, Workbook};
 
 use chrono::DateTime;
 use hypaxel::{

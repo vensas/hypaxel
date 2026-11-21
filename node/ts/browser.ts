@@ -57,12 +57,15 @@ export {
   type WriterOptions,
 } from './core.js'
 export {
+  SheetLayout,
   SheetRecords,
   SheetRows,
   Workbook,
   type BytesSource,
+  type ColumnWidth,
   type ReadOptions,
   type ReadRecord,
+  type ReadTable,
   type ReadValue,
   type RecordsOptions,
   type RowsOptions,
