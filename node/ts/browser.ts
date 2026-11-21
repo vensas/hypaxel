@@ -78,7 +78,7 @@ setMissingEngineMessage(
 )
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 let loaded = false
 let loading: Promise<void> | undefined
 

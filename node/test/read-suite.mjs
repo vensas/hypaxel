@@ -97,6 +97,18 @@ export function defineReadSuite(label, api) {
     })
     const read = openWorkbookSync(toBufferSync(rows, { sharedStrings: true })).rows().toArray()
     assert.deepEqual(read, rows)
+
+    // Within one row, strings that share a slot are sent once and then copied from the earlier cell.
+    const first = Array.from({ length: 4097 }, (_, i) => `s${i}`)
+    const alternating = Array.from({ length: 1000 }, (_, i) => (i % 2 === 0 ? 's0' : 's4096'))
+    const mixed = ['s4096', 's1', 's0', 's4096', 's0', 's1', 's4096']
+    const collide = [first, alternating, mixed, mixed]
+    assert.deepEqual(openWorkbookSync(toBufferSync(collide, { sharedStrings: true })).rows().toArray(), collide)
+
+    const bom = [['\uFEFFcell', '\uFEFF', 'a\uFEFFb']]
+    for (const sharedStrings of [false, true]) {
+      assert.deepEqual(openWorkbookSync(toBufferSync(bom, { sharedStrings })).rows().toArray(), bom)
+    }
   })
 
   test('streams many rows in several batches, synchronously and asynchronously', async () => {

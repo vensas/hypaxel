@@ -14,11 +14,15 @@
 //! - `DURATION` `f64` elapsed milliseconds
 //! - `SHARED_NEW` `u32` shared string index, `u32` byte length, UTF-8 bytes
 //! - `SHARED` `u32` shared string index, for a string sent earlier in the same slot
+//! - `COPY` `u32` 0-based column of an earlier cell in the same row holding the same shared string
 //!
 //! Shared strings go through a direct-mapped cache of [`STRING_SLOTS`] slots that the decoder
 //! mirrors: a string is sent once per slot occupancy, so repeated text (names, categories) is
-//! neither copied nor decoded again, while memory stays bounded.
+//! neither copied nor decoded again, while memory stays bounded. When strings that share a slot
+//! alternate within a row, `COPY` refers back to the earlier cell, so a row never carries the same
+//! shared string twice and its size stays bounded by the shared string table.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -39,6 +43,7 @@ const TAG_DURATION: u8 = 8;
 const TAG_ERROR: u8 = 9;
 const TAG_SHARED_NEW: u8 = 10;
 const TAG_SHARED: u8 = 11;
+const TAG_COPY: u8 = 12;
 
 /// Slots in the shared string cache. Must equal `STRING_SLOTS` in `node/ts/core.ts`.
 pub const STRING_SLOTS: usize = 4096;
@@ -246,6 +251,8 @@ impl Workbook {
         Ok(RowStream {
             state: StreamState::Pending { origin: self.origin.clone(), reader: self.reader.clone(), index: index as usize },
             slots: vec![u32::MAX; STRING_SLOTS].into_boxed_slice(),
+            row_shared: Vec::new(),
+            row_columns: HashMap::new(),
         })
     }
 }
@@ -261,6 +268,11 @@ pub struct RowStream {
     state: StreamState,
     /// The shared string index held by each cache slot, `u32::MAX` when empty.
     slots: Box<[u32]>,
+    /// Shared string index and 0-based column of each shared string cell in the current row.
+    row_shared: Vec<(u32, u32)>,
+    /// First column of each shared string in the current row, built from `row_shared` on the
+    /// first slot collision in the row.
+    row_columns: HashMap<u32, u32>,
 }
 
 fn put_u32(out: &mut Vec<u8>, value: u32) {
@@ -327,6 +339,9 @@ impl RowStream {
             out.push(TAG_ROW);
             put_u32(out, row.number());
             put_u32(out, row.last_column());
+            self.row_shared.clear();
+            self.row_columns.clear();
+            let mut indexed = false;
             let mut column = 1;
             for cell in row.cells() {
                 if cell.column() > column {
@@ -337,15 +352,32 @@ impl RowStream {
                 match cell.value() {
                     Value::String(s) => match cell.shared_string_index() {
                         Some(i) => {
+                            let (index, at) = (i as u32, cell.column() - 1);
                             let slot = &mut self.slots[i % STRING_SLOTS];
-                            if *slot == i as u32 {
+                            if *slot == index {
                                 out.push(TAG_SHARED);
-                                put_u32(out, i as u32);
+                                put_u32(out, index);
                             } else {
-                                *slot = i as u32;
-                                out.push(TAG_SHARED_NEW);
-                                put_u32(out, i as u32);
-                                put_str(out, s);
+                                if !indexed {
+                                    indexed = true;
+                                    for &(earlier, col) in &self.row_shared {
+                                        self.row_columns.entry(earlier).or_insert(col);
+                                    }
+                                }
+                                if let Some(&earlier) = self.row_columns.get(&index) {
+                                    out.push(TAG_COPY);
+                                    put_u32(out, earlier);
+                                } else {
+                                    *slot = index;
+                                    out.push(TAG_SHARED_NEW);
+                                    put_u32(out, index);
+                                    put_str(out, s);
+                                }
+                            }
+                            if indexed {
+                                self.row_columns.entry(index).or_insert(at);
+                            } else {
+                                self.row_shared.push((index, at));
                             }
                         }
                         None => {
@@ -466,6 +498,33 @@ mod tests {
         assert_eq!(again, out);
         assert!(deleted.unwrap());
         assert_eq!(last, out);
+    }
+
+    #[test]
+    fn sends_a_shared_string_once_per_row_when_slots_collide() {
+        let long = |c: char| c.to_string().repeat(1000);
+        let options = Options::new().string_storage(StringStorage::Shared);
+        let mut writer = XlsxWriter::with_options(Vec::new(), options);
+        let mut sheet = writer.add_worksheet("Data").unwrap();
+        for i in 0..=STRING_SLOTS {
+            match i {
+                0 => sheet.write(long('a').as_str()),
+                STRING_SLOTS => sheet.write(long('b').as_str()),
+                _ => sheet.write(format!("s{i}").as_str()),
+            };
+        }
+        sheet.end_row().unwrap();
+        for i in 0..2000 {
+            sheet.write(long(if i % 2 == 0 { 'a' } else { 'b' }).as_str());
+        }
+        sheet.end_row().unwrap();
+        let bytes = writer.finish().unwrap();
+
+        let book = Workbook::open_bytes(bytes, &ReadConfig::default()).unwrap();
+        let mut rows = book.rows(0).unwrap();
+        let mut out = Vec::new();
+        while rows.next_batch(&mut out).unwrap() {}
+        assert!(out.len() < 100_000, "{} bytes", out.len());
     }
 
     #[test]

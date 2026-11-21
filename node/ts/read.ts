@@ -62,6 +62,7 @@ const TAG_DURATION = 8
 const TAG_ERROR = 9
 const TAG_SHARED_NEW = 10
 const TAG_SHARED = 11
+const TAG_COPY = 12
 
 /** Must equal `STRING_SLOTS` in `node/engine/src/read.rs`. */
 const STRING_SLOTS = 4096
@@ -173,6 +174,8 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     this.#rows = undefined
     this.#pending = undefined
     this.#batch = new Uint8Array(0)
+    this.#view = new DataView(this.#batch.buffer)
+    this.#strings.fill(undefined as unknown as string)
     this.#position = 0
     if (rows !== undefined && !this.#reading) rows.close()
   }
@@ -267,6 +270,10 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
         }
         case TAG_SHARED:
           row.push(this.#strings[view.getUint32(p, true) % STRING_SLOTS]!)
+          p += 4
+          break
+        case TAG_COPY:
+          row.push(row[view.getUint32(p, true)]!)
           p += 4
           break
         case TAG_TRUE:
