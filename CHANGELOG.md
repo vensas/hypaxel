@@ -51,7 +51,15 @@ Python, Node.js, .NET, Java, Go and PHP).
     request; reading values does not touch them. A custom (non-built-in) style reads as "no
     style", and a table written without a header row reads back without filter buttons.
   - Each row has its outline level (0–7), hidden and collapsed flags and its height (absent when
-    the row stores none). Rows without values are still skipped.
+    the row stores none).
+  - Rows that the file stores without any value (a spacer row with a height, an empty hidden
+    row) are still skipped by default. A new reader option returns them with their number and
+    properties and no cells: Rust `ReadOptions::include_empty_rows`, .NET
+    `XlsxReaderOptions.IncludeEmptyRows`, Go `WithEmptyRows`, Java
+    `ReadOptions.Builder.includeEmptyRows`. Python (`include_empty_rows=`) and Node.js
+    (`includeEmptyRows`) already return rows without values as empty lists; there the option
+    adds their properties and returns such rows after the last value too, and `skip_empty` /
+    `skipEmpty` still drops them.
   - Each worksheet has its column widths (runs of columns, explicit and auto-fitted alike), a
     lookup by column, `outline_summary_above` and the declared row outline levels. They precede
     the rows in the file and are available before the first row is read.
