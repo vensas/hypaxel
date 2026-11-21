@@ -97,7 +97,8 @@ Python, Node.js, .NET, Java, Go and PHP).
   - Go: `TableStyleMedium(2)` is now the zero `TableStyle`, so a table written with it compares
     equal to the table read back.
   - Limits for untrusted input: at most 4,096 tables per sheet, 16,384 columns per table, 64 MiB
-    of table and column names per sheet and 16,384 column ranges per sheet. A table part that a
+    of table and column names per sheet 16,384 column ranges per sheet and 65,536
+    relationships per part (links to external targets do not count). A table part that a
     sheet references several times is read once.
   - Integer attributes (row numbers, outline levels, column ranges) are read as plain digits in
     every implementation; the Rust core no longer accepts a leading `+`.
