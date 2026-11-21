@@ -71,7 +71,6 @@
       "php",
       "php-jit"
     ],
-    "comparisonSuite": "php",
     "value": "~3.9 s",
     "label": "1M rows (~2.9 s with JIT)",
     "comparison": "~11–13x faster than OpenSpout, ~40x faster than PhpSpreadsheet (100k rows)",
