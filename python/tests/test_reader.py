@@ -422,3 +422,13 @@ def test_reads_a_sheet_exported_by_numbers():
             (8, 20.05, ["Item 5", 16, 21]),
         ]
     assert hypaxel.read_rows(path, skip_empty=True)[0] == ["Table 1"]
+
+
+def test_table_names_that_look_like_excel_escapes_round_trip():
+    def fill(wb):
+        ws = wb.add_worksheet("S")
+        ws.write_rows([["a_x0042_"], [1]])
+        ws.add_table(1, 1, 2, 1, name="T_x0041_", columns=["a_x0042_"])
+
+    table = hypaxel.open_workbook(build(fill)).tables()[0]
+    assert (table["name"], table["columns"]) == ("T_x0041_", ["a_x0042_"])

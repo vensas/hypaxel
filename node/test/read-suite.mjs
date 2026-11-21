@@ -660,4 +660,14 @@ export function defineReadSuite(label, api) {
       assert.throws(() => later.toArray(), expected)
     }
   })
+
+  test('round-trips table names that look like excel escapes', () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('S')
+    sheet.writeRow(['a_x0042_'])
+    sheet.writeRow([1])
+    sheet.addTable(1, 1, 2, 1, { name: 'T_x0041_', columns: ['a_x0042_'] })
+    const [table] = openWorkbookSync(writer.finish()).tables()
+    assert.deepEqual([table.options.name, table.options.columns], ['T_x0041_', ['a_x0042_']])
+  })
 }
