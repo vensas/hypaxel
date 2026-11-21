@@ -511,13 +511,18 @@ def read_rows(source: Source, sheet: SheetRef = 0, *, skip_empty: bool = False, 
 
 def _header_names(row: Sequence[Any]) -> list[str]:
     names: list[str] = []
-    seen: dict[str, int] = {}
+    taken: set[str] = set()
+    suffixes: dict[str, int] = {}
     for i, value in enumerate(row, 1):
-        name = f"column_{i}" if value is None or value == "" else str(value)
-        if name in seen:
-            seen[name] += 1
-            name = f"{name}_{seen[name]}"
-        seen.setdefault(name, 1)
+        base = f"column_{i}" if value is None or value == "" else str(value)
+        name = base
+        if name in taken:
+            suffix = suffixes.get(base, 1)
+            while name in taken:
+                suffix += 1
+                name = f"{base}_{suffix}"
+            suffixes[base] = suffix
+        taken.add(name)
         names.append(name)
     return names
 

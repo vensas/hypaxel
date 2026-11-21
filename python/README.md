@@ -87,7 +87,7 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   result. Dates are recognised from the cell's number format, in both date systems; times are
   rounded to the millisecond.
 - **Records:** `iter_records` / `read_records` use a header row (`header_row=1`). Empty header
-  cells become `column_<n>`, repeated names get `_2`, `_3`, ... and rows without values are
+  cells become `column_<n>`, repeated names get the first free suffix of `_2`, `_3`, ... and rows without values are
   skipped.
 - **DataFrames:** `read_dataframe(source, sheet=0, *, header=True, library="pandas")`. polars needs
   one type per column, so a column mixing text and dates arrives as text.
