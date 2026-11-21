@@ -120,6 +120,16 @@
     "memoryKind": "peakRss"
   },
   {
+    "language": "nodejs",
+    "group": "Reading",
+    "suite": "nodejs-read",
+    "value": "~1.6–1.7 s",
+    "label": "1M rows, files with a reference on every cell",
+    "comparison": "~8x faster than ExcelJS's streaming reader, ~13x faster than SheetJS (100k rows)",
+    "memory": "peak 88 MB inline / 148 MB shared",
+    "memoryKind": "peakRss"
+  },
+  {
     "language": "go",
     "group": "Reading",
     "suite": "go-read",

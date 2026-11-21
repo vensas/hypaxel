@@ -1,4 +1,4 @@
-//! Node.js bindings for the hypaxel XLSX writer.
+//! Node.js bindings for the hypaxel XLSX writer and reader.
 //!
 //! The public API lives in `node/ts/`. This module adapts [`hypaxel_js_engine::Engine`], which the
 //! WebAssembly build in `node/wasm` shares, to N-API.
@@ -6,6 +6,8 @@
 use hypaxel_js_engine::{Engine, RowConfig, SheetConfig, StyleConfig, TableConfig, WriterConfig};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+
+mod read;
 
 fn to_napi(e: hypaxel_js_engine::Error) -> Error {
     let status = match e {

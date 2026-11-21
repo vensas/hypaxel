@@ -1,0 +1,105 @@
+{
+  "id": "nodejs-read",
+  "language": "nodejs",
+  "group": "Reading",
+  "title": "Node.js reading: 100,000 and 1,000,000 rows",
+  "dataset": "The write benchmark's 10 columns plus a header row, written by Hypaxel with a shared string table and a reference on every cell, as Excel saves them (9.5 MB and 94 MB files)",
+  "method": "benchmarks/read_bench.mjs. Single runs; each case runs in its own process and reports the non-empty cells it read, and every library returns the same cells. Peak RSS includes Node.js itself, about 81 MB.",
+  "environment": {
+    "hardware": "Apple M1 Max",
+    "os": "macOS 26.6",
+    "runtime": "Node.js 22.23.2"
+  },
+  "versions": [
+    "ExcelJS 4.4.0",
+    "SheetJS 0.20.3"
+  ],
+  "metrics": [
+    {
+      "id": "t100k",
+      "label": "100k rows",
+      "unit": "ms",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rss100k",
+      "label": "Peak RSS (100k)",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    },
+    {
+      "id": "t1m",
+      "label": "1M rows",
+      "unit": "s",
+      "lowerIsBetter": true
+    },
+    {
+      "id": "rss1m",
+      "label": "Peak RSS (1M)",
+      "unit": "MB",
+      "lowerIsBetter": true,
+      "memoryKind": "peakRss"
+    }
+  ],
+  "chartMetric": "t100k",
+  "rows": [
+    {
+      "label": "Hypaxel, rows, sync",
+      "subject": true,
+      "values": {
+        "t100k": 163,
+        "rss100k": 108,
+        "t1m": 1.57,
+        "rss1m": 148
+      }
+    },
+    {
+      "label": "Hypaxel, rows, for await (thread pool)",
+      "subject": true,
+      "values": {
+        "t100k": 168,
+        "rss100k": 107,
+        "t1m": 1.6,
+        "rss1m": 144
+      }
+    },
+    {
+      "label": "Hypaxel, WebAssembly engine, rows",
+      "subject": true,
+      "values": {
+        "t100k": 244,
+        "rss100k": 141,
+        "t1m": 2.25,
+        "rss1m": 355
+      }
+    },
+    {
+      "label": "ExcelJS, streaming reader",
+      "subject": false,
+      "values": {
+        "t100k": 1297,
+        "rss100k": 275,
+        "t1m": 13.05,
+        "rss1m": 595
+      }
+    },
+    {
+      "label": "SheetJS, read and sheet_to_json",
+      "subject": false,
+      "values": {
+        "t100k": 2160,
+        "rss100k": 440,
+        "t1m": null,
+        "rss1m": null
+      }
+    }
+  ],
+  "notes": [
+    "SheetJS reads the whole file into memory and is not run at 1M rows.",
+    "With inline strings instead of a shared string table, Hypaxel's peak RSS stays at 88 MB at both sizes (1.68 s for 1M rows), and ExcelJS takes 12.92 s.",
+    "The WebAssembly row runs the browser build in Node.js; it holds the file in WebAssembly memory as well as in a Buffer."
+  ],
+  "reproduce": "cd node && npm run build && node benchmarks/read_bench.mjs && node benchmarks/read_bench.mjs 1000000",
+  "sourcePath": "node/benchmarks/read_bench.mjs"
+}

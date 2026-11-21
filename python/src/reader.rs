@@ -31,25 +31,67 @@ impl AsRef<[u8]> for SharedBytes {
     }
 }
 
-/// Where the workbook comes from. Each sheet iterator gets its own handle, so several sheets can
+/// A cursor over a file shared with other cursors. Reads are positioned, so each sheet iterator
+/// seeks independently while all of them read the file that was opened, even if its path is later
+/// replaced or deleted.
+struct FileCursor {
+    file: Arc<File>,
+    pos: u64,
+}
+
+impl FileCursor {
+    #[cfg(unix)]
+    fn read_at(&self, buf: &mut [u8]) -> io::Result<usize> {
+        std::os::unix::fs::FileExt::read_at(&*self.file, buf, self.pos)
+    }
+
+    #[cfg(windows)]
+    fn read_at(&self, buf: &mut [u8]) -> io::Result<usize> {
+        std::os::windows::fs::FileExt::seek_read(&*self.file, buf, self.pos)
+    }
+}
+
+impl Read for FileCursor {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.read_at(buf)?;
+        self.pos += n as u64;
+        Ok(n)
+    }
+}
+
+impl Seek for FileCursor {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let (base, offset) = match pos {
+            SeekFrom::Start(n) => (n, 0),
+            SeekFrom::Current(d) => (self.pos, d),
+            SeekFrom::End(d) => (self.file.metadata()?.len(), d),
+        };
+        self.pos = base
+            .checked_add_signed(offset)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before the start of the file"))?;
+        Ok(self.pos)
+    }
+}
+
+/// Where the workbook comes from. Each sheet iterator gets its own cursor, so several sheets can
 /// be read at once.
 #[derive(Clone)]
 enum Origin {
-    Path(PathBuf),
+    File(Arc<File>),
     Bytes(SharedBytes),
 }
 
 enum Source {
-    File(BufReader<File>),
+    File(BufReader<FileCursor>),
     Bytes(Cursor<SharedBytes>),
 }
 
 impl Origin {
-    fn open(&self) -> io::Result<Source> {
-        Ok(match self {
-            Origin::Path(p) => Source::File(BufReader::with_capacity(64 * 1024, File::open(p)?)),
+    fn open(&self) -> Source {
+        match self {
+            Origin::File(f) => Source::File(BufReader::with_capacity(64 * 1024, FileCursor { file: f.clone(), pos: 0 })),
             Origin::Bytes(b) => Source::Bytes(Cursor::new(b.clone())),
-        })
+        }
     }
 }
 
@@ -76,7 +118,7 @@ fn origin_from(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Origin> {
         return Ok(Origin::Bytes(SharedBytes(Arc::from(bytes.as_bytes()))));
     }
     if let Ok(path) = source.extract::<PathBuf>() {
-        return Ok(Origin::Path(path));
+        return Ok(Origin::File(Arc::new(File::open(path)?)));
     }
     if source.hasattr("read")? {
         let data = source.call_method0("read")?;
@@ -94,7 +136,8 @@ fn origin_from(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<Origin> {
 /// Reads an XLSX workbook. See :func:`hypaxel.open_workbook`.
 #[pyclass(module = "hypaxel")]
 pub(crate) struct Reader {
-    origin: Origin,
+    /// Cleared by `close()`, which releases the file; open row iterators keep their own handle.
+    origin: Option<Origin>,
     reader: Option<XlsxReader<Source>>,
 }
 
@@ -133,9 +176,9 @@ impl Reader {
     fn new(py: Python<'_>, source: &Bound<'_, PyAny>, max_shared_strings_bytes: u64) -> PyResult<Self> {
         let origin = origin_from(py, source)?;
         let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes);
-        let handle = origin.open()?;
+        let handle = origin.open();
         let reader = py.detach(|| XlsxReader::with_options(handle, &options)).map_err(read_err)?;
-        Ok(Reader { origin, reader: Some(reader) })
+        Ok(Reader { origin: Some(origin), reader: Some(reader) })
     }
 
     /// Sheet names in workbook order, including hidden sheets.
@@ -187,7 +230,7 @@ impl Reader {
             Some(s) if !s.is_none() => self.sheet_index(s)?,
             _ => 0,
         };
-        let handle = self.origin.open()?;
+        let handle = self.origin.as_ref().ok_or_else(|| PyValueError::new_err("the reader is closed"))?.open();
         let reader = self.reader()?;
         let rows = py.detach(|| reader.with_source(handle)?.into_worksheet_at(index)).map_err(read_err)?;
         Ok(RowIterator {
@@ -201,6 +244,7 @@ impl Reader {
     }
 
     fn close(&mut self) {
+        self.origin = None;
         self.reader = None;
     }
 

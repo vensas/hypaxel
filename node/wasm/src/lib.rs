@@ -1,9 +1,9 @@
-//! WebAssembly bindings for the hypaxel XLSX writer.
+//! WebAssembly bindings for the hypaxel XLSX writer and reader.
 //!
-//! Exposes the same surface as the N-API `NativeWriter` in `node/src/lib.rs`, so the TypeScript
-//! layer in `node/ts/core.ts` drives either engine unchanged.
+//! Exposes the same surface as the N-API `NativeWriter`, `NativeWorkbook` and `NativeRows` in
+//! `node/src/`, so the TypeScript layer in `node/ts/core.ts` drives either engine unchanged.
 
-use hypaxel_js_engine::Engine;
+use hypaxel_js_engine::{BATCH_BYTES, Engine, ReadConfig, RowStream, Workbook};
 use js_sys::Uint8Array;
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
@@ -106,6 +106,66 @@ impl WasmWriter {
     #[wasm_bindgen(getter)]
     pub fn finished(&self) -> bool {
         self.engine.finished()
+    }
+}
+
+/// An open workbook, read from bytes copied into WebAssembly memory.
+#[wasm_bindgen]
+pub struct WasmWorkbook {
+    inner: Option<Workbook>,
+}
+
+#[wasm_bindgen]
+impl WasmWorkbook {
+    #[wasm_bindgen(js_name = openBytes)]
+    pub fn open_bytes(bytes: Vec<u8>, options_value: JsValue) -> Result<WasmWorkbook, JsError> {
+        let config: ReadConfig = options(options_value)?;
+        Ok(WasmWorkbook { inner: Some(Workbook::open_bytes(bytes, &config).map_err(to_js)?) })
+    }
+
+    fn inner(&self) -> Result<&Workbook, JsError> {
+        self.inner.as_ref().ok_or_else(|| JsError::new("the workbook is closed"))
+    }
+
+    /// `[{ name, visible, kind }]` in workbook order.
+    pub fn sheets(&self) -> Result<JsValue, JsError> {
+        serde_wasm_bindgen::to_value(self.inner()?.sheets()).map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn date1904(&self) -> Result<bool, JsError> {
+        Ok(self.inner()?.date1904())
+    }
+
+    /// Rows of the sheet at a 0-based index.
+    pub fn rows(&self, index: u32) -> Result<WasmRows, JsError> {
+        Ok(WasmRows { inner: self.inner()?.rows(index).map_err(to_js)? })
+    }
+
+    /// Releases the workbook. Rows already obtained keep working.
+    pub fn close(&mut self) {
+        self.inner = None;
+    }
+}
+
+/// One sheet's rows, in batches encoded as described in `node/engine/src/read.rs`.
+#[wasm_bindgen]
+pub struct WasmRows {
+    inner: RowStream,
+}
+
+#[wasm_bindgen]
+impl WasmRows {
+    /// The next batch of rows, or `null` at the end of the sheet.
+    #[wasm_bindgen(js_name = next)]
+    pub fn next_batch(&mut self) -> Result<Option<Uint8Array>, JsError> {
+        let mut out = Vec::with_capacity(BATCH_BYTES + BATCH_BYTES / 4);
+        Ok(self.inner.next_batch(&mut out).map_err(to_js)?.then(|| Uint8Array::from(out.as_slice())))
+    }
+
+    /// Stops reading.
+    pub fn close(&mut self) {
+        self.inner.close();
     }
 }
 

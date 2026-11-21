@@ -39,7 +39,7 @@ Hypaxel writes `.xlsx` files as a forward-only stream: each cell is serialized t
 ## What Exists
 
 - **Writing:** all seven implementations, plus browsers through the Node.js package on WebAssembly.
-- **Reading:** .NET, Rust, Python, Go and Java. Node.js and PHP do not read yet.
+- **Reading:** .NET, Rust, Python, Node.js (and browsers, on WebAssembly), Go and Java. PHP does not read yet.
 - **Web integrations:** ASP.NET Core, axum, FastAPI/Starlette, `net/http`, and stream helpers for Node.js, Java and PHP.
 
 Do not assume a roadmap item exists. Check the code and `CHANGELOG.md` first.

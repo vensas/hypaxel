@@ -1,5 +1,7 @@
 import datetime as dt
 import io
+import os
+import sys
 
 import openpyxl
 import pandas as pd
@@ -121,6 +123,48 @@ def test_records_and_dataframes():
 
     with pytest.raises(ValueError):
         hypaxel.read_dataframe(data, library="duckdb")
+
+
+def test_generated_header_names_never_collide():
+    def fill(wb):
+        ws = wb.add_worksheet("Data")
+        ws.write_row(["name", "name_2", "name", "column_5", None, "name_3", "name"])
+        ws.write_row([1, 2, 3, 4, 5, 6, 7])
+
+    assert hypaxel.read_records(build(fill)) == [
+        {"name": 1, "name_2": 2, "name_3": 3, "column_5": 4, "column_5_2": 5, "name_3_2": 6, "name_4": 7}
+    ]
+
+
+def test_reads_the_opened_file_after_its_path_is_replaced_or_deleted(tmp_path):
+    def fill(wb):
+        ws = wb.add_worksheet("Data")
+        for i in range(1000):
+            ws.write_row([i, f"row {i}"])
+
+    path = tmp_path / "book.xlsx"
+    path.write_bytes(build(fill, shared_strings=True))
+    with hypaxel.open_workbook(path) as book:
+        expected = list(book.rows())
+        replacement = tmp_path / "other.xlsx"
+        replacement.write_bytes(b"not a workbook")
+        replacement.replace(path)
+        assert list(book.rows()) == expected
+        path.unlink()
+        assert list(book.rows()) == expected
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="counts descriptors in /dev/fd")
+def test_close_releases_the_file(tmp_path):
+    path = tmp_path / "book.xlsx"
+    path.write_bytes(build(lambda wb: wb.add_worksheet("Data").write_row([1])))
+    before = len(os.listdir("/dev/fd"))
+    book = hypaxel.open_workbook(path)
+    assert len(os.listdir("/dev/fd")) == before + 1
+    book.close()
+    assert len(os.listdir("/dev/fd")) == before
+    with pytest.raises(ValueError, match="closed"):
+        book.rows()
 
 
 def test_round_trips_a_dataframe():
