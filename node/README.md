@@ -25,9 +25,9 @@ same engine compiled to WebAssembly, with the same API.
   (see [Reading](#reading)).
 - **Typed:** written in TypeScript (strict), ships its own type declarations, works from ESM and CommonJS.
 
-Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md) through [napi-rs](https://napi.rs)
+Hypaxel is built on the [`hypaxel` Rust crate](https://github.com/vensas/hypaxel/blob/main/rust/README.md) through [napi-rs](https://napi.rs)
 (Node.js) and [wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) (WebAssembly).
-The [.NET](../dotnet/README.md) and [Python](../python/README.md) versions use the same design.
+The [.NET](https://github.com/vensas/hypaxel/blob/main/dotnet/README.md) and [Python](https://github.com/vensas/hypaxel/blob/main/python/README.md) versions use the same design.
 
 ## Install
 
@@ -421,4 +421,4 @@ Node.js entry and `ts/browser.ts` the browser entry.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE). Copyright 2026 vensas GmbH.
+Licensed under the [Apache License, Version 2.0](https://github.com/vensas/hypaxel/blob/main/node/LICENSE). Copyright 2026 vensas GmbH.

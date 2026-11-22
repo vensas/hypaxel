@@ -132,13 +132,17 @@ Python, Node.js, .NET, Java, Go and PHP).
   read-only repository with `git subtree split`, fast-forwarding its `main` and creating release
   tags without ever moving a published one (`docs/publishing-php.md`). The Composer archive leaves
   out tests, benchmarks, examples and tool configuration.
-- Releases: one `Release` workflow publishes a release tag to Packagist, to nuget.org and
-  crates.io through Trusted Publishing, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
+- Releases: one `Release` workflow publishes a release tag to Packagist, to nuget.org, crates.io
+  and npm through Trusted Publishing, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
   a module in a subdirectory. It first checks that every manifest declares the tag's version
   (`docs/releasing.md`). The PHP split workflow now only keeps the split repository's `main` in
   step.
 - Rust: `hypaxel` and `hypaxel-axum` can be published to crates.io (they were marked
   `publish = false`). The README lists the `cargo add` commands, and its links work on crates.io.
+- Node.js: the npm package is released with the native addon for all five targets (Linux x64 and
+  arm64 linked against glibc 2.17, macOS x64 and arm64, Windows x64) and the WebAssembly build.
+  Each release installs the packed tarball on every target with Node.js 22 before publishing it.
+  The README's links work on npmjs.com.
 - .NET: both NuGet packages carry the README, a symbol package (`.snupkg`) and a project URL, and CI
   builds are deterministic with Source Link. `Hypaxel.AspNetCore` gains its package README. The
   README lists the `dotnet add package` commands, and its links work on nuget.org.

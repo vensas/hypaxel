@@ -9,9 +9,10 @@ It first checks that every manifest declares the tag's version, then publishes t
 | Packagist | `vensas/hypaxel` | Tag in the generated `vensas/hypaxel-php` repository | [publishing-php.md](publishing-php.md) |
 | nuget.org | `Hypaxel`, `Hypaxel.AspNetCore` (with symbols) | Trusted Publishing, no stored API key | [below](#nugetorg) |
 | crates.io | `hypaxel`, `hypaxel-axum` | Trusted Publishing; the first version with a temporary token | [below](#cratesio) |
+| npm | `hypaxel` (native addon for five targets and WebAssembly, with provenance) | Trusted Publishing; the first version with a temporary token | [below](#npm) |
 | Go module proxy | `github.com/vensas/hypaxel/go` | `go/vX.Y.Z` tag in this repository | none |
 
-PyPI, npm and Maven Central are not published yet.
+PyPI and Maven Central are not published yet.
 
 ## Publishing a release
 
@@ -45,8 +46,8 @@ already exists with a different commit fails the run. Published versions are nev
 replaced; fix a broken release with a new version.
 
 A pre-release tag (`v0.5.0-beta1`) needs no manifest change: the manifests keep `0.5.0`, and the
-suffix is added from the tag where the registry supports it (NuGet `0.5.0-beta1`, Packagist and Go
-read the tag itself). crates.io is skipped for pre-release tags, because Cargo publishes the version
+suffix is added from the tag where the registry supports it (NuGet and npm `0.5.0-beta1`, npm under
+the `next` dist-tag instead of `latest`; Packagist and Go read the tag itself). crates.io is skipped for pre-release tags, because Cargo publishes the version
 in the manifests.
 
 ## nuget.org
@@ -106,6 +107,52 @@ After the first release, for each of `hypaxel` and `hypaxel-axum`:
 
 Then delete the secret (`gh secret delete CARGO_REGISTRY_TOKEN --repo vensas/hypaxel --env
 release`) and revoke the token on crates.io.
+
+## npm
+
+One package carries the native addon for every target in `napi.targets` of `node/package.json`
+(Linux x64 and arm64 with glibc, macOS x64 and arm64, Windows x64) plus the WebAssembly build:
+
+1. `npm-native` builds each addon. Linux addons are built with `--use-napi-cross`, which links
+   against glibc 2.17, so they load on every current distribution; macOS x64 is cross-compiled on
+   an arm64 runner.
+2. `npm-pack` builds the WebAssembly module and TypeScript, runs the test suite against the
+   Linux x64 addon, packs the tarball and checks that every addon is in it.
+3. `npm-smoke` installs that tarball with Node.js 22, the oldest supported version, on Ubuntu
+   22.04 (x64 and arm64), macOS (Intel and Apple silicon) and Windows, and writes and reads a
+   workbook (`node/scripts/smoke.mjs`).
+4. `npm` publishes the tested tarball, unless npm already has the version.
+
+npm sets up a trusted publisher in the settings of a package that exists, and the publisher must
+complete its first publish within two days. So the first version is published with a token:
+
+1. Sign in to [npmjs.com](https://www.npmjs.com) with an account that has two-factor
+   authentication. The package stays unscoped; the npm organization `hypaxel` manages it and
+   reserves the `@hypaxel/` scope for future packages. After the first publish, give a team of
+   that organization read/write access, so the package does not depend on one account:
+   *organization settings → Teams → Packages → + Add Existing Package*, or
+   `npm access grant read-write hypaxel:<team> hypaxel`.
+2. Create a granular access token under *Access Tokens → Generate New Token*: read and write for
+   all packages (a token limited to existing packages or one scope cannot create `hypaxel`),
+   allowed to bypass two-factor authentication, short expiry.
+3. Store it as the secret `NPM_TOKEN` of the `release` environment:
+
+   ```bash
+   gh secret set NPM_TOKEN --repo vensas/hypaxel --env release
+   ```
+
+After the first release:
+
+1. On npmjs.com, open `hypaxel` → *Settings → Trusted Publisher* → GitHub Actions, with
+   organization `vensas`, repository `hypaxel`, workflow file `release.yml`, environment `release`,
+   and allow `npm publish`.
+2. Under *Settings → Publishing access*, choose "Require two-factor authentication and disallow
+   tokens". Trusted publishing keeps working.
+3. Delete the secret (`gh secret delete NPM_TOKEN --repo vensas/hypaxel --env release`) and the
+   token on npmjs.com.
+
+Packages published through trusted publishing get a provenance statement automatically; the token
+release passes `--provenance` for the same result.
 
 ## Go
 
