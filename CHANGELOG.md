@@ -3,7 +3,7 @@
 All notable changes to Hypaxel are recorded here. Versions apply to every package (Rust crates,
 Python, Node.js, .NET, Java, Go and PHP).
 
-## 0.4.0 (unreleased)
+## 0.4.0 (2026-11-22)
 
 ### Added
 
@@ -132,6 +132,27 @@ Python, Node.js, .NET, Java, Go and PHP).
   read-only repository with `git subtree split`, fast-forwarding its `main` and creating release
   tags without ever moving a published one (`docs/publishing-php.md`). The Composer archive leaves
   out tests, benchmarks, examples and tool configuration.
+- Releases: one `Release` workflow publishes a release tag to Packagist, to nuget.org, crates.io,
+  npm and PyPI through Trusted Publishing, to Maven Central, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
+  a module in a subdirectory. It first checks that every manifest declares the tag's version
+  (`docs/releasing.md`). A manual dry run builds, tests and smoke-tests everything without
+  publishing. The PHP split workflow now only keeps the split repository's `main` in step.
+- Rust: `hypaxel` and `hypaxel-axum` can be published to crates.io (they were marked
+  `publish = false`). The README lists the `cargo add` commands, and its links work on crates.io.
+- Node.js: the npm package is released with the native addon for all five targets (Linux x64 and
+  arm64 linked against glibc 2.17, macOS x64 and arm64, Windows x64) and the WebAssembly build.
+  Each release installs the packed tarball on every target with Node.js 22 before publishing it.
+  The README's links work on npmjs.com.
+- Python: releases publish wheels for CPython 3.10–3.14 on Linux x86_64 and aarch64 (manylinux and
+  musllinux), macOS x86_64 and arm64 and Windows x64, plus an sdist that builds from source. Each
+  release installs the wheels with Python 3.10 and 3.14 on every platform before uploading them.
+  The README's links work on PyPI.
+- Java: a `release` Maven profile builds the sources and javadoc jars, signs every artifact and
+  publishes `de.vensas:hypaxel` to Maven Central through the Central Portal. The README's
+  coordinates name the current version.
+- .NET: both NuGet packages carry the README, a symbol package (`.snupkg`) and a project URL, and CI
+  builds are deterministic with Source Link. `Hypaxel.AspNetCore` gains its package README. The
+  README lists the `dotnet add package` commands, and its links work on nuget.org.
 
 ## 0.3.0 (2026-11-20)
 

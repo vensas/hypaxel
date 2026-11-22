@@ -1,19 +1,13 @@
 name: PHP split
 
-# Publishes php/ to the generated repository that Packagist reads (repository variable
-# PHP_SPLIT_REPOSITORY, deploy key secret PHP_SPLIT_DEPLOY_KEY). Pushes to main update its main
-# branch; release tags (vX.Y.Z) are published as the same tag. Path filters do not apply to tag
-# pushes. See docs/publishing-php.md.
+# Keeps the main branch of the generated repository that Packagist reads (repository variable
+# PHP_SPLIT_REPOSITORY, deploy key secret PHP_SPLIT_DEPLOY_KEY) in step with php/ on main.
+# Release tags are published by release.yml. See docs/publishing-php.md.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
     paths: ["php/**", "scripts/split-php.sh", ".github/workflows/php-split.yml"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing release tag to publish (leave empty to sync the main branch)
-        required: false
 
 permissions:
   contents: read
@@ -24,7 +18,7 @@ concurrency:
 
 jobs:
   split:
-    if: github.repository == 'vensas/hypaxel' && vars.PHP_SPLIT_REPOSITORY != ''
+    if: github.repository == 'vensas/hypaxel' && github.ref == 'refs/heads/main' && vars.PHP_SPLIT_REPOSITORY != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,16 +41,7 @@ jobs:
             > "$HOME/.ssh/known_hosts_github"
           echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/php_split -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_github" \
             >> "$GITHUB_ENV"
-      - name: Publish
+      - name: Sync main
         env:
           SPLIT_REMOTE: git@github.com:${{ vars.PHP_SPLIT_REPOSITORY }}.git
-          TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
-        run: |
-          if [ -n "$TAG" ]; then
-            scripts/split-php.sh tag "$TAG"
-          elif [ "$GITHUB_REF" = refs/heads/main ]; then
-            scripts/split-php.sh branch HEAD
-          else
-            echo "::error::Only main is synced; pass a tag to publish a release from $GITHUB_REF_NAME"
-            exit 1
-          fi
+        run: scripts/split-php.sh branch HEAD

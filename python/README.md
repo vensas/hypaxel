@@ -24,12 +24,12 @@ It can stream a download to the browser while your query is still running.
   pandas DataFrame 4–4.5x faster than `pandas.read_excel(engine="calamine")`, and a polars one
   faster than fastexcel. See [Reading](#reading).
 
-Hypaxel is built on the [`hypaxel` Rust crate](../rust/README.md). The [.NET version](../dotnet/README.md) uses the same design.
+Hypaxel is built on the [`hypaxel` Rust crate](https://github.com/vensas/hypaxel/blob/main/rust/README.md). The [.NET version](https://github.com/vensas/hypaxel/blob/main/dotnet/README.md) uses the same design.
 
 ## Install
 
 ```bash
-pip install hypaxel                 # not published yet: build from source, see "Development"
+pip install hypaxel
 pip install "hypaxel[pandas]"       # extras: pandas, polars, starlette
 ```
 

@@ -63,8 +63,7 @@ Rust core. The Node.js package also runs in browsers, on the Rust core compiled 
 
 Timings come from each implementation's own benchmark, all run one after another on the same
 Apple M1 Max (macOS 26.6). The benchmarks differ in method (warm-up, runs, destination), so compare
-each row with its "compared with" library, not the rows with each other. Each README has the full tables, versions and how to reproduce them. None of the packages
-is published to a registry yet.
+each row with its "compared with" library, not the rows with each other. Each README has the full tables, versions and how to reproduce them.
 
 "Peak" is the peak resident memory of the whole process, including the runtime, except for PHP,
 where it is `memory_get_peak_usage()`; Python's write figure is its `tracemalloc` heap peak. .NET and Java report the bytes the writer allocates instead.

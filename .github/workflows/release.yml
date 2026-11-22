@@ -1,0 +1,641 @@
+name: Release
+
+# Publishes a release tag (vX.Y.Z, or vX.Y.Z-beta1) to the package registries. Tag pushes need a
+# workflow without path filters: a tag on a commit that is already on main changes no files, so a
+# path-filtered workflow never starts. A manual run publishes an existing tag, to all registries or
+# to one; a version a registry already has is left alone. Every job that publishes runs in the
+# release environment; builds and tests run outside it.
+#
+# A dry run (manual, with dry_run) builds, tests, packs and smoke-tests everything, validates the
+# PHP split and signs the Maven artifacts, but publishes nothing. Without a tag it uses the commit
+# of the selected branch and the version in its manifests, so no v* tag (which would release) is
+# needed. See docs/releasing.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.4.0 (may be empty for a dry run)
+        required: false
+      registry:
+        description: Where to publish it
+        type: choice
+        options: [all, packagist, nuget, crates, npm, pypi, maven, go]
+        default: all
+      dry_run:
+        description: Build and test everything, publish nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || (github.event_name == 'push' && github.ref_name) || '' }}
+  # The commit to release: the tag, or for a dry run without a tag the selected branch's commit.
+  REF: ${{ (inputs.tag && format('refs/tags/{0}', inputs.tag)) || github.sha }}
+  DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+
+jobs:
+  version:
+    if: github.repository == 'vensas/hypaxel'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prefix: ${{ steps.version.outputs.prefix }}
+      suffix: ${{ steps.version.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        run: |
+          if [ -n "$TAG" ]; then
+            scripts/release-version.sh "$TAG" | tee -a "$GITHUB_OUTPUT"
+          elif [ -n "$DRY_RUN" ]; then
+            scripts/release-version.sh --head | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "::error::A release needs a tag; only a dry run can go without one"
+            exit 1
+          fi
+
+  packagist:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'packagist'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the configuration
+        env:
+          SPLIT_REPOSITORY: ${{ vars.PHP_SPLIT_REPOSITORY }}
+          DEPLOY_KEY: ${{ secrets.PHP_SPLIT_DEPLOY_KEY }}
+        run: |
+          test -n "$SPLIT_REPOSITORY" || { echo "::error::PHP_SPLIT_REPOSITORY is not set"; exit 1; }
+          test -n "$DEPLOY_KEY" || { echo "::error::PHP_SPLIT_DEPLOY_KEY is not set"; exit 1; }
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.4"
+          coverage: none
+          tools: composer:v2
+      - name: Configure the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.PHP_SPLIT_DEPLOY_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/php_split")
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" \
+            > "$HOME/.ssh/known_hosts_github"
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/php_split -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_github" \
+            >> "$GITHUB_ENV"
+      - name: Publish the tag to the split repository
+        env:
+          SPLIT_REMOTE: git@github.com:${{ vars.PHP_SPLIT_REPOSITORY }}.git
+        run: |
+          if [ -n "$TAG" ]; then
+            scripts/split-php.sh tag "$TAG"
+          else
+            scripts/split-php.sh branch "$REF"
+          fi
+
+  nuget-pack:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'nuget'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dotnet
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+            11.0.x
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release -p:VersionSuffix="$VERSION_SUFFIX"
+      - run: dotnet test --no-build -c Release
+      - run: |
+          for project in Hypaxel Hypaxel.AspNetCore; do
+            dotnet pack "src/$project/$project.csproj" --no-build -c Release \
+              -p:VersionSuffix="$VERSION_SUFFIX" -o artifacts
+            test -f "artifacts/$project.$VERSION.nupkg" \
+              || { echo "::error::$project was not packed as version $VERSION"; exit 1; }
+          done
+          ls -l artifacts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget-packages
+          path: dotnet/artifacts/*.*nupkg
+          if-no-files-found: error
+
+  nuget:
+    needs: nuget-pack
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check the configuration
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: test -n "$NUGET_USER" || { echo "::error::NUGET_USER is not set"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nuget-packages
+          path: packages
+      - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "packages/*.nupkg" --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # Cargo publishes the version in the manifests, which carry no pre-release suffix, so a
+  # pre-release tag is not published to crates.io.
+  crates-check:
+    needs: version
+    if: (needs.version.outputs.suffix == '' || inputs.dry_run) && ((inputs.registry || 'all') == 'all' || inputs.registry == 'crates')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      - run: cargo test --workspace --all-features --locked
+      # Packages every crate in dependency order and builds it from the packaged sources.
+      - run: cargo package --workspace --locked
+
+  crates:
+    needs: [version, crates-check]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # crates.io accepts a crate's first version only with an API token; later versions use
+      # Trusted Publishing. Remove the secret once the crates have a trusted publisher.
+      HAS_BOOTSTRAP_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+        if: env.HAS_BOOTSTRAP_TOKEN != 'true'
+        id: auth
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in hypaxel hypaxel-axum; do
+            if curl -fsS "https://index.crates.io/hy/pa/$crate" 2>/dev/null \
+                | jq -e --arg v "$VERSION" 'select(.vers == $v)' >/dev/null; then
+              echo "$crate $VERSION is already on crates.io."
+              continue
+            fi
+            cargo publish -p "$crate" --locked
+          done
+
+  # The npm package carries the native addon for every target in package.json's napi.targets,
+  # plus the WebAssembly build. Linux binaries are linked against glibc 2.17.
+  npm-native:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'npm'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, flags: --use-napi-cross }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-latest, flags: --use-napi-cross }
+          - { target: x86_64-apple-darwin, runner: macos-latest }
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+          - { target: x86_64-pc-windows-msvc, runner: windows-latest }
+    defaults:
+      run:
+        working-directory: node
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - run: npm ci
+      - run: >
+          npx napi build --platform --release --target ${{ matrix.target }} ${{ matrix.flags }}
+          --js binding.js --dts binding.d.ts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-native-${{ matrix.target }}
+          path: node/*.node
+          if-no-files-found: error
+      - if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-binding
+          path: |
+            node/binding.js
+            node/binding.d.ts
+          if-no-files-found: error
+
+  npm-pack:
+    needs: [version, npm-native]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: wasm-bindgen@0.2.130
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: npm-native-*
+          path: node
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-binding
+          path: node
+      - run: npm ci
+      - run: npm run build:wasm
+      - run: npm run build:ts
+      # Runs the test suite against the cross-built linux-x64-gnu binary.
+      - run: npm test
+      - name: Set a pre-release version
+        if: needs.version.outputs.suffix != ''
+        run: npm version "$VERSION" --no-git-tag-version
+      - name: Pack
+        run: |
+          npm pack
+          files=$(tar -tzf "hypaxel-$VERSION.tgz")
+          for f in binding.js lib/browser/wasm/hypaxel_bg.wasm hypaxel.linux-x64-gnu.node \
+              hypaxel.linux-arm64-gnu.node hypaxel.darwin-x64.node hypaxel.darwin-arm64.node \
+              hypaxel.win32-x64-msvc.node; do
+            grep -qx "package/$f" <<<"$files" || { echo "::error::$f is missing from the package"; exit 1; }
+          done
+          echo "$files"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm-package
+          path: node/hypaxel-*.tgz
+          if-no-files-found: error
+
+  # Installs the packed tarball on each target with the oldest supported Node.js. Ubuntu 22.04
+  # (glibc 2.35) checks that the binaries do not need a newer glibc than common servers have.
+  npm-smoke:
+    needs: npm-pack
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm, macos-15-intel, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+          sparse-checkout: node/scripts/smoke.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+          path: package
+      - run: |
+          mkdir smoke && cd smoke
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund ../package/hypaxel-*.tgz
+          cp ../node/scripts/smoke.mjs .
+          node smoke.mjs
+
+  npm:
+    needs: [version, npm-smoke]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      DIST_TAG: ${{ needs.version.outputs.suffix == '' && 'latest' || 'next' }}
+      # npm configures a trusted publisher in the settings of an existing package, so the first
+      # version is published with a token. Remove the secret once the trusted publisher is set.
+      NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@11.21.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm-package
+          path: package
+      - name: Publish to npm
+        run: |
+          if [ "$(npm view "hypaxel@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+            echo "hypaxel $VERSION is already on npm."
+            exit 0
+          fi
+          if [ -n "$NPM_BOOTSTRAP_TOKEN" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_BOOTSTRAP_TOKEN"
+          fi
+          npm publish "package/hypaxel-$VERSION.tgz" --access public --tag "$DIST_TAG" --provenance
+
+  # maturin takes the version from python/Cargo.toml, which carries no pre-release suffix, so a
+  # pre-release tag is not published to PyPI. Wheels are built for every CPython version that
+  # requires-python allows; Linux wheels for manylinux (glibc) and musllinux (Alpine).
+  pypi-wheels:
+    needs: version
+    if: (needs.version.outputs.suffix == '' || inputs.dry_run) && ((inputs.registry || 'all') == 'all' || inputs.registry == 'pypi')
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: manylinux-x86_64, runner: ubuntu-latest, target: x86_64, manylinux: auto }
+          - { name: manylinux-aarch64, runner: ubuntu-latest, target: aarch64, manylinux: auto }
+          - { name: musllinux-x86_64, runner: ubuntu-latest, target: x86_64, manylinux: musllinux_1_2 }
+          - { name: musllinux-aarch64, runner: ubuntu-latest, target: aarch64, manylinux: musllinux_1_2 }
+          - { name: macos-x86_64, runner: macos-15-intel, target: x86_64 }
+          - { name: macos-arm64, runner: macos-latest, target: aarch64 }
+          - { name: windows-x64, runner: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: runner.os != 'Linux'
+        with:
+          python-version: |
+            3.10
+            3.11
+            3.12
+            3.13
+            3.14
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: python
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist --find-interpreter
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pypi-wheels-${{ matrix.name }}
+          path: python/dist/*.whl
+          if-no-files-found: error
+
+  pypi-sdist:
+    needs: version
+    if: (needs.version.outputs.suffix == '' || inputs.dry_run) && ((inputs.registry || 'all') == 'all' || inputs.registry == 'pypi')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          working-directory: python
+          command: sdist
+          args: --out dist
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      # The sdist vendors the hypaxel crate from rust/; building it proves it is complete.
+      - name: Build and test the sdist
+        run: |
+          python -m venv /tmp/sdist-venv
+          /tmp/sdist-venv/bin/pip install python/dist/hypaxel-*.tar.gz
+          cd /tmp && /tmp/sdist-venv/bin/python "$GITHUB_WORKSPACE/python/scripts/smoke.py"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pypi-sdist
+          path: python/dist/*.tar.gz
+          if-no-files-found: error
+
+  # Installs the built wheels with the oldest and newest supported Python on each platform, and on
+  # Alpine in a container. Ubuntu 22.04 checks the manylinux wheels against an older glibc.
+  pypi-smoke:
+    needs: [version, pypi-wheels]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, python: "3.10" }
+          - { runner: ubuntu-22.04, python: "3.14" }
+          - { runner: ubuntu-22.04-arm, python: "3.10" }
+          - { runner: ubuntu-22.04-arm, python: "3.14" }
+          - { runner: macos-15-intel, python: "3.10" }
+          - { runner: macos-latest, python: "3.14" }
+          - { runner: windows-latest, python: "3.10" }
+          - { runner: windows-latest, python: "3.14" }
+          - { runner: ubuntu-latest, alpine: "python:3.14-alpine" }
+          - { runner: ubuntu-24.04-arm, alpine: "python:3.10-alpine" }
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.prefix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+          sparse-checkout: python/scripts/smoke.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: pypi-wheels-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: matrix.python
+        with:
+          python-version: ${{ matrix.python }}
+      - if: matrix.python
+        run: |
+          python -m pip install --no-index --find-links dist "hypaxel==$VERSION"
+          cd "$RUNNER_TEMP" && python "$GITHUB_WORKSPACE/python/scripts/smoke.py"
+      - if: matrix.alpine
+        run: |
+          docker run --rm -v "$PWD:/w:ro" -e VERSION "${{ matrix.alpine }}" sh -c \
+            'pip install --no-index --find-links /w/dist "hypaxel==$VERSION" && cd /tmp && python /w/python/scripts/smoke.py'
+
+  pypi:
+    needs: [pypi-sdist, pypi-smoke]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+      - run: ls -l dist
+      # Trusted Publishing; attestations are generated and uploaded with the files.
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          skip-existing: true
+
+  # Maven Central takes only a user token, no Trusted Publishing. The token and the signing key
+  # are secrets of the release environment and reach only the deploy step.
+  maven:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'maven'
+    runs-on: ubuntu-latest
+    environment: release
+    defaults:
+      run:
+        working-directory: java
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REF }}
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: java/pom.xml
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+      - name: Skip a version Maven Central already has
+        id: published
+        run: |
+          if curl -fsI "https://repo1.maven.org/maven2/de/vensas/hypaxel/$VERSION/hypaxel-$VERSION.pom" >/dev/null; then
+            echo "de.vensas:hypaxel:$VERSION is already on Maven Central."
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set a pre-release version
+        if: steps.published.outputs.done != 'true' && needs.version.outputs.suffix != ''
+        run: >
+          ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.21.0:set
+          -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+      - if: steps.published.outputs.done != 'true' || env.DRY_RUN
+        run: ./mvnw -B verify
+      - name: Publish to Maven Central, or build and sign only in a dry run
+        if: steps.published.outputs.done != 'true' || env.DRY_RUN
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          for name in MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD MAVEN_GPG_KEY MAVEN_GPG_PASSPHRASE; do
+            test -n "${!name}" || { echo "::error::$name is not set"; exit 1; }
+          done
+          if [ -n "$DRY_RUN" ]; then
+            ./mvnw -B -Prelease verify -DskipTests
+          else
+            ./mvnw -B -Prelease deploy -DskipTests
+          fi
+
+  go:
+    needs: version
+    if: ${{ !inputs.dry_run && ((inputs.registry || 'all') == 'all' || inputs.registry == 'go') }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The module lives in go/, so Go resolves its versions from go/vX.Y.Z tags.
+      - name: Tag the Go module
+        run: |
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if existing=$(git rev-parse -q --verify "refs/tags/go/$TAG^{commit}"); then
+            if [ "$existing" != "$commit" ]; then
+              echo "::error::go/$TAG already points to $existing, not $commit; published versions are never moved"
+              exit 1
+            fi
+            echo "go/$TAG already exists."
+          else
+            git tag "go/$TAG" "$commit"
+            git push origin "refs/tags/go/$TAG"
+          fi
+      - name: Make the version known to the Go module proxy
+        run: |
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 15 \
+            "https://proxy.golang.org/github.com/vensas/hypaxel/go/@v/$TAG.info"

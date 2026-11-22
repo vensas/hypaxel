@@ -29,7 +29,7 @@ versions use the same design.
 ## Install
 
 ```bash
-go get github.com/vensas/hypaxel/go        # not published yet: use a replace directive, see "Development"
+go get github.com/vensas/hypaxel/go
 ```
 
 Requires Go 1.26 or later. The package name is `hypaxel`:
@@ -595,10 +595,9 @@ go test -fuzz FuzzReader -fuzztime 1m    # or FuzzSheetXML
 cd tests && go test ./...     # reads every feature back with excelize, compares the readers
 ```
 
-Until the module is published, use it from another module with a replace directive:
+To try local changes from another module, point it at your checkout with a replace directive:
 
 ```
-require github.com/vensas/hypaxel/go v0.0.0
 replace github.com/vensas/hypaxel/go => /path/to/hypaxel/go
 ```
 

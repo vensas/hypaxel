@@ -20,7 +20,7 @@ you write it and compressed straight into the output, so memory stays flat wheth
 > Status: **Milestone 1 — creating Excel files**, plus a **streaming reader** (`XlsxReader`, see [Reading](#reading)).
 > Editing existing workbooks is planned for a later milestone (see roadmap).
 
-> **Rust:** a native Rust implementation with the same design lives in [`rust/`](../rust/README.md):
+> **Rust:** a native Rust implementation with the same design lives in [`rust/`](https://github.com/vensas/hypaxel/blob/main/rust/README.md):
 > the `hypaxel` crate (sync `io::Write` + tokio `AsyncWrite`, serde records, chrono dates) and
 > `hypaxel-axum` for streaming downloads from axum.
 
@@ -30,6 +30,11 @@ you write it and compressed straight into the output, so memory stays flat wheth
 | --- | --- |
 | `Hypaxel` | Core writer and streaming reader (`net8.0`, `net9.0`, `net10.0`, `net11.0`), no dependencies |
 | `Hypaxel.AspNetCore` | `IResult` / `IActionResult` helpers for streaming workbooks as HTTP responses |
+
+```bash
+dotnet add package Hypaxel
+dotnet add package Hypaxel.AspNetCore   # for ASP.NET Core
+```
 
 ## Quick start
 
@@ -545,4 +550,4 @@ dotnet run --project samples/Hypaxel.Samples.WebApi -f net10.0   # GET /orders.x
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](../LICENSE). Copyright 2026 vensas GmbH.
+Licensed under the [Apache License, Version 2.0](https://github.com/vensas/hypaxel/blob/main/LICENSE). Copyright 2026 vensas GmbH.

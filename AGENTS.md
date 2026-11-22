@@ -33,7 +33,7 @@ Hypaxel writes `.xlsx` files as a forward-only stream: each cell is serialized t
 | `go/` | Module `github.com/vensas/hypaxel/go`, `hypaxelhttp/`, and `tests/` (nested module with read-back tests and benchmarks) | native |
 | `java/` | Maven project `de.vensas:hypaxel`: `src/`, `benchmarks/` (separate project) | native |
 | `php/` | Composer package `vensas/hypaxel`: `src/`, `tests/`, `benchmarks/`, `examples/` | native |
-| `.github/workflows/` | One workflow per implementation, triggered only by changes to its own code | |
+| `.github/workflows/` | One workflow per implementation, triggered only by changes to its own code; `release.yml` publishes release tags, `php-split.yml` feeds Packagist | |
 | `testdata/` | Workbooks saved by Excel and LibreOffice, read by every reader's tests (origin of each file in `testdata/README.md`); a change runs all reader workflows | |
 | `docs/assets/` | README banner and the script that generates it | |
 
@@ -119,7 +119,8 @@ CI enforces at least 80% line coverage for PHP. Aim for the same in every implem
 
 ## Versioning and Changelog
 
-- All packages share one version. A bump touches `rust/Cargo.toml` (workspace), `python/Cargo.toml`, `node/Cargo.toml`, `node/engine/Cargo.toml`, `node/wasm/Cargo.toml`, `node/package.json`, `dotnet/Directory.Build.props` and `java/pom.xml`. Python takes its version from its `Cargo.toml`; Go and PHP are versioned by tag.
+- All packages share one version. A bump touches `rust/Cargo.toml` (workspace), `python/Cargo.toml`, `node/Cargo.toml`, `node/engine/Cargo.toml`, `node/wasm/Cargo.toml`, `node/package.json`, `dotnet/Directory.Build.props` and `java/pom.xml`. Python takes its version from its `Cargo.toml`; Go (`go/vX.Y.Z`) and PHP are versioned by tag.
+- A release is a pushed `vX.Y.Z` tag; `release.yml` checks the manifests against it and publishes. See `docs/releasing.md`.
 - Record every user-visible change in `CHANGELOG.md` under the unreleased version, naming the affected implementations and public API.
 - Use conventional commits with the implementation as scope, for example `feat(node): ...`.
 - Update the implementation's `README.md` when its public API or benchmark figures change, and the root `README.md` when the cross-language tables change.

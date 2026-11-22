@@ -6,11 +6,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsTrimmable>false</IsTrimmable>
     <Description>High-performance, low-allocation XLSX (Excel) writer and streaming reader for .NET. Writes directly to any Stream, including ASP.NET Core response bodies, and reads rows with bounded memory.</Description>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="Hypaxel.Tests" />
   </ItemGroup>
 
