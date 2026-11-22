@@ -224,7 +224,7 @@ and repeat the error if reading the layout failed.
   thread at a time.
 
 Not read (yet): formula text, styles beyond date detection, merged ranges, comments, hyperlinks
-and other drawing or table parts.
+and other drawing parts.
 
 ## Streaming HTTP responses
 
