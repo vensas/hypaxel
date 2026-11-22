@@ -473,6 +473,10 @@ def test_applies_configured_limits():
         hypaxel.read_rows(data, max_token_bytes=1)
     with pytest.raises(XlsxError, match="max_row_text_bytes"):
         hypaxel.read_rows(data, max_row_text_bytes=199_999)
+    for option in ["max_tables", "max_table_bytes", "max_token_bytes", "max_row_text_bytes"]:
+        for value in [0, -1]:
+            with pytest.raises(ValueError, match=f"{option} must be at least 1"):
+                hypaxel.open_workbook(data, **{option: value})
 
     def fill(wb):
         ws = wb.add_worksheet("S")

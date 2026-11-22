@@ -199,11 +199,23 @@ impl Reader {
         source: &Bound<'_, PyAny>,
         max_shared_strings_bytes: u64,
         include_empty_rows: bool,
-        max_tables: usize,
-        max_table_bytes: usize,
-        max_token_bytes: usize,
-        max_row_text_bytes: usize,
+        max_tables: i64,
+        max_table_bytes: i64,
+        max_token_bytes: i64,
+        max_row_text_bytes: i64,
     ) -> PyResult<Self> {
+        let limit = |value: i64, name: &str| -> PyResult<usize> {
+            if value < 1 {
+                return Err(PyValueError::new_err(format!("{name} must be at least 1")));
+            }
+            Ok(usize::try_from(value).unwrap_or(usize::MAX))
+        };
+        let (max_tables, max_table_bytes, max_token_bytes, max_row_text_bytes) = (
+            limit(max_tables, "max_tables")?,
+            limit(max_table_bytes, "max_table_bytes")?,
+            limit(max_token_bytes, "max_token_bytes")?,
+            limit(max_row_text_bytes, "max_row_text_bytes")?,
+        );
         let origin = origin_from(py, source)?;
         let options = ReadOptions::new()
             .max_shared_strings_bytes(max_shared_strings_bytes)
