@@ -3,6 +3,13 @@
 All notable changes to Hypaxel are recorded here. Versions apply to every package (Rust crates,
 Python, Node.js, .NET, Java, Go and PHP).
 
+## Unreleased
+
+### Changed
+
+- Package metadata (all implementations) links the project website,
+  [hypaxel.libs.vensas.de](https://hypaxel.libs.vensas.de), as the homepage.
+
 ## 0.4.0 (2026-11-22)
 
 ### Added
