@@ -137,6 +137,8 @@ Python, Node.js, .NET, Java, Go and PHP).
   a module in a subdirectory. It first checks that every manifest declares the tag's version
   (`docs/releasing.md`). The PHP split workflow now only keeps the split repository's `main` in
   step.
+- Rust: `hypaxel` and `hypaxel-axum` can be published to crates.io (they were marked
+  `publish = false`). The README lists the `cargo add` commands, and its links work on crates.io.
 - .NET: both NuGet packages carry the README, a symbol package (`.snupkg`) and a project URL, and CI
   builds are deterministic with Source Link. `Hypaxel.AspNetCore` gains its package README. The
   README lists the `dotnet add package` commands, and its links work on nuget.org.

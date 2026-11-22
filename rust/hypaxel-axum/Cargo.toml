@@ -9,7 +9,6 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-publish = false
 
 [dependencies]
 axum = { version = "0.8.9", default-features = false }

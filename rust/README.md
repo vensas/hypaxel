@@ -26,7 +26,7 @@ the HTTP client while your query is still running.
   or hostile files fail with a clear error. See [Reading](#reading).
 - **Safe Rust:** `#![deny(unsafe_code)]`.
 
-> Status: **creating Excel files** (milestone 1) and **streaming reads**. The .NET version lives in [`dotnet/`](../dotnet/README.md).
+> Status: **creating Excel files** (milestone 1) and **streaming reads**. The .NET version lives in [`dotnet/`](https://github.com/vensas/hypaxel/blob/main/dotnet/README.md).
 
 ## Crates
 
@@ -34,6 +34,11 @@ the HTTP client while your query is still running.
 | --- | --- |
 | `hypaxel` | Core writer and reader. Features: `chrono` (default), `serde` (default), `tokio` |
 | `hypaxel-axum` | `Xlsx` response type for axum 0.8 |
+
+```bash
+cargo add hypaxel
+cargo add hypaxel-axum   # for axum
+```
 
 ## Quick start
 
