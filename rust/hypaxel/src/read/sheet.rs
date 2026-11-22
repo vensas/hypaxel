@@ -13,8 +13,6 @@ use super::zip::EntryReader;
 use crate::engine::{MAX_COLUMNS, MAX_ROWS};
 use crate::error::{Error, Result};
 
-/// Largest amount of decoded text one row may hold.
-
 #[derive(Debug, Clone, Copy)]
 enum Raw {
     Shared(u32),
