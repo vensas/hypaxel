@@ -274,7 +274,7 @@ export function defineReadSuite(label, api) {
     sheet.writeRow(['Product', 'Units & more', 'Line\nbreak'])
     sheet.beginRow({ outlineLevel: 1 })
     sheet.writeRow(['Widget', 3])
-    sheet.beginRow({ outlineLevel: 2, hidden: true, visible: false })
+    sheet.beginRow({ outlineLevel: 2, hidden: true })
     sheet.writeRow(['Gadget', 5])
     sheet.beginRow({ outlineLevel: 1, collapsed: true, height: 20.5 })
     sheet.writeRow(['Gizmo'])
@@ -454,7 +454,7 @@ export function defineReadSuite(label, api) {
     sheet.endRow()
     sheet.skipRows(1)
     sheet.writeRow([4])
-    sheet.beginRow({ outlineLevel: 1, hidden: true, visible: false })
+    sheet.beginRow({ outlineLevel: 1, hidden: true })
     sheet.endRow()
     const bytes = writer.finish()
 
