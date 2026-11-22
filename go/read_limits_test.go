@@ -1,6 +1,7 @@
 package hypaxel
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -23,10 +24,25 @@ func TestReadDefaultLimits(t *testing.T) {
 	}
 }
 
+func TestReadLimitOptionsRejectValuesBelowOne(t *testing.T) {
+	data := singleSheet(t, `<worksheet><sheetData/></worksheet>`, "")
+	for name, opt := range map[string]ReadOption{
+		"WithMaxTables":       WithMaxTables(0),
+		"WithMaxTableBytes":   WithMaxTableBytes(-1),
+		"WithMaxTokenBytes":   WithMaxTokenBytes(0),
+		"WithMaxRowTextBytes": WithMaxRowTextBytes(0),
+	} {
+		_, err := NewReader(bytes.NewReader(data), int64(len(data)), opt)
+		wantErr(t, err, ErrInvalidArgument)
+		if err != nil && !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
 func TestReadLimitOptionsClampTheirValues(t *testing.T) {
-	r := openBytes(t, singleSheet(t, `<worksheet><sheetData/></worksheet>`, ""),
-		WithMaxTables(0), WithMaxTableBytes(-1), WithMaxTokenBytes(1), WithMaxRowTextBytes(0))
-	if r.cfg.maxTables != 1 || r.cfg.maxTableBytes != 1 || r.cfg.maxTokenBytes != 64<<10 || r.cfg.maxRowTextBytes != 1 {
+	r := openBytes(t, singleSheet(t, `<worksheet><sheetData/></worksheet>`, ""), WithMaxTokenBytes(1))
+	if r.cfg.maxTokenBytes != 64<<10 {
 		t.Errorf("got %+v", r.cfg)
 	}
 	r = openBytes(t, singleSheet(t, `<worksheet><sheetData/></worksheet>`, ""), WithMaxTokenBytes(1<<40), WithMaxRowTextBytes(1<<40))

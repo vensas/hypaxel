@@ -46,34 +46,54 @@ func WithMaxSharedStringsBytes(n int64) ReadOption {
 }
 
 // WithMaxTables caps the tables that [Reader.TablesAt] reads from one worksheet. The default
-// is 4,096; values below 1 are treated as 1.
+// is 4,096; [NewReader] rejects values below 1 with [ErrInvalidArgument].
 func WithMaxTables(n int) ReadOption {
-	return func(c *readConfig) { c.maxTables = max(n, 1) }
+	return func(c *readConfig) { c.maxTables = max(n, 0) }
 }
 
 // WithMaxTableBytes caps the bytes of table, column and custom style names that
 // [Reader.TablesAt] holds for the tables of one worksheet, counting 32 bytes per column on top
-// of its name. The default is 64 MiB; values below 1 are treated as 1.
+// of its name. The default is 64 MiB; [NewReader] rejects values below 1 with
+// [ErrInvalidArgument].
 func WithMaxTableBytes(n int64) ReadOption {
-	return func(c *readConfig) { c.maxTableBytes = clampInt(n, 1, math.MaxInt) }
+	return func(c *readConfig) { c.maxTableBytes = clampInt(n, 0, math.MaxInt) }
 }
 
 // WithMaxTokenBytes caps a single XML token, such as a tag with its attributes or a run of
-// text, in every part the Reader parses. The default is 16 MiB; values below 64 KiB are treated
-// as 64 KiB, since Excel's cell text alone can approach 100 KB, and values above 2 GiB as 2 GiB.
+// text, in every part the Reader parses. The default is 16 MiB; [NewReader] rejects values below
+// 1 with [ErrInvalidArgument]. Values from 1 to 64 KiB are treated as 64 KiB, since Excel's cell
+// text alone can approach 100 KB, and values above 2 GiB as 2 GiB.
 func WithMaxTokenBytes(n int64) ReadOption {
-	return func(c *readConfig) { c.maxTokenBytes = clampInt(n, minTokenBytes, math.MaxInt32) }
+	return func(c *readConfig) { c.maxTokenBytes = clampInt(n, 0, math.MaxInt32) }
 }
 
 // WithMaxRowTextBytes caps the decoded text that the cells of one row hold, apart from shared
-// strings. The default is 256 MiB; values below 1 are treated as 1, and values above 2 GiB as
-// 2 GiB.
+// strings. The default is 256 MiB; [NewReader] rejects values below 1 with
+// [ErrInvalidArgument], and values above 2 GiB are treated as 2 GiB.
 func WithMaxRowTextBytes(n int64) ReadOption {
-	return func(c *readConfig) { c.maxRowTextBytes = clampInt(n, 1, math.MaxInt32) }
+	return func(c *readConfig) { c.maxRowTextBytes = clampInt(n, 0, math.MaxInt32) }
 }
 
 func clampInt(n, lo, hi int64) int {
 	return int(min(max(n, lo), hi))
+}
+
+func (c *readConfig) validate() error {
+	for _, limit := range []struct {
+		option string
+		value  int
+	}{
+		{"WithMaxTables", c.maxTables},
+		{"WithMaxTableBytes", c.maxTableBytes},
+		{"WithMaxTokenBytes", c.maxTokenBytes},
+		{"WithMaxRowTextBytes", c.maxRowTextBytes},
+	} {
+		if limit.value < 1 {
+			return fmt.Errorf("%w: %s needs a value of at least 1", ErrInvalidArgument, limit.option)
+		}
+	}
+	c.maxTokenBytes = max(c.maxTokenBytes, minTokenBytes)
+	return nil
 }
 
 // WithConcurrentInflate sets whether a worksheet and the shared string table are decompressed
@@ -177,6 +197,9 @@ func NewReader(src io.ReaderAt, size int64, opts ...ReadOption) (*Reader, error)
 	}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 	if size >= int64(len(oleMagic)) {
 		magic := make([]byte, len(oleMagic))
