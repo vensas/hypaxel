@@ -38,12 +38,12 @@ and Scala.
 <dependency>
   <groupId>de.vensas</groupId>
   <artifactId>hypaxel</artifactId>
-  <version>0.4.0</version>
+  <version>0.5.0</version>
 </dependency>
 ```
 
 ```kotlin
-implementation("de.vensas:hypaxel:0.4.0")
+implementation("de.vensas:hypaxel:0.5.0")
 ```
 
 Requires Java 17 or later.
