@@ -537,7 +537,7 @@ export function defineReadSuite(label, api) {
     const bytes = await readFile(new URL('../../testdata/reader/google-sheets.xlsx', import.meta.url))
     const book = openWorkbookSync(bytes)
     assert.deepEqual(book.sheetNames, ['Inventory'])
-    // The file uses a custom table style, which reads as 'none', and has no filter buttons.
+    // The file uses a custom table style and has no filter buttons.
     assert.deepEqual(book.tables(), [
       {
         firstRow: 1,
@@ -547,7 +547,7 @@ export function defineReadSuite(label, api) {
         options: {
           name: 'Table1',
           columns: ['SKU', 'Item', 'Group', 'Vendor', 'Cost', 'Price', 'Opening', 'Sold', 'Closing', 'Reorder', 'Status'],
-          style: 'none',
+          style: 'Inventory-style',
           headerRow: true,
           autofilter: false,
           rowStripes: true,
@@ -669,5 +669,60 @@ export function defineReadSuite(label, api) {
     sheet.addTable(1, 1, 2, 1, { name: 'T_x0041_', columns: ['a_x0042_'] })
     const [table] = openWorkbookSync(writer.finish()).tables()
     assert.deepEqual([table.options.name, table.options.columns], ['T_x0041_', ['a_x0042_']])
+  })
+
+  test('round-trips custom table styles', () => {
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('S')
+    sheet.writeRow(['a', null, 'b'])
+    sheet.writeRow([1, null, 2])
+    sheet.addTable(1, 1, 2, 1, { name: 'Branded', columns: ['a'], style: 'Brand & Co_x0041_' })
+    sheet.addTable(1, 3, 2, 3, { name: 'Builtin', columns: ['b'], style: 'TableStyleLight9' })
+    const tables = openWorkbookSync(writer.finish()).tables()
+    assert.deepEqual(tables.map((t) => t.options.style), ['Brand & Co_x0041_', 'TableStyleLight9'])
+    const bad = new Writer().addWorksheet('S')
+    assert.throws(() => bad.addTable(1, 1, 2, 1, { columns: ['a'], style: 'two\nlines' }), /invalid table style name/)
+  })
+
+  async function sheetPackage(sheetXml) {
+    const zip = new JSZip()
+    zip.file('_rels/.rels', '<Relationships><Relationship Id="rId1" Type="t/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    zip.file('xl/workbook.xml', '<workbook><sheets><sheet name="S" sheetId="1" id="rId1"/></sheets></workbook>')
+    zip.file('xl/_rels/workbook.xml.rels', '<Relationships><Relationship Id="rId1" Type="t/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+    zip.file('xl/worksheets/sheet1.xml', sheetXml)
+    return zip.generateAsync({ type: 'uint8array' })
+  }
+
+  test('reports hidden columns without a width', async () => {
+    const bytes = await sheetPackage(
+      '<worksheet><cols><col min="1" max="1" width="9"/><col min="2" max="3" hidden="1"/><col min="4" max="4" style="1"/></cols><sheetData/></worksheet>',
+    )
+    const layout = openWorkbookSync(bytes).rows().layout()
+    assert.deepEqual(layout.columnWidths, [
+      { firstColumn: 1, lastColumn: 1, width: 9, hidden: false },
+      { firstColumn: 2, lastColumn: 3, width: undefined, hidden: true },
+    ])
+    assert.deepEqual([layout.columnWidth(2), layout.columnHidden(3), layout.columnHidden(4)], [undefined, true, false])
+  })
+
+  test('applies configured limits', async () => {
+    const text = 'x'.repeat(100_000)
+    const cell = `<c t="inlineStr"><is><t>${text}</t></is></c>`
+    const bytes = await sheetPackage(`<worksheet><sheetData><row r="1">${cell}${cell}</row></sheetData></worksheet>`)
+    assert.equal(openWorkbookSync(bytes).rows().toArray()[0].length, 2)
+    assert.throws(() => openWorkbookSync(bytes, { maxTokenBytes: 1 }).rows().toArray(), /maxTokenBytes|max_token_bytes/)
+    assert.throws(() => openWorkbookSync(bytes, { maxRowTextBytes: 199_999 }).rows().toArray(), /max_row_text_bytes/)
+    assert.throws(() => openWorkbookSync(bytes, { maxTables: 0 }), XlsxError)
+
+    const writer = new Writer()
+    const sheet = writer.addWorksheet('S')
+    sheet.writeRow(['a', null, 'b'])
+    sheet.writeRow([1, null, 2])
+    sheet.addTable(1, 1, 2, 1, { columns: ['a'] })
+    sheet.addTable(1, 3, 2, 3, { columns: ['b'] })
+    const tables = writer.finish()
+    assert.equal(openWorkbookSync(tables).tables().length, 2)
+    assert.throws(() => openWorkbookSync(tables, { maxTables: 1 }).tables(), /max_tables/)
+    assert.throws(() => openWorkbookSync(tables, { maxTableBytes: 10 }).tables(), /max_table_bytes/)
   })
 }

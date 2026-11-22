@@ -292,7 +292,7 @@ export function defineSuite(label, api) {
 
     const other = new Writer().addWorksheet('S')
     assert.throws(() => other.addTable(1, 1, 3, 2), /column names/)
-    assert.throws(() => other.addTable(1, 1, 3, 1, { columns: ['a'], style: 'Fancy' }), /table style/)
+    assert.throws(() => other.addTable(1, 1, 3, 1, { columns: ['a'], style: 'two\nlines' }), /invalid table style name/)
     assert.throws(() => other.addTable(1, 1, 3, 1, { columns: ['a'], name: 'A1' }), /invalid table name/)
   })
 

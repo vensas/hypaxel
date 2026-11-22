@@ -28,6 +28,7 @@ import {
   Workbook,
   bytesOf,
   collectBytes,
+  engineOptions,
   iterRecordsOf,
   iterRowsOf,
   openBytes,
@@ -151,7 +152,7 @@ export type SyncWorkbookSource = string | URL | Uint8Array | ArrayBuffer | Array
 function openPath(path: string | URL, options: ReadOptions): Workbook {
   const file = typeof path === 'string' ? path : fileURLToPath(path)
   const native = guard(() =>
-    NativeWorkbook.openPath(file, { maxSharedStringsBytes: options.maxSharedStringsBytes, includeEmptyRows: options.includeEmptyRows }),
+    NativeWorkbook.openPath(file, engineOptions(options)),
   )
   return new Workbook(native, options)
 }
