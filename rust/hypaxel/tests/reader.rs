@@ -1046,6 +1046,13 @@ fn applies_configured_limits() {
     let err = open(&two, ReadOptions::new().max_table_bytes(2 * (1 + 2 * 33 + 26) - 1)).tables_at(0).unwrap_err();
     assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_table_bytes")), "{err}");
 
+    let built_in = sheet_with_table(
+        r#"<table name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns><tableStyleInfo name="TableStyleMedium2"/></table>"#,
+    );
+    assert_eq!(open(&built_in, ReadOptions::new().max_table_bytes(1 + 2 * 33)).tables_at(0).unwrap()[0].style, TableStyle::Medium(2));
+    let err = open(&built_in, ReadOptions::new().max_table_bytes(2 * 33)).tables_at(0).unwrap_err();
+    assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_table_bytes")), "{err}");
+
     let text = "x".repeat(100_000);
     let sheet = single_sheet(
         &format!(

@@ -51,8 +51,10 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>, budget: &mut usize) -> Resu
             }
             (Some(t), b"tableStyleInfo") => {
                 let name = text(&tag, b"name", false).unwrap_or_default();
-                cost = name.len();
                 t.style = TableStyle::from_name(&name);
+                if matches!(t.style, TableStyle::Custom(_)) {
+                    cost = name.len();
+                }
                 t.row_stripes = flag(&tag, b"showRowStripes");
                 t.column_stripes = flag(&tag, b"showColumnStripes");
                 t.first_column_highlight = flag(&tag, b"showFirstColumn");
