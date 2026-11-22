@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 class XmlReaderTest {
     private static XmlReader reader(String xml, int bufferSize) {
-        return new XmlReader(ByteInput.of(xml.getBytes(StandardCharsets.UTF_8)), "test.xml", bufferSize);
+        return new XmlReader(ByteInput.of(xml.getBytes(StandardCharsets.UTF_8)), "test.xml", bufferSize, XmlReader.MAX_TOKEN);
     }
 
     private static String s(XmlReader r, int start, int end) {

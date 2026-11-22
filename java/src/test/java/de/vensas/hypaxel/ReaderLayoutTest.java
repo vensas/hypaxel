@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalDouble;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 /** Reading tables, row properties, column widths and outline settings. */
 class ReaderLayoutTest {
@@ -135,7 +136,7 @@ class ReaderLayoutTest {
         try (XlsxReader reader = XlsxReader.open(xlsx)) {
             List<ExcelTable> tables = reader.tables("S");
             assertEquals(3, tables.size());
-            assertEquals(ExcelTable.builder(2, 2, 10, 4).name("Sales_2024").columns("Line\nbreak", "R&D", "Total").style(TableStyle.NONE)
+            assertEquals(ExcelTable.builder(2, 2, 10, 4).name("Sales_2024").columns("Line\nbreak", "R&D", "Total").style(TableStyle.custom("My Custom Style"))
                     .highlightFirstColumn(true).totalsRow(true).build(), tables.get(1));
             assertTrue(tables.get(1).toString().endsWith(" totalsRow=true"), tables.get(1).toString());
             assertEquals(ExcelTable.builder(5, 6, 5, 6).name("OnlyName").columns("").style(TableStyle.NONE).headerRow(false)
@@ -157,15 +158,61 @@ class ReaderLayoutTest {
     }
 
     @Test
-    void mapsOnlyBuiltInTableStyles() throws IOException {
-        String[][] cases = {{"TableStyleMedium28", "TableStyleMedium28"}, {"TableStyleDark11", "TableStyleDark11"},
-                {" TableStyleLight1 ", "TableStyleLight1"}, {"TableStyleDark12", null}, {"TableStyleMedium", null},
-                {"TableStyleLight0", null}, {"TableStyleLight1x", null}, {"TableStyleFancy3", null}, {"PivotStyleLight16", null}, {"", null}};
-        for (String[] c : cases) {
+    void mapsBuiltInTableStylesAndKeepsCustomNames() throws IOException {
+        Object[][] cases = {{"TableStyleMedium28", TableStyle.medium(28)}, {"TableStyleDark11", TableStyle.dark(11)},
+                {" TableStyleLight1 ", TableStyle.light(1)}, {"TableStyleDark12", TableStyle.custom("TableStyleDark12")},
+                {"TableStyleMedium", TableStyle.custom("TableStyleMedium")}, {"TableStyleLight0", TableStyle.custom("TableStyleLight0")},
+                {"TableStyleLight1x", TableStyle.custom("TableStyleLight1x")}, {" My Style ", TableStyle.custom(" My Style ")},
+                {"PivotStyleLight16", TableStyle.custom("PivotStyleLight16")}, {"R&amp;D_x0041_", TableStyle.custom("R&D_x0041_")},
+                {"", TableStyle.NONE}};
+        for (Object[] c : cases) {
             byte[] xlsx = withTable("<table " + NS + " ref=\"A1:B2\"><tableStyleInfo name=\"" + c[0] + "\"/></table>");
             try (XlsxReader reader = XlsxReader.open(xlsx)) {
-                assertEquals(c[1], reader.tables(0).get(0).style().name(), c[0]);
+                assertEquals(c[1], reader.tables(0).get(0).style(), (String) c[0]);
             }
+        }
+        try (XlsxReader reader = XlsxReader.open(withTable("<table " + NS + " ref=\"A1:B2\"><tableStyleInfo/></table>"))) {
+            assertEquals(TableStyle.NONE, reader.tables(0).get(0).style());
+        }
+        assertEquals(TableStyle.medium(9), TableStyle.fromName("TableStyleMedium9"));
+        assertEquals(TableStyle.NONE, TableStyle.fromName(""));
+        assertEquals(TableStyle.custom("Mine"), TableStyle.fromName("Mine"));
+    }
+
+    @Test
+    void customStyleNamesCountAgainstTheTableBytes() throws IOException {
+        String table = "<table " + NS + " name=\"T\" ref=\"A1:A2\"><tableColumns><tableColumn name=\"a\"/></tableColumns>"
+                + "<tableStyleInfo name=\"%s\"/></table>";
+        ReadOptions options = ReadOptions.builder().maxTableBytes(1 + 1 + 32 + 10).build();
+        try (XlsxReader reader = XlsxReader.open(withTable(String.format(table, "s".repeat(10))), options)) {
+            assertEquals(TableStyle.custom("s".repeat(10)), reader.tables(0).get(0).style());
+        }
+        try (XlsxReader reader = XlsxReader.open(withTable(String.format(table, "s".repeat(11))), options)) {
+            XlsxException e = assertThrows(XlsxException.class, () -> reader.tables(0));
+            assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
+            assertTrue(e.getMessage().contains("ReadOptions.maxTableBytes"), e.getMessage());
+        }
+        try (XlsxReader reader = XlsxReader.open(withTable(String.format(table, "TableStyleMedium9")), ReadOptions.builder().maxTableBytes(34).build())) {
+            assertEquals(TableStyle.medium(9), reader.tables(0).get(0).style());
+        }
+    }
+
+    @Test
+    void reportsHiddenColumnsWithoutAWidth() throws IOException {
+        String sheet = "<worksheet " + NS + "><cols><col min=\"1\" max=\"1\" width=\"12\"/><col min=\"2\" max=\"3\" hidden=\"1\"/>"
+                + "<col min=\"4\" max=\"4\" style=\"1\"/><col min=\"5\" max=\"5\" hidden=\"true\" style=\"2\"/>"
+                + "<col min=\"6\" max=\"6\" hidden=\"0\"/></cols><sheetData/></worksheet>";
+        try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(List.of(new ColumnWidth(1, 1, OptionalDouble.of(12), false), new ColumnWidth(2, 3, OptionalDouble.empty(), true),
+                    new ColumnWidth(5, 5, OptionalDouble.empty(), true)), rows.columnWidths());
+            assertTrue(rows.columnHidden(2));
+            assertTrue(rows.columnHidden(3));
+            assertEquals(OptionalDouble.empty(), rows.columnWidth(2));
+            assertEquals(OptionalDouble.empty(), rows.columnWidth(3));
+            assertFalse(rows.columnHidden(4));
+            assertTrue(rows.columnHidden(5));
+            assertFalse(rows.columnHidden(6));
+            assertEquals(OptionalDouble.of(12), rows.columnWidth(1));
         }
     }
 
@@ -218,6 +265,54 @@ class ReaderLayoutTest {
     }
 
     @Test
+    void readerLimitsAreConfigurable() throws IOException {
+        assertEquals(4096, ReadOptions.DEFAULT.maxTables());
+        assertEquals(64L << 20, ReadOptions.DEFAULT.maxTableBytes());
+        assertEquals(16 << 20, ReadOptions.DEFAULT.maxTokenBytes());
+        assertEquals(256 << 20, ReadOptions.DEFAULT.maxRowTextBytes());
+        for (Executable invalid : new Executable[] {() -> ReadOptions.builder().maxTables(0), () -> ReadOptions.builder().maxTableBytes(0),
+                () -> ReadOptions.builder().maxTokenBytes(0), () -> ReadOptions.builder().maxRowTextBytes(-1)}) {
+            assertEquals(XlsxException.Kind.INVALID_ARGUMENT, assertThrows(XlsxException.class, invalid).kind());
+        }
+
+        byte[] twoTables = singleSheet("<worksheet " + NS + "><sheetData/></worksheet>", "",
+                "xl/worksheets/_rels/sheet1.xml.rels", sheetRels("../tables/table1.xml", "../tables/table2.xml"),
+                "xl/tables/table1.xml", "<table " + NS + " ref=\"A1\"/>", "xl/tables/table2.xml", "<table " + NS + " ref=\"B1\"/>");
+        try (XlsxReader reader = XlsxReader.open(twoTables, ReadOptions.builder().maxTables(2).build())) {
+            assertEquals(2, reader.tables(0).size());
+        }
+        try (XlsxReader reader = XlsxReader.open(twoTables, ReadOptions.builder().maxTables(1).build())) {
+            XlsxException e = assertThrows(XlsxException.class, () -> reader.tables(0));
+            assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
+            assertTrue(e.getMessage().contains("ReadOptions.maxTables"), e.getMessage());
+        }
+
+        String longText = "x".repeat(100_000);
+        String sheet = "<worksheet " + NS + "><sheetData><row r=\"1\"><c t=\"inlineStr\"><is><t>" + longText + "</t></is></c>"
+                + "<c t=\"inlineStr\"><is><t>" + longText + "</t></is></c></row></sheetData></worksheet>";
+        byte[] xlsx = singleSheet(sheet, "");
+        try (XlsxReader reader = XlsxReader.open(xlsx); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(longText, rows.nextRow().getString(2));
+        }
+        try (XlsxReader reader = XlsxReader.open(xlsx, ReadOptions.builder().maxTokenBytes(1).build()); SheetReader rows = reader.worksheet(0)) {
+            XlsxException e = assertThrows(XlsxException.class, rows::nextRow);
+            assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
+            assertTrue(e.getMessage().contains("ReadOptions.maxTokenBytes"), e.getMessage());
+            assertTrue(e.getMessage().contains("65536"), e.getMessage());
+        }
+        try (XlsxReader reader = XlsxReader.open(xlsx, ReadOptions.builder().maxRowTextBytes(150_000).build());
+                SheetReader rows = reader.worksheet(0)) {
+            XlsxException e = assertThrows(XlsxException.class, rows::nextRow);
+            assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
+            assertTrue(e.getMessage().contains("ReadOptions.maxRowTextBytes"), e.getMessage());
+        }
+        try (XlsxReader reader = XlsxReader.open(xlsx, ReadOptions.builder().maxRowTextBytes(200_000).build());
+                SheetReader rows = reader.worksheet(0)) {
+            assertEquals(longText, rows.nextRow().getString(1));
+        }
+    }
+
+    @Test
     void boundsTheMemoryOfASheetsTables() throws IOException {
         String table = "<table " + NS + " name=\"T\" ref=\"A1:B2\"><tableColumns><tableColumn name=\"a\"/><tableColumn name=\"b\"/></tableColumns></table>";
         byte[] repeated = singleSheet("<worksheet " + NS + "><sheetData/></worksheet>", "",
@@ -230,7 +325,7 @@ class ReaderLayoutTest {
         String column = "<tableColumn name=\"" + "n".repeat(4200) + "\"/>";
         XlsxException e = tableError("<table " + NS + " name=\"T\" ref=\"A1:B2\"><tableColumns>" + column.repeat(16384) + "</tableColumns></table>");
         assertEquals(XlsxException.Kind.LIMIT_EXCEEDED, e.kind());
-        assertTrue(e.getMessage().contains("too many names"), e.getMessage());
+        assertTrue(e.getMessage().contains("ReadOptions.maxTableBytes"), e.getMessage());
     }
 
     @Test
@@ -265,7 +360,7 @@ class ReaderLayoutTest {
                 + "<row r=\"1\" outlineLevel=\"4294967295\"><c><v>1</v></c></row>"
                 + "<row r=\"2\" outlineLevel=\"+3\"><c><v>2</v></c></row></sheetData></worksheet>";
         try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
-            assertEquals(List.of(new ColumnWidth(1, 16384, 9, false)), rows.columnWidths());
+            assertEquals(List.of(new ColumnWidth(1, 16384, OptionalDouble.of(9), false)), rows.columnWidths());
             assertEquals(7, rows.rowOutlineLevels());
             assertEquals(7, rows.nextRow().outlineLevel());
             assertEquals(0, rows.nextRow().outlineLevel());
@@ -310,7 +405,7 @@ class ReaderLayoutTest {
             try (SheetReader rows = reader.worksheet("Grouped")) {
                 assertTrue(rows.outlineSummaryAbove());
                 assertEquals(2, rows.rowOutlineLevels());
-                assertEquals(List.of(new ColumnWidth(1, 1, 30, false), new ColumnWidth(3, 3, 12.5, true)), rows.columnWidths());
+                assertEquals(List.of(new ColumnWidth(1, 1, OptionalDouble.of(30), false), new ColumnWidth(3, 3, OptionalDouble.of(12.5), true)), rows.columnWidths());
                 assertFalse(rows.columnHidden(1));
                 assertFalse(rows.columnHidden(2));
                 assertTrue(rows.columnHidden(3));
@@ -393,8 +488,8 @@ class ReaderLayoutTest {
                 + "<row r=\"7\"><c r=\"A7\"><v>7</v></c></row>"
                 + "</sheetData></worksheet>";
         try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
-            assertEquals(List.of(new ColumnWidth(1, 16384, 10.83203125, false), new ColumnWidth(2, 3, 7, true), new ColumnWidth(5, 16384, 10, false)),
-                    rows.columnWidths());
+            assertEquals(List.of(new ColumnWidth(1, 16384, OptionalDouble.of(10.83203125), false), new ColumnWidth(2, 3, OptionalDouble.of(7), true), new ColumnWidth(5, 16384, OptionalDouble.of(10), false),
+                    new ColumnWidth(7, 7, OptionalDouble.empty(), true)), rows.columnWidths());
             assertFalse(rows.columnHidden(1));
             assertFalse(rows.columnHidden(0));
             assertTrue(rows.columnWidths().get(1).hidden());
@@ -634,7 +729,7 @@ class ReaderLayoutTest {
     }
 
     static final List<ColumnWidth> SEED_WIDTHS =
-            List.of(new ColumnWidth(1, 1, 14, false), new ColumnWidth(2, 2, 22.5, false), new ColumnWidth(4, 4, 6, true));
+            List.of(new ColumnWidth(1, 1, OptionalDouble.of(14), false), new ColumnWidth(2, 2, OptionalDouble.of(22.5), false), new ColumnWidth(4, 4, OptionalDouble.of(6), true));
 
     static void assertSeedLayout(byte[] xlsx, ReadOptions options) throws IOException {
         try (XlsxReader reader = XlsxReader.open(xlsx, options); SheetReader rows = reader.worksheet("Orders")) {
@@ -705,8 +800,8 @@ class ReaderLayoutTest {
                 assertFalse(sheet.outlineSummaryAbove());
                 List<ColumnWidth> widths = sheet.columnWidths();
                 assertEquals(11, widths.size());
-                assertEquals(new ColumnWidth(1, 1, 11.6640625, false), widths.get(0));
-                assertEquals(new ColumnWidth(11, 11, 13.1640625, false), widths.get(10));
+                assertEquals(new ColumnWidth(1, 1, OptionalDouble.of(11.6640625), false), widths.get(0));
+                assertEquals(new ColumnWidth(11, 11, OptionalDouble.of(13.1640625), false), widths.get(10));
 
                 int count = 0;
                 Row totals = null;
@@ -743,7 +838,7 @@ class ReaderLayoutTest {
         ExcelTable expected = ExcelTable.builder(1, 1, 903, 11).name("Table1")
                 .columns("SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening",
                         "Sold", "Closing", "Reorder", "Status")
-                .style(TableStyle.NONE).autoFilter(false)
+                .style(TableStyle.custom("Inventory-style")).autoFilter(false)
                 .highlightFirstColumn(true).highlightLastColumn(true)
                 .totalsRow(true).build();
         try (XlsxReader reader = XlsxReader.open(xlsx)) {
@@ -753,8 +848,8 @@ class ReaderLayoutTest {
                 assertFalse(sheet.outlineSummaryAbove());
                 List<ColumnWidth> widths = sheet.columnWidths();
                 assertEquals(12, widths.size());
-                assertEquals(new ColumnWidth(1, 1, 11.63, false), widths.get(0));
-                assertEquals(new ColumnWidth(12, 26, 8.88, false), widths.get(11));
+                assertEquals(new ColumnWidth(1, 1, OptionalDouble.of(11.63), false), widths.get(0));
+                assertEquals(new ColumnWidth(12, 26, OptionalDouble.of(8.88), false), widths.get(11));
                 assertEquals(8.88, sheet.columnWidth(20).orElseThrow());
 
                 int count = 0;
@@ -801,8 +896,8 @@ class ReaderLayoutTest {
             assertEquals(List.of("Table and Chart"), reader.sheetNames());
             assertTrue(reader.tables(0).isEmpty());
             try (SheetReader sheet = reader.worksheet(0)) {
-                assertEquals(List.of(new ColumnWidth(1, 1, 24.6719, false), new ColumnWidth(2, 2, 18.3672, false),
-                        new ColumnWidth(3, 5, 18.7188, false), new ColumnWidth(6, 16384, 27.75, false)), sheet.columnWidths());
+                assertEquals(List.of(new ColumnWidth(1, 1, OptionalDouble.of(24.6719), false), new ColumnWidth(2, 2, OptionalDouble.of(18.3672), false),
+                        new ColumnWidth(3, 5, OptionalDouble.of(18.7188), false), new ColumnWidth(6, 16384, OptionalDouble.of(27.75), false)), sheet.columnWidths());
                 assertFalse(sheet.outlineSummaryAbove());
                 assertEquals(0, sheet.rowOutlineLevels());
 

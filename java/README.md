@@ -147,7 +147,8 @@ try (SheetReader rows = reader.worksheet("Orders")) {
 Tables are stored in their own parts and are read only when `tables` is called; reading rows does
 not touch them. They are returned from top to bottom, then left to right, whatever order the file
 lists them in. A table style that is not one of Excel's built-in styles reads as
-`TableStyle.NONE`. `totalsRow()` tells whether the last row of a table's range is a totals row;
+`TableStyle.custom(name)` with the name the file stores (`isCustom()` is true); a table without a
+style reads as `TableStyle.NONE`. `TableStyle.fromName(name)` applies the same mapping. `totalsRow()` tells whether the last row of a table's range is a totals row;
 such a table can be read but not written, so `addTable` rejects it. Row properties are reported for the rows that are returned, that is rows with at
 least one value. To also get the rows that the file stores without a value (a spacer row with a
 height, an empty hidden row), open the workbook with
@@ -158,7 +159,7 @@ their number and properties. Rows that the file does not store are never returne
 
 | Method | Purpose |
 | --- | --- |
-| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats. `ReadOptions`: `maxSharedStringsBytes` (default 1 GiB), `includeEmptyRows` (default false) |
+| `open(Path \| SeekableByteChannel \| byte[] \| InputStream, ReadOptions?)` | Reads the package structure, sheet list and cell formats. `ReadOptions`: `maxSharedStringsBytes` (default 1 GiB), `maxTables` (per worksheet, default 4,096), `maxTableBytes` (table, column and custom style names per worksheet, default 64 MiB), `maxTokenBytes` (default 16 MiB, at least 64 KiB), `maxRowTextBytes` (default 256 MiB), `includeEmptyRows` (default false) |
 | `sheets()`, `sheetNames()` | Sheets in workbook order: name, `SheetVisibility` (`VISIBLE`, `HIDDEN`, `VERY_HIDDEN`), `SheetKind` (`WORKSHEET`, `CHARTSHEET`, `OTHER`) |
 | `worksheet(name)` | Sheet by name: exact match first, then ignoring case |
 | `worksheet(index)` | Sheet by 0-based position |
@@ -171,8 +172,8 @@ their number and properties. Rows that the file does not store are never returne
 | Method | Purpose |
 | --- | --- |
 | `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back; with `includeEmptyRows`, every row the file stores |
-| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`, `hidden()`) the sheet defines, explicit and auto-fitted, in file order |
-| `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width |
+| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`, `hidden()`) the sheet defines, explicit and auto-fitted, in file order, including hidden columns without a width; `width()` is an `OptionalDouble`, empty when the file stores none |
+| `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width or a hidden column without a width |
 | `columnHidden(column)` | Whether a 1-based column is hidden |
 | `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
 
@@ -210,11 +211,12 @@ and repeat the error if reading the layout failed.
   rows without references, out-of-order cells, rich text, phonetic runs, inline strings, CDATA,
   ISO 8601 dates (`t="d"`) and Excel's `_xHHHH_` escapes.
 - **Safety:** document type declarations are rejected (no entity expansion or external entities),
-  every XML token (16 MiB) and row (16,384 cells, 256 MiB of text) is bounded, ZIP entries must
-  match their declared size and CRC-32, and `ReadOptions.builder().maxSharedStringsBytes(...)`
-  (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
-  64 MiB of table and column names between them, and a table part that is referenced more than
-  once is read once. A part may have at most 65,536 relationships to other parts (external links
+  every XML token (`maxTokenBytes`, 16 MiB) and row (16,384 cells, `maxRowTextBytes`, 256 MiB of
+  text) is bounded, ZIP entries must match their declared size and CRC-32, and
+  `ReadOptions.builder().maxSharedStringsBytes(...)` (default 1 GiB) caps the shared string table.
+  A sheet may have at most `maxTables` tables (4,096) holding `maxTableBytes` (64 MiB) of table,
+  column and custom style names between them, and a table part that is referenced more than once
+  is read once. Exceeding a limit fails with `LIMIT_EXCEEDED` and a message naming the option. A part may have at most 65,536 relationships to other parts (external links
   do not count). Legacy `.xls` files, encrypted workbooks, CSV and
   Word files fail with `XlsxException` of kind `INVALID_FILE`, damaged parts with `MALFORMED` and
   a `part()` such as `xl/worksheets/sheet1.xml`; messages name the part and row. Invalid UTF-8 in
@@ -423,14 +425,16 @@ sheet.addRow("Gadget", 5);
 sheet.addTable(ExcelTable.builder(1, 1, sheet.rowNumber(), 2)
         .name("Orders")                  // optional: Table1, Table2, ... otherwise
         .columns("Product", "Units")     // must match the header row
-        .style(TableStyle.medium(9))     // light(1-21), medium(1-28), dark(1-11) or NONE
+        .style(TableStyle.medium(9))     // light(1-21), medium(1-28), dark(1-11), custom("Name") or NONE
         .build());
 ```
 
 With a header row (the default), `columns` must list the header texts exactly as written, because
 Excel identifies table columns by those names. `headerRow(false)` makes a table without one, whose
 columns are named `Column1`, `Column2`, ... unless you name them. Table names are unique in the
-workbook, ignoring case, and follow Excel's name rules. Tables cannot overlap each other, merged
+workbook, ignoring case, and follow Excel's name rules. `TableStyle.custom(name)` references a
+style the workbook defines (for example in a template); the name is written verbatim and must be
+1 to 255 characters without control characters. Tables cannot overlap each other, merged
 cells or the worksheet auto filter; violations throw an `XlsxException`. The range may include rows
 you have not written yet.
 

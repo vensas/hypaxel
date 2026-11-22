@@ -306,6 +306,52 @@ class LayoutFeaturesTest {
         assertFalse(xml.contains("autoFilter"));
     }
 
+    @Test
+    void writesCustomTableStyleNamesVerbatim() throws Exception {
+        TableStyle custom = TableStyle.custom("Corporate & \"Blue\" <1> _x0041_ \u00e9\ud83d\ude00");
+        assertTrue(custom.isCustom());
+        assertEquals(TableStyle.custom(custom.name()), custom);
+        assertEquals(TableStyle.custom(custom.name()).hashCode(), custom.hashCode());
+        assertEquals("Custom(" + custom.name() + ")", custom.toString());
+        assertFalse(TableStyle.medium(9).isCustom());
+        assertFalse(TableStyle.custom("TableStyleMedium9").equals(TableStyle.medium(9)));
+        assertFalse(TableStyle.custom("A").equals(TableStyle.custom("B")));
+        assertThrows(NullPointerException.class, () -> TableStyle.custom(null));
+
+        byte[] xlsx = Xlsx.write(writer -> {
+            Worksheet sheet = writer.addWorksheet("S");
+            sheet.addTable(ExcelTable.builder(1, 1, 2, 1).columns("a").style(custom).build());
+            sheet.addTable(ExcelTable.builder(1, 3, 2, 3).columns("b").style(TableStyle.custom("TableStyleMedium9")).build());
+            sheet.addTable(ExcelTable.builder(1, 5, 2, 5).columns("c").style(TableStyle.custom("x".repeat(255))).build());
+        });
+        assertTrue(Xlsx.part(xlsx, "xl/tables/table1.xml").contains(
+                "<tableStyleInfo name=\"Corporate &amp; &quot;Blue&quot; &lt;1&gt; _x0041_ \u00e9\ud83d\ude00\""));
+        assertTrue(Xlsx.part(xlsx, "xl/tables/table2.xml").contains("<tableStyleInfo name=\"TableStyleMedium9\""));
+        try (XSSFWorkbook workbook = Xlsx.read(xlsx)) {
+            assertEquals(custom.name(), workbook.getSheetAt(0).getTables().get(0).getStyleName());
+        }
+        try (XlsxReader reader = XlsxReader.open(xlsx)) {
+            List<ExcelTable> tables = reader.tables(0);
+            assertEquals(custom, tables.get(0).style());
+            assertEquals(TableStyle.medium(9), tables.get(1).style());
+            assertEquals(TableStyle.custom("x".repeat(255)), tables.get(2).style());
+        }
+    }
+
+    @Test
+    void rejectsInvalidCustomTableStyleNames() throws IOException {
+        Xlsx.write(writer -> {
+            Worksheet sheet = writer.addWorksheet("S");
+            for (String name : List.of("", "x".repeat(256), "a\tb", "a\nb", "a\rb", "a\u0001b", "a\ufffeb", "a\ud800b", "a\udc00")) {
+                XlsxException e = assertThrows(XlsxException.class,
+                        () -> sheet.addTable(ExcelTable.builder(1, 1, 2, 1).columns("a").style(TableStyle.custom(name)).build()));
+                assertEquals(XlsxException.Kind.INVALID_ARGUMENT, e.kind());
+                assertTrue(e.getMessage().contains("invalid table style name"), e.getMessage());
+            }
+            sheet.addTable(ExcelTable.builder(1, 1, 2, 1).columns("a").style(TableStyle.custom("Fine")).build());
+        });
+    }
+
     // ------------------------------------------------------------------ auto-fit
 
     @Test
