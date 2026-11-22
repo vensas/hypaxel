@@ -2,7 +2,7 @@
 
 use std::io::Read;
 
-use super::xml::{Event, MAX_TOKEN, XmlReader, decode_into};
+use super::xml::{Event, XmlReader, decode_into};
 use crate::error::{Error, Result};
 
 #[derive(Debug, Default)]
@@ -29,7 +29,7 @@ impl SharedStrings {
 
     pub fn parse<S: Read>(xml: &mut XmlReader<S>, max_bytes: u64) -> Result<Self> {
         // Offsets are u32; one more text token must still fit after the limit check.
-        let limit = max_bytes.min(u32::MAX as u64 - MAX_TOKEN as u64) as usize;
+        let limit = max_bytes.min(u32::MAX as u64 - xml.max_token() as u64) as usize;
         let mut sst = SharedStrings::default();
         loop {
             if let Some(text) = xml.scan_shared_string()? {

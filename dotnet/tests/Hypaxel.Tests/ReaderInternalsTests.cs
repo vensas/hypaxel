@@ -201,7 +201,7 @@ public class ReaderInternalsTests
     [Fact]
     public void BoundsTokenSize()
     {
-        var huge = new byte[Utf8XmlReader.MaxToken + 10];
+        var huge = new byte[Utf8XmlReader.DefaultMaxToken + 10];
         huge.AsSpan().Fill((byte)'x');
         "<a>"u8.CopyTo(huge);
         using var reader = Xml(huge);

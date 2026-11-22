@@ -12,6 +12,30 @@ public sealed class XlsxReaderOptions
     /// </remarks>
     public long MaxSharedStringsBytes { get; set; } = 1L << 30;
 
+    /// <summary>Most Excel tables one worksheet may have, for <see cref="XlsxReader.GetTables(int)"/>. Default: 4,096.</summary>
+    public int MaxTables { get; set; } = 4096;
+
+    /// <summary>
+    /// Largest amount of names (UTF-8 bytes) the tables of one worksheet may hold: table names, column names
+    /// and custom style names, plus 32 bytes per column. Default: 64 MiB.
+    /// </summary>
+    public long MaxTableBytes { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Largest single XML token (a tag with its attributes, or a run of text) in any part. Default: 16 MiB.
+    /// </summary>
+    /// <remarks>
+    /// The reader's buffer for a part grows up to this size. Values below 64 KiB are treated as 64 KiB:
+    /// a single cell can hold over 100 KB of XML-escaped text.
+    /// </remarks>
+    public int MaxTokenBytes { get; set; } = 16 * 1024 * 1024;
+
+    /// <summary>
+    /// Largest amount of inline text (bytes of UTF-16, two per character) one row may hold. Default: 256 MiB.
+    /// </summary>
+    /// <remarks>Shared strings do not count; they are limited by <see cref="MaxSharedStringsBytes"/>.</remarks>
+    public long MaxRowTextBytes { get; set; } = 256L * 1024 * 1024;
+
     /// <summary>
     /// Decompresses worksheets and the shared string table on a thread-pool thread, up to four 256 KiB chunks
     /// ahead of the parser, so that inflating and parsing overlap. Default: false.
@@ -43,6 +67,19 @@ public sealed class XlsxReaderOptions
         if (MaxSharedStringsBytes < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(MaxSharedStringsBytes), MaxSharedStringsBytes, "The limit cannot be negative.");
+        }
+
+        Positive(MaxTables, nameof(MaxTables));
+        Positive(MaxTableBytes, nameof(MaxTableBytes));
+        Positive(MaxTokenBytes, nameof(MaxTokenBytes));
+        Positive(MaxRowTextBytes, nameof(MaxRowTextBytes));
+    }
+
+    private static void Positive(long value, string name)
+    {
+        if (value < 1)
+        {
+            throw new ArgumentOutOfRangeException(name, value, "The limit must be at least 1.");
         }
     }
 }

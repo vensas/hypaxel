@@ -164,7 +164,7 @@ sheet.AddTable(new ExcelTable(1, 1, sheet.RowNumber, 2)
 {
     Name = "Orders",                    // optional: Table1, Table2, … otherwise
     Columns = ["Product", "Units"],     // must match the header row
-    Style = TableStyle.Medium(9),       // Light(1–21), Medium(1–28), Dark(1–11) or None
+    Style = TableStyle.Medium(9),       // Light(1–21), Medium(1–28), Dark(1–11), Custom("Name") or None
 });
 ```
 
@@ -172,6 +172,9 @@ With a header row (the default), `Columns` must list the header texts exactly as
 Excel identifies table columns by those names. Table names are unique in the workbook and follow
 Excel's name rules. Tables cannot overlap each other, merged cells or the worksheet auto filter.
 The range may include rows you have not written yet.
+`TableStyle.Custom("Corporate")` references a custom table style by name (1 to 255 characters on one
+line); the workbook must define it, as a template does, or Excel shows the table unformatted.
+`TableStyle.FromName(name)` maps a name to a built-in style when it is one and to a custom style otherwise.
 
 ## Row grouping
 
@@ -251,16 +254,24 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
   without references, out-of-order and duplicate cells (the last one wins), rich text, inline strings,
   phonetic runs (skipped), ISO 8601 dates (`t="d"`), CDATA, CRLF line endings and Excel's `_xHHHH_`
   escapes.
-- **Safety:** DTDs are rejected (no entity expansion), every XML token (16 MiB) and row (16,384
-  cells, 128 Mi characters of text) is bounded, ZIP entries must match their declared size and CRC-32,
-  and `XlsxReaderOptions.MaxSharedStringsBytes` (default 1 GiB) caps the shared string table; lower it
+- **Safety:** DTDs are rejected (no entity expansion), every XML token and row (16,384 cells and a
+  bounded amount of text) is bounded, ZIP entries must match their declared size and CRC-32, and
+  `XlsxReaderOptions.MaxSharedStringsBytes` (default 1 GiB) caps the shared string table; lower it
   for untrusted uploads. Damaged or malicious input throws `XlsxReadException` (or an `IOException`
   from your stream), never another exception type. Its `Kind` is `InvalidFile` (not an `.xlsx`:
   CSV, legacy `.xls`, a password-protected workbook, a Word file), `Malformed` (with the `Part`, and the
-  row in the message), `LimitExceeded` or `Unsupported`. Besides `MaxSharedStringsBytes`, fixed limits
-  apply: a sheet may have 4,096 tables holding 64 MiB of table and column names in total, a table 16,384
-  columns, a sheet 16,384 column ranges, and a part 65,536 relationships to other parts (links to
-  external targets do not count).
+  row in the message), `LimitExceeded` or `Unsupported`; a `LimitExceeded` message names the option to raise. Besides
+  `MaxSharedStringsBytes`, these options set limits (all must be at least 1):
+
+  | Option | Default | Limits |
+  | --- | --- | --- |
+  | `MaxTables` | 4,096 | tables per worksheet |
+  | `MaxTableBytes` | 64 MiB | UTF-8 bytes of table, column and custom style names of one worksheet's tables, plus 32 per column |
+  | `MaxTokenBytes` | 16 MiB | largest XML token (a tag or a run of text); values below 64 KiB count as 64 KiB |
+  | `MaxRowTextBytes` | 256 MiB | inline text of one row, as UTF-16 (two bytes per character) |
+
+  Fixed limits also apply: a table has at most 16,384 columns, a sheet 16,384 column ranges, and a part
+  65,536 relationships to other parts (links to external targets do not count).
 - **Sheets:** `reader.Sheets` lists every sheet with its `Visibility` (`Visible`, `Hidden`,
   `VeryHidden`) and `Kind` (`Worksheet`, `Chartsheet`, `Other`). `OpenWorksheet(name)` matches exactly,
   then ignoring case. Several worksheets of one reader can be open at once on one thread; use one reader
@@ -270,11 +281,13 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
   options. Tables are stored in their own parts and are read only when you ask, so reading values costs
   the same as before. They come back from top to bottom, then left to right, whatever order the file
   lists them in. `ShowAutoFilter` tells whether the file has filter buttons, and a custom
-  (non-built-in) table style reads as `TableStyle.None`. `HasTotalsRow` tells whether the last row of
+  (non-built-in) table style reads as `TableStyle.Custom(name)` with the name the file stores
+  (`IsCustom` is true). `HasTotalsRow` tells whether the last row of
   the range is a totals row; such tables can be read but not written, so `AddTable` rejects them.
 - **Rows and columns:** each `XlsxRow` carries `OutlineLevel`, `Hidden`, `Collapsed` and `Height`
   (null when the row stores no height). `WorksheetReader` has `ColumnWidths` (runs of columns with
-  `FirstColumn`, `LastColumn`, `Width` and `Hidden`, explicit and auto-fitted alike),
+  `FirstColumn`, `LastColumn`, `Width` and `Hidden`, explicit and auto-fitted alike; `Width` is null for
+  a hidden run that stores no width),
   `GetColumnWidth(column)`, `IsColumnHidden(column)`, `OutlineSummaryAbove` and `RowOutlineLevels`; they precede the rows in the file, so they are
   available before the first `Read()`. Rows without values are skipped by default, whatever their
   properties; set `new XlsxReaderOptions { IncludeEmptyRows = true }` to also get the rows the file

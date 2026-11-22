@@ -28,13 +28,9 @@ namespace Hypaxel;
 /// </example>
 public sealed class XlsxReader : IDisposable
 {
-    private const int MaxTables = 4096;
-
     /// <summary>Most relationships to other parts that one part may have. Links to external targets are not kept and do not count.</summary>
     private const int MaxRelationships = 65_536;
 
-    /// <summary>Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes per column on top of its name.</summary>
-    private const long MaxTableText = 64 * 1024 * 1024;
     private const string NotAWorkbook = "The package has no workbook part; it may be a Word or PowerPoint file.";
 
     private readonly Stream _stream;
@@ -195,7 +191,7 @@ public sealed class XlsxReader : IDisposable
         }
 
         var sharedStrings = LoadSharedStrings();
-        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem, _options.IncludeEmptyRows);
+        return new WorksheetReader(info.Name, OpenXml(info.Part, _options.BackgroundDecompression), sharedStrings, _styles, Is1904DateSystem, _options.IncludeEmptyRows, _options.MaxRowTextBytes);
     }
 
     /// <summary>
@@ -213,9 +209,11 @@ public sealed class XlsxReader : IDisposable
     /// <remarks>
     /// Tables live in their own parts, which are read on each call; reading rows does not touch them.
     /// They are returned from top to bottom, then left to right, whatever order the file lists them in.
-    /// A part that the sheet references more than once is read once. A sheet may have at most 4,096
-    /// tables holding 64 MiB of table and column names in total.
-    /// A table style that is not one of Excel's built-in styles is reported as <see cref="TableStyle.None"/>.
+    /// A part that the sheet references more than once is read once. The number of tables and the bytes of
+    /// names they hold are limited by <see cref="XlsxReaderOptions.MaxTables"/> and
+    /// <see cref="XlsxReaderOptions.MaxTableBytes"/>.
+    /// A table style that is not one of Excel's built-in styles is reported as a custom style
+    /// (<see cref="TableStyle.IsCustom"/>) with the name the file stores.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">There is no sheet at this position.</exception>
     /// <exception cref="XlsxReadException">A table part is missing or damaged, or the tables exceed a limit.</exception>
@@ -243,14 +241,14 @@ public sealed class XlsxReader : IDisposable
             }
         }
 
-        if (targets.Count > MaxTables)
+        if (targets.Count > _options.MaxTables)
         {
-            throw XlsxReadException.LimitExceeded(part, $"The sheet has more than {MaxTables} tables.");
+            throw XlsxReadException.LimitExceeded(part, $"The sheet has more than {_options.MaxTables} tables (XlsxReaderOptions.MaxTables).");
         }
 
         var tables = new List<ExcelTable>(targets.Count);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        long budget = MaxTableText;
+        var budget = _options.MaxTableBytes;
         foreach (var target in targets)
         {
             if (!seen.Add(target))
@@ -259,7 +257,7 @@ public sealed class XlsxReader : IDisposable
             }
 
             using var xml = OpenXml(target);
-            tables.Add(TableReader.Parse(xml, ref budget));
+            tables.Add(TableReader.Parse(xml, ref budget, _options.MaxTableBytes));
         }
 
         return [.. tables.OrderBy(t => t.FirstRow).ThenBy(t => t.FirstColumn)];
@@ -306,7 +304,7 @@ public sealed class XlsxReader : IDisposable
     {
         var entry = _directory.Find(part) ?? throw XlsxReadException.Malformed(part, "The part is missing.");
         var stream = ZipDirectory.Open(entry, _stream);
-        return new Utf8XmlReader(background ? new PrefetchStream(stream) : stream, part);
+        return new Utf8XmlReader(background ? new PrefetchStream(stream) : stream, part, maxToken: _options.MaxTokenBytes);
     }
 
     private List<Relationship>? ReadRelationships(string part)

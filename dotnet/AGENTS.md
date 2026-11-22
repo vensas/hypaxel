@@ -10,6 +10,9 @@ Solution: `src/Hypaxel`, `src/Hypaxel.AspNetCore`, `tests/`, `samples/`, `benchm
 Run from `dotnet/`. Targets .NET 8, 9, 10 and 11.
 
 ```bash
+dotnet format --verify-no-changes
 dotnet build -c Release
 dotnet test -c Release
 ```
+
+`dotnet format` follows `.editorconfig`; run `dotnet format` without the flag to fix what it reports.

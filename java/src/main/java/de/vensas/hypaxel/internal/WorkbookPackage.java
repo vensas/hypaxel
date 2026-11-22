@@ -15,12 +15,8 @@ import java.util.Set;
 
 /** The structure of an XLSX package: its parts, sheets, date system and cell formats. */
 public final class WorkbookPackage {
-    /** Most tables read from one worksheet. */
-    static final int MAX_TABLES = 4096;
     /** Most relationships to other parts that one part may have; links to external targets are not kept and do not count. */
     static final int MAX_RELATIONSHIPS = 65_536;
-    /** Most bytes of table and column names held for the tables of one worksheet (see {@link TableParser#parse}). */
-    static final long MAX_TABLE_TEXT = 64L * 1024 * 1024;
 
     private static final String NOT_A_WORKBOOK = "the package has no workbook part; it may be a Word or PowerPoint file";
 
@@ -53,9 +49,11 @@ public final class WorkbookPackage {
     private final DateStyles styles;
     private final String sharedStringsPart;
     private final boolean date1904;
+    private final int maxToken;
 
     private WorkbookPackage(ZipArchive archive, List<SheetInfo> sheets, List<String> sheetParts, DateStyles styles,
-            String sharedStringsPart, boolean date1904) {
+            String sharedStringsPart, boolean date1904, int maxToken) {
+        this.maxToken = maxToken;
         this.archive = archive;
         this.sheets = sheets;
         this.sheetParts = sheetParts;
@@ -64,11 +62,12 @@ public final class WorkbookPackage {
         this.date1904 = date1904;
     }
 
-    public static WorkbookPackage read(ReadSource source) throws IOException {
+    /** Reads the package structure; XML tokens may hold up to {@code maxToken} bytes (see {@link XmlReader}). */
+    public static WorkbookPackage read(ReadSource source, int maxToken) throws IOException {
         ZipArchive archive = ZipArchive.read(source);
 
         String workbookPart = "xl/workbook.xml";
-        List<Relationship> rootRels = relationships(archive, "_rels/.rels");
+        List<Relationship> rootRels = relationships(archive, "_rels/.rels", maxToken);
         if (rootRels != null) {
             for (Relationship r : rootRels) {
                 if (r.is("officeDocument")) {
@@ -81,20 +80,20 @@ public final class WorkbookPackage {
             throw new XlsxException(XlsxException.Kind.INVALID_FILE, NOT_A_WORKBOOK);
         }
 
-        List<Relationship> rels = relationships(archive, relsPath(workbookPart));
+        List<Relationship> rels = relationships(archive, relsPath(workbookPart), maxToken);
         if (rels == null) {
             rels = List.of();
         }
 
         List<SheetInfo> sheets = new ArrayList<>();
         List<String> sheetParts = new ArrayList<>();
-        boolean date1904 = readWorkbook(archive, workbookPart, rels, sheets, sheetParts);
+        boolean date1904 = readWorkbook(archive, workbookPart, rels, sheets, sheetParts, maxToken);
 
         DateStyles styles = DateStyles.NONE;
         String sharedStringsPart = null;
         for (Relationship r : rels) {
             if (styles == DateStyles.NONE && r.is("styles") && archive.find(r.target) != null) {
-                XmlReader xml = open(archive, r.target);
+                XmlReader xml = open(archive, r.target, maxToken);
                 try {
                     styles = DateStyles.parse(xml);
                 } finally {
@@ -104,7 +103,7 @@ public final class WorkbookPackage {
                 sharedStringsPart = r.target;
             }
         }
-        return new WorkbookPackage(archive, Collections.unmodifiableList(sheets), sheetParts, styles, sharedStringsPart, date1904);
+        return new WorkbookPackage(archive, Collections.unmodifiableList(sheets), sheetParts, styles, sharedStringsPart, date1904, maxToken);
     }
 
     public List<SheetInfo> sheets() {
@@ -123,7 +122,7 @@ public final class WorkbookPackage {
         if (sharedStringsPart == null) {
             return SharedStringTable.EMPTY;
         }
-        XmlReader xml = open(archive, sharedStringsPart);
+        XmlReader xml = open(archive, sharedStringsPart, maxToken);
         try {
             return SharedStringTable.parse(xml, maxBytes);
         } finally {
@@ -145,16 +144,20 @@ public final class WorkbookPackage {
         if (archive.find(part) == null) {
             throw new XlsxException(XlsxException.Kind.MALFORMED, part, "the worksheet part of sheet \"" + info.name() + "\" is missing");
         }
-        return open(archive, part);
+        return open(archive, part, maxToken);
     }
 
-    /** Reads the tables of the sheet at {@code index} from their own parts, from top to bottom, then left to right. */
-    public List<ExcelTable> readTables(int index) throws IOException {
+    /**
+     * Reads the tables of the sheet at {@code index} from their own parts, from top to bottom, then
+     * left to right; at most {@code maxTables}, holding at most {@code maxTableBytes} of names (see
+     * {@link TableParser#parse}).
+     */
+    public List<ExcelTable> readTables(int index, int maxTables, long maxTableBytes) throws IOException {
         String part = sheetParts.get(index);
         if (part == null) {
             return List.of();
         }
-        List<Relationship> rels = relationships(archive, relsPath(part));
+        List<Relationship> rels = relationships(archive, relsPath(part), maxToken);
         if (rels == null) {
             return List.of();
         }
@@ -164,15 +167,16 @@ public final class WorkbookPackage {
             if (!r.is("table")) {
                 continue;
             }
-            if (++count > MAX_TABLES) {
-                throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, part + " has more than " + MAX_TABLES + " tables");
+            if (++count > maxTables) {
+                throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, part,
+                        "the worksheet has more than " + maxTables + " tables (ReadOptions.maxTables)");
             }
             targets.add(r.target);
         }
         List<ExcelTable> tables = new ArrayList<>(targets.size());
-        long[] budget = {MAX_TABLE_TEXT};
+        long[] budget = {maxTableBytes};
         for (String target : targets) {
-            XmlReader xml = open(archive, target);
+            XmlReader xml = open(archive, target, maxToken);
             try {
                 tables.add(TableParser.parse(xml, budget));
             } finally {
@@ -183,21 +187,21 @@ public final class WorkbookPackage {
         return Collections.unmodifiableList(tables);
     }
 
-    private static XmlReader open(ZipArchive archive, String part) throws IOException {
+    private static XmlReader open(ZipArchive archive, String part, int maxToken) throws IOException {
         ZipArchive.Entry entry = archive.find(part);
         if (entry == null) {
             throw new XlsxException(XlsxException.Kind.MALFORMED, part, "the part is missing");
         }
-        return new XmlReader(archive.open(entry), part);
+        return new XmlReader(archive.open(entry), part, maxToken);
     }
 
-    static List<Relationship> relationships(ZipArchive archive, String part) throws IOException {
+    static List<Relationship> relationships(ZipArchive archive, String part, int maxToken) throws IOException {
         if (archive.find(part) == null) {
             return null;
         }
         String base = sourceDirectory(part);
         List<Relationship> rels = new ArrayList<>();
-        XmlReader xml = open(archive, part);
+        XmlReader xml = open(archive, part, maxToken);
         try {
             while (true) {
                 int event = xml.next();
@@ -230,8 +234,8 @@ public final class WorkbookPackage {
 
     /** Reads the date system and the sheets; returns whether the 1904 date system is used. */
     private static boolean readWorkbook(ZipArchive archive, String part, List<Relationship> rels, List<SheetInfo> sheets,
-            List<String> sheetParts) throws IOException {
-        XmlReader xml = open(archive, part);
+            List<String> sheetParts, int maxToken) throws IOException {
+        XmlReader xml = open(archive, part, maxToken);
         boolean date1904 = false;
         boolean root = true;
         try {

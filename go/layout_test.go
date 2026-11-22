@@ -173,7 +173,7 @@ func TestTableValidation(t *testing.T) {
 	wantErr(t, s.AddTable(named(tbl(3, 1, "a"), "A1")), ErrInvalidTableName)
 	wantErr(t, s.AddTable(named(tbl(3, 1, "a"), "my table")), ErrInvalidTableName)
 	wantErr(t, s.AddTable(styled(tbl(3, 1, "a"), TableStyleMedium(29))), ErrInvalidArgument)
-	wantErr(t, s.AddTable(styled(tbl(3, 1, "a"), TableStyle(0x0900))), ErrInvalidArgument)
+	wantErr(t, s.AddTable(styled(tbl(3, 1, "a"), TableStyle{id: 0x0900})), ErrInvalidArgument)
 	totals := tbl(3, 1, "a")
 	totals.TotalsRow = true
 	err := s.AddTable(totals)
@@ -225,7 +225,7 @@ func TestOverlaps(t *testing.T) {
 
 func TestTableStyleString(t *testing.T) {
 	for style, want := range map[TableStyle]string{
-		0: "TableStyleMedium2", TableStyleNone: "None", TableStyleLight(21): "TableStyleLight21",
+		{}: "TableStyleMedium2", TableStyleNone: "None", TableStyleLight(21): "TableStyleLight21",
 		TableStyleMedium(28): "TableStyleMedium28", TableStyleDark(1): "TableStyleDark1",
 	} {
 		if got := style.String(); got != want {

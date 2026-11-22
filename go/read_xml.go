@@ -16,11 +16,7 @@ import (
 // Namespace prefixes are dropped and local names compared. Document type declarations are
 // rejected, so entity expansion is impossible, and every token must fit into a bounded buffer.
 
-const (
-	xmlInitialBuffer = 64 << 10
-	// maxXMLToken bounds a single tag or run of text. Excel limits cell text to 32,767 characters.
-	maxXMLToken = 16 << 20
-)
+const xmlInitialBuffer = 64 << 10
 
 type xmlEvent uint8
 
@@ -48,6 +44,8 @@ type xmlReader struct {
 	eof     bool
 	started bool
 	depth   int
+	// maxToken bounds a single tag or run of text, and so the buffer.
+	maxToken int
 	// The current token, valid until the next call: the local name of a tag, the raw
 	// attributes of a start tag, or raw text.
 	name  []byte
@@ -56,7 +54,7 @@ type xmlReader struct {
 }
 
 func newXMLReader(src io.Reader, part string) *xmlReader {
-	return &xmlReader{src: src, part: part, buf: make([]byte, xmlInitialBuffer)}
+	return &xmlReader{src: src, part: part, buf: make([]byte, xmlInitialBuffer), maxToken: defaultMaxTokenBytes}
 }
 
 func partError(part string, kind error, format string, args ...any) error {
@@ -87,10 +85,10 @@ func (x *xmlReader) fill() (bool, error) {
 		x.pos = 0
 	}
 	if x.end == len(x.buf) {
-		if len(x.buf) >= maxXMLToken {
-			return false, partError(x.part, ErrLimitExceeded, "an XML token is larger than %d bytes", maxXMLToken)
+		if len(x.buf) >= x.maxToken {
+			return false, partError(x.part, ErrLimitExceeded, "an XML token is larger than %d bytes (see WithMaxTokenBytes)", x.maxToken)
 		}
-		grown := make([]byte, min(2*len(x.buf), maxXMLToken))
+		grown := make([]byte, min(2*len(x.buf), x.maxToken))
 		copy(grown, x.buf[:x.end])
 		x.buf = grown
 	}

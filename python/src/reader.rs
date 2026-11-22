@@ -18,6 +18,7 @@ const MAX_EXACT_INT: f64 = 9_007_199_254_740_992.0;
 fn read_err(e: hypaxel::Error) -> PyErr {
     match e {
         hypaxel::Error::Io(io) => io.into(),
+        limit @ hypaxel::Error::LimitExceeded(_) => XlsxError::new_err(limit.to_string().replace("ReadOptions::", "")),
         other => XlsxError::new_err(other.to_string()),
     }
 }
@@ -176,13 +177,53 @@ impl Reader {
     }
 }
 
+/// `(first_col, last_col, width, hidden)`.
+type ColumnWidthTuple = (u32, u32, Option<f64>, bool);
+
 #[pymethods]
 impl Reader {
     #[new]
-    #[pyo3(signature = (source, *, max_shared_strings_bytes = 1 << 30, include_empty_rows = false))]
-    fn new(py: Python<'_>, source: &Bound<'_, PyAny>, max_shared_strings_bytes: u64, include_empty_rows: bool) -> PyResult<Self> {
+    #[pyo3(signature = (
+        source,
+        *,
+        max_shared_strings_bytes = 1 << 30,
+        include_empty_rows = false,
+        max_tables = 4096,
+        max_table_bytes = 64 << 20,
+        max_token_bytes = 16 << 20,
+        max_row_text_bytes = 256 << 20,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        py: Python<'_>,
+        source: &Bound<'_, PyAny>,
+        max_shared_strings_bytes: u64,
+        include_empty_rows: bool,
+        max_tables: i64,
+        max_table_bytes: i64,
+        max_token_bytes: i64,
+        max_row_text_bytes: i64,
+    ) -> PyResult<Self> {
+        let limit = |value: i64, name: &str| -> PyResult<usize> {
+            if value < 1 {
+                return Err(PyValueError::new_err(format!("{name} must be at least 1")));
+            }
+            Ok(usize::try_from(value).unwrap_or(usize::MAX))
+        };
+        let (max_tables, max_table_bytes, max_token_bytes, max_row_text_bytes) = (
+            limit(max_tables, "max_tables")?,
+            limit(max_table_bytes, "max_table_bytes")?,
+            limit(max_token_bytes, "max_token_bytes")?,
+            limit(max_row_text_bytes, "max_row_text_bytes")?,
+        );
         let origin = origin_from(py, source)?;
-        let options = ReadOptions::new().max_shared_strings_bytes(max_shared_strings_bytes).include_empty_rows(include_empty_rows);
+        let options = ReadOptions::new()
+            .max_shared_strings_bytes(max_shared_strings_bytes)
+            .include_empty_rows(include_empty_rows)
+            .max_tables(max_tables)
+            .max_table_bytes(max_table_bytes)
+            .max_token_bytes(max_token_bytes)
+            .max_row_text_bytes(max_row_text_bytes);
         let handle = origin.open();
         let reader = py.detach(|| XlsxReader::with_options(handle, &options)).map_err(read_err)?;
         Ok(Reader { origin: Some(origin), reader: Some(reader) })
@@ -475,7 +516,7 @@ impl RowIterator {
     /// The column widths the sheet defines as ``(first_col, last_col, width, hidden)`` tuples
     /// (1-based, inclusive). Available before the first row is read.
     #[getter]
-    fn column_widths(&mut self) -> PyResult<Vec<(u32, u32, f64, bool)>> {
+    fn column_widths(&mut self) -> PyResult<Vec<ColumnWidthTuple>> {
         Ok(self.layout()?.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect())
     }
 

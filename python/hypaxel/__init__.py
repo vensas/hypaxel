@@ -476,7 +476,16 @@ def _rebind(recs: _Records, batch: list[Any]) -> _Records:
 # Reading
 
 
-def open_workbook(source: Source, *, max_shared_strings_bytes: int = 1 << 30, include_empty_rows: bool = False) -> Reader:
+def open_workbook(
+    source: Source,
+    *,
+    max_shared_strings_bytes: int = 1 << 30,
+    include_empty_rows: bool = False,
+    max_tables: int = 4096,
+    max_table_bytes: int = 64 << 20,
+    max_token_bytes: int = 16 << 20,
+    max_row_text_bytes: int = 256 << 20,
+) -> Reader:
     """Opens an XLSX workbook for reading.
 
     ``source`` is a path, ``bytes`` or a binary file object (which is read into memory). Rows are
@@ -492,8 +501,20 @@ def open_workbook(source: Source, *, max_shared_strings_bytes: int = 1 << 30, in
     read as ``[]`` like missing rows. With ``include_empty_rows`` the row iterator also reports
     their ``outline_level``, ``hidden``, ``collapsed`` and ``height``, and such rows after the last
     value are returned too.
+
+    The ``max_*`` options cap what an untrusted workbook can make the reader hold: the shared
+    string table, the tables of one sheet (count and bytes of names), one XML token (at least
+    64 KiB) and the text of one row. Exceeding one raises :class:`XlsxError` naming the option.
     """
-    return Reader(source, max_shared_strings_bytes=max_shared_strings_bytes, include_empty_rows=include_empty_rows)
+    return Reader(
+        source,
+        max_shared_strings_bytes=max_shared_strings_bytes,
+        include_empty_rows=include_empty_rows,
+        max_tables=max_tables,
+        max_table_bytes=max_table_bytes,
+        max_token_bytes=max_token_bytes,
+        max_row_text_bytes=max_row_text_bytes,
+    )
 
 
 def iter_rows(source: Source, sheet: SheetRef = 0, *, skip_empty: bool = False, **options: Any) -> Iterator[list[Any]]:

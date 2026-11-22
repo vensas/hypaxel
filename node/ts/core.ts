@@ -139,7 +139,10 @@ export interface TableOptions {
   name?: string
   /** Column names. Required with a header row and must equal the header texts exactly. */
   columns?: readonly string[]
-  /** Built-in style such as `'TableStyleMedium2'` (the default), or `'none'`. */
+  /**
+   * Built-in style such as `'TableStyleMedium2'` (the default), the name of a custom style defined
+   * in the workbook (Excel falls back to no style if it is not), or `'none'`.
+   */
   style?: string
   headerRow?: boolean
   autofilter?: boolean
@@ -234,6 +237,16 @@ export interface EngineRows {
   close(): void
 }
 
+/** @internal The read options the engines take. */
+export interface EngineReadOptions {
+  maxSharedStringsBytes?: number
+  includeEmptyRows?: boolean
+  maxTables?: number
+  maxTableBytes?: number
+  maxTokenBytes?: number
+  maxRowTextBytes?: number
+}
+
 /** @internal The native (N-API) or WebAssembly workbook reader. */
 export interface EngineWorkbook {
   sheets(): EngineSheetInfo[]
@@ -247,7 +260,7 @@ export interface EngineWorkbook {
 export interface Engine {
   createWriter(options: Omit<WriterOptions, 'dates'>): EngineWriter
   /** Opens a workbook from bytes. */
-  openWorkbook(bytes: Uint8Array, options: { maxSharedStringsBytes?: number; includeEmptyRows?: boolean }): EngineWorkbook
+  openWorkbook(bytes: Uint8Array, options: EngineReadOptions): EngineWorkbook
   /** Decodes UTF-8 from a batch returned by {@link EngineRows.next}. */
   decodeUtf8(buffer: Uint8Array, start: number, end: number): string
   columnName(column: number): string

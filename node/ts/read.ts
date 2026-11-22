@@ -3,7 +3,7 @@
  * Platform-neutral reading API, shared by the Node.js entry (native engine) and the browser entry
  * (WebAssembly engine). It uses no Node.js APIs.
  */
-import { type EngineRows, type EngineWorkbook, type TableOptions, XlsxError, currentEngine, guard } from './core.js'
+import { type EngineReadOptions, type EngineRows, type EngineWorkbook, type TableOptions, XlsxError, currentEngine, guard } from './core.js'
 
 /**
  * A cell value as read: text, a number, a boolean, a `Date` for cells formatted as a date, date
@@ -28,6 +28,20 @@ export interface ReadOptions {
    * the one part of a workbook held in memory while rows stream; lower it for untrusted uploads.
    */
   maxSharedStringsBytes?: number
+  /** Most tables read from one worksheet by {@link Workbook.tables} (default 4,096). */
+  maxTables?: number
+  /**
+   * Most bytes of names held for the tables of one worksheet (default 64 MiB): table, column and
+   * custom style names, counting 32 bytes per column on top of its name.
+   */
+  maxTableBytes?: number
+  /**
+   * Largest single XML token, such as a tag with its attributes or a run of text, in bytes
+   * (default 16 MiB). Values below 64 KiB count as 64 KiB.
+   */
+  maxTokenBytes?: number
+  /** Most bytes of text one row may hold (default 256 MiB). */
+  maxRowTextBytes?: number
   /**
    * Rows that the file stores without any value (a spacer row with a height, an empty hidden row)
    * read as `[]`, like missing rows. With this option {@link SheetRows} also reports their
@@ -62,18 +76,18 @@ export interface ReadTable {
   readonly lastRow: number
   readonly lastColumn: number
   /**
-   * The table's settings, complete. `style` is `'none'` unless the table uses one of Excel's
-   * built-in styles.
+   * The table's settings, complete. `style` is the style's name as stored, built-in or custom, or
+   * `'none'`.
    */
   readonly options: Readonly<Required<TableOptions>>
 }
 
-/** A run of adjacent columns (1-based, inclusive) that share one width. */
+/** A run of adjacent columns (1-based, inclusive) that share one width and hidden flag. */
 export interface ColumnWidth {
   readonly firstColumn: number
   readonly lastColumn: number
-  /** Width in characters of the default font. */
-  readonly width: number
+  /** Width in characters of the default font; `undefined` when the file stores none (a hidden column, for example). */
+  readonly width: number | undefined
   readonly hidden: boolean
 }
 
@@ -81,7 +95,7 @@ export interface ColumnWidth {
 export class SheetLayout {
   /** @internal */
   constructor(
-    /** The column widths the sheet defines, explicit and auto-fitted alike. */
+    /** The column widths the sheet defines, explicit and auto-fitted alike, and the hidden columns. */
     readonly columnWidths: readonly ColumnWidth[],
     /** True if summary rows sit above their groups. */
     readonly outlineSummaryAbove: boolean,
@@ -348,11 +362,12 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     const widths: ColumnWidth[] = []
     let p = 7
     for (let i = 0; i < count; i++, p += 17) {
+      const width = view.getFloat64(p + 8, true)
       widths.push(
         Object.freeze({
           firstColumn: view.getUint32(p, true),
           lastColumn: view.getUint32(p + 4, true),
-          width: view.getFloat64(p + 8, true),
+          width: Number.isNaN(width) ? undefined : width,
           hidden: view.getUint8(p + 16) === 1,
         }),
       )
@@ -800,11 +815,23 @@ export async function collectBytes(source: BytesSource): Promise<Uint8Array> {
   throw new XlsxError('the workbook source must be bytes, a Blob, a stream or an async iterable of bytes')
 }
 
+/** @internal The reader options the engines take. */
+export function engineOptions(options: ReadOptions): EngineReadOptions {
+  return {
+    maxSharedStringsBytes: options.maxSharedStringsBytes,
+    includeEmptyRows: options.includeEmptyRows,
+    maxTables: options.maxTables,
+    maxTableBytes: options.maxTableBytes,
+    maxTokenBytes: options.maxTokenBytes,
+    maxRowTextBytes: options.maxRowTextBytes,
+  }
+}
+
 /** @internal Opens a workbook held in memory on the current engine. */
 export function openBytes(bytes: Uint8Array, options: ReadOptions): Workbook {
   const engine = currentEngine()
   const native = guard(() =>
-    engine.openWorkbook(bytes, { maxSharedStringsBytes: options.maxSharedStringsBytes, includeEmptyRows: options.includeEmptyRows }),
+    engine.openWorkbook(bytes, engineOptions(options)),
   )
   return new Workbook(native, options)
 }

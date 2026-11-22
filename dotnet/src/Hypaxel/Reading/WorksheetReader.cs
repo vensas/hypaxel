@@ -31,13 +31,12 @@ namespace Hypaxel;
 /// </example>
 public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 {
-    private const int MaxRowText = 128 * 1024 * 1024;
-
     private readonly Utf8XmlReader _xml;
     private readonly string[] _sharedStrings;
     private readonly StyleTable _styles;
     private readonly bool _is1904;
     private readonly bool _includeEmptyRows;
+    private readonly long _maxRowTextBytes;
     private readonly XlsxRow _row;
     private byte[] _scratch = new byte[64];
     private int _scratchLength;
@@ -49,9 +48,10 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     private bool _outlineSummaryAbove;
     private int _rowOutlineLevels;
 
-    internal WorksheetReader(string name, Utf8XmlReader xml, string[] sharedStrings, StyleTable styles, bool is1904, bool includeEmptyRows)
+    internal WorksheetReader(string name, Utf8XmlReader xml, string[] sharedStrings, StyleTable styles, bool is1904, bool includeEmptyRows, long maxRowTextBytes)
     {
         _includeEmptyRows = includeEmptyRows;
+        _maxRowTextBytes = maxRowTextBytes;
         Name = name;
         _xml = xml;
         _sharedStrings = sharedStrings;
@@ -85,8 +85,8 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
     public XlsxRow Row => _row;
 
     /// <summary>
-    /// The column widths the sheet defines, explicit and auto-fitted alike, in file order. Columns that
-    /// are not covered have the default width. Available before the first row is read.
+    /// The column widths the sheet defines, explicit and auto-fitted alike, and the hidden column runs, in file
+    /// order. Columns that are not covered have the default width. Available before the first row is read.
     /// </summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
     /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
@@ -140,7 +140,10 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         return false;
     }
 
-    /// <summary>The width of a 1-based column in characters of the default font; null if the sheet leaves it at the default.</summary>
+    /// <summary>
+    /// The width of a 1-based column in characters of the default font; null if the sheet leaves it at the default
+    /// or hides it without storing a width.
+    /// </summary>
     /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
     /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
     public double? GetColumnWidth(int column)
@@ -333,7 +336,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         }
 
         last = Math.Min(last, CellReference.MaxColumns);
-        if (width is null || first < 1 || first > last)
+        if ((width is null && !hidden) || first < 1 || first > last)
         {
             return;
         }
@@ -343,7 +346,7 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
             throw _xml.Malformed("The sheet defines more than 16384 column ranges.");
         }
 
-        _columnWidths.Add(new ColumnWidth((int)first, (int)last, width.GetValueOrDefault(), hidden));
+        _columnWidths.Add(new ColumnWidth((int)first, (int)last, width, hidden));
     }
 
     private static uint ParseColumnBound(ReadOnlySpan<byte> raw) =>
@@ -512,9 +515,11 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 
     private void CheckRowText()
     {
-        if (_row.Text.Length > MaxRowText)
+        if (_row.Text.Length * 2L > _maxRowTextBytes)
         {
-            throw XlsxReadException.LimitExceeded(_xml.Part, $"Row {_row.Number} holds more than {MaxRowText} characters of text.");
+            throw XlsxReadException.LimitExceeded(
+                _xml.Part,
+                $"Row {_row.Number} holds more than {_maxRowTextBytes} bytes of text (XlsxReaderOptions.MaxRowTextBytes).");
         }
     }
 
@@ -924,6 +929,9 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 /// <summary>A run of adjacent columns that share one width.</summary>
 /// <param name="FirstColumn">1-based first column of the run.</param>
 /// <param name="LastColumn">1-based last column of the run.</param>
-/// <param name="Width">Width in characters of the default font, as in <see cref="ColumnDefinition.Width"/>.</param>
+/// <param name="Width">
+/// Width in characters of the default font, as in <see cref="ColumnDefinition.Width"/>; null if the file stores
+/// none (a hidden run without a width).
+/// </param>
 /// <param name="Hidden">True if the columns are hidden.</param>
-public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double Width, bool Hidden = false);
+public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double? Width, bool Hidden = false);

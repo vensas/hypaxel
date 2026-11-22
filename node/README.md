@@ -180,7 +180,9 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   `addTable` takes (`name`, `columns`, `style`, `headerRow`, `autofilter`, `rowStripes`,
   `columnStripes`, `firstColumn`, `lastColumn`, `totalsRow`), from top to bottom, then left to
   right. Tables are stored apart from the rows and are read only when you ask. A custom
-  (non-built-in) table style reads as `'none'`. `totalsRow` tells whether the last row of the
+  (non-built-in) table style reads as its name, and `addTable` writes a name that is not a
+  built-in one as a custom style (Excel applies it only if the workbook defines it). Names
+  starting with `TableStyle` must be built-in, so a typo such as `'TableStyleMeduim2'` throws. `totalsRow` tells whether the last row of the
   range is a totals row; such a table can be read but not written.
 - **Rows and columns:** the object returned by `workbook.rows()` describes the row it returned
   last: `rowNumber`, `outlineLevel`, `hidden`, `collapsed` and `height` (`undefined` when the row
@@ -188,7 +190,8 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   empty hidden row) come back as `[]` with default properties; open the workbook with
   `includeEmptyRows: true` to get their properties as well (such rows after the last value are
   then returned too, and `skipEmpty: true` still drops them). `rows.layout()` (or `await rows.layoutAsync()`) gives the sheet's
-  `columnWidths` (`{ firstColumn, lastColumn, width, hidden }`, explicit and auto-fitted alike),
+  `columnWidths` (`{ firstColumn, lastColumn, width, hidden }`, explicit and auto-fitted alike;
+  `width` is `undefined` for a hidden column stored without one),
   `columnWidth(column)`, `columnHidden(column)`, `outlineSummaryAbove` and `rowOutlineLevels`. They can be read before
   the first row. If the sheet cannot be opened or its layout read, `layout()`, `layoutAsync()` and
   the row methods throw that error every time they are called.
@@ -213,8 +216,11 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   requests; the sync form is slightly faster. `openWorkbookSync` opens a path or bytes without a
   promise. In browsers both forms run on the calling thread; use a worker for very large files.
 - **Memory:** beyond the source, memory is bounded by the workbook's shared string table and one
-  batch of rows (about 64 KB). `maxSharedStringsBytes` (default 1 GiB) caps the table for untrusted
-  uploads. Several sheets, or the same sheet twice, can be read at the same time.
+  batch of rows (about 64 KB). For untrusted uploads, the read options cap what a workbook can make
+  the reader hold: `maxSharedStringsBytes` (default 1 GiB) for the shared string table,
+  `maxTables` (4,096) and `maxTableBytes` (64 MiB of names) for the tables of one sheet,
+  `maxTokenBytes` (16 MiB, at least 64 KiB) for one XML token and `maxRowTextBytes` (256 MiB) for
+  one row. Exceeding one throws an `XlsxError` naming the option. Several sheets, or the same sheet twice, can be read at the same time.
 - **Closing:** `workbook.close()` (or `using`) releases the file; rows already started keep
   reading. Breaking out of a loop releases that sheet. `iterRows` and the other helpers close
   everything themselves.

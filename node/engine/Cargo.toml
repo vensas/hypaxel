@@ -1,7 +1,7 @@
 [package]
 name = "hypaxel-js-engine"
 description = "Engine shared by the hypaxel Node.js and WebAssembly bindings: option parsing and the binary cell-batch decoder."
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ serde = ["dep:serde"]
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
-hypaxel = { version = "0.4.0", path = "../../rust/hypaxel", default-features = false, features = ["chrono"] }
+hypaxel = { version = "0.5.0", path = "../../rust/hypaxel", default-features = false, features = ["chrono"] }
 serde = { version = "1.0.229", features = ["derive"], optional = true }
 
 [dev-dependencies]

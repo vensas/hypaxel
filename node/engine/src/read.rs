@@ -69,6 +69,19 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 fn read_error(e: hypaxel::Error) -> Error {
     match e {
         hypaxel::Error::Io(io) if io.kind() == io::ErrorKind::NotFound => failed(format!("file not found: {io}")),
+        hypaxel::Error::LimitExceeded(_) => {
+            let mut message = e.to_string();
+            for (rust, js) in [
+                ("ReadOptions::max_shared_strings_bytes", "maxSharedStringsBytes"),
+                ("ReadOptions::max_tables", "maxTables"),
+                ("ReadOptions::max_table_bytes", "maxTableBytes"),
+                ("ReadOptions::max_token_bytes", "maxTokenBytes"),
+                ("ReadOptions::max_row_text_bytes", "maxRowTextBytes"),
+            ] {
+                message = message.replace(rust, js);
+            }
+            failed(message)
+        }
         other => failed(other.to_string()),
     }
 }
@@ -175,6 +188,10 @@ impl Seek for Source {
 pub struct ReadConfig {
     pub max_shared_strings_bytes: Option<f64>,
     pub include_empty_rows: Option<bool>,
+    pub max_tables: Option<f64>,
+    pub max_table_bytes: Option<f64>,
+    pub max_token_bytes: Option<f64>,
+    pub max_row_text_bytes: Option<f64>,
 }
 
 impl ReadConfig {
@@ -185,6 +202,25 @@ impl ReadConfig {
                 return Err(invalid("maxSharedStringsBytes must be a non-negative number"));
             }
             options = options.max_shared_strings_bytes(bytes as u64);
+        }
+        let limit = |value: Option<f64>, name: &str| -> Result<Option<usize>> {
+            match value {
+                None => Ok(None),
+                Some(v) if v.is_finite() && v >= 1.0 => Ok(Some(v.min(usize::MAX as f64) as usize)),
+                Some(_) => Err(invalid(format!("{name} must be a number of at least 1"))),
+            }
+        };
+        if let Some(n) = limit(self.max_tables, "maxTables")? {
+            options = options.max_tables(n);
+        }
+        if let Some(n) = limit(self.max_table_bytes, "maxTableBytes")? {
+            options = options.max_table_bytes(n);
+        }
+        if let Some(n) = limit(self.max_token_bytes, "maxTokenBytes")? {
+            options = options.max_token_bytes(n);
+        }
+        if let Some(n) = limit(self.max_row_text_bytes, "maxRowTextBytes")? {
+            options = options.max_row_text_bytes(n);
         }
         Ok(options)
     }
@@ -211,7 +247,7 @@ pub struct TableEntry {
     pub last_row: u32,
     pub last_column: u32,
     pub columns: Vec<String>,
-    /// `TableStyleMedium2` etc.; `none` for no built-in table style.
+    /// `TableStyleMedium2` etc., or the name of a custom style; `none` for no table style.
     pub style: String,
     pub header_row: bool,
     pub autofilter: bool,
@@ -378,7 +414,7 @@ fn put_layout(out: &mut Vec<u8>, layout: &SheetLayout) {
     for column in layout.column_widths() {
         put_u32(out, column.first_column());
         put_u32(out, column.last_column());
-        out.extend_from_slice(&column.width().to_le_bytes());
+        out.extend_from_slice(&column.width().unwrap_or(f64::NAN).to_le_bytes());
         out.push(column.is_hidden() as u8);
     }
 }

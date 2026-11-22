@@ -429,8 +429,11 @@ def test_tables():
         ws.add_table(1, 1, 3, 2)
     with pytest.raises(XlsxError, match="invalid table name"):
         ws.add_table(1, 1, 3, 1, columns=["a"], name="A1")
-    with pytest.raises(ValueError, match="table style"):
-        ws.add_table(1, 1, 3, 1, columns=["a"], style="Fancy")
+    with pytest.raises(XlsxError, match="invalid table style name"):
+        ws.add_table(1, 1, 3, 1, columns=["a"], style="two\nlines")
+    for typo in ["TableStyleMedium29", "TableStyleMeduim2", "tablestylemedium2"]:
+        with pytest.raises(ValueError, match=r"unknown built-in table style .*\(Light 1–21, Medium 1–28, Dark 1–11\)"):
+            ws.add_table(1, 1, 3, 1, columns=["a"], style=typo)
     ws.add_table(1, 1, 3, 1, columns=["a"])
     with pytest.raises(XlsxError, match="overlap"):
         ws.add_table(2, 1, 4, 1, columns=["b"])

@@ -132,7 +132,7 @@ pub struct RowConfig {
 pub struct TableConfig {
     pub name: Option<String>,
     pub columns: Option<Vec<String>>,
-    /// `TableStyleMedium2` etc.; `"none"` for no table style.
+    /// `TableStyleMedium2` etc., or the name of a custom style; `"none"` for no table style.
     pub style: Option<String>,
     pub header_row: Option<bool>,
     pub autofilter: Option<bool>,
@@ -145,22 +145,12 @@ pub struct TableConfig {
 }
 
 fn parse_table_style(name: Option<&str>) -> Result<TableStyle> {
-    let Some(name) = name else { return Ok(TableStyle::default()) };
-    if name.eq_ignore_ascii_case("none") {
-        return Ok(TableStyle::None);
+    match name {
+        None => Ok(TableStyle::default()),
+        Some(name) if name.eq_ignore_ascii_case("none") => Ok(TableStyle::None),
+        Some(name) => TableStyle::parse(name)
+            .ok_or_else(|| invalid(format!("unknown built-in table style {name:?} (Light 1–21, Medium 1–28, Dark 1–11)"))),
     }
-    let invalid = || invalid(format!("unknown table style {name:?}; expected e.g. 'TableStyleMedium2' or 'none'"));
-    let rest = name.strip_prefix("TableStyle").ok_or_else(invalid)?;
-    let (kind, number): (fn(u8) -> TableStyle, &str) = if let Some(n) = rest.strip_prefix("Light") {
-        (TableStyle::Light, n)
-    } else if let Some(n) = rest.strip_prefix("Medium") {
-        (TableStyle::Medium, n)
-    } else if let Some(n) = rest.strip_prefix("Dark") {
-        (TableStyle::Dark, n)
-    } else {
-        return Err(invalid());
-    };
-    Ok(kind(number.parse().map_err(|_| invalid())?))
 }
 
 fn parse_color(s: &str) -> Result<Color> {
@@ -570,8 +560,9 @@ mod tests {
         assert!(engine.add_style(StyleConfig { fill: Some("red".into()), ..Default::default() }).is_err());
         assert!(engine.add_style(StyleConfig { border: Some("wavy".into()), ..Default::default() }).is_err());
         engine.add_worksheet("Data", SheetConfig::default()).unwrap();
-        let table = TableConfig { style: Some("TableStyleFancy".into()), ..Default::default() };
-        assert!(engine.add_table(1, 1, 2, 2, table).is_err());
+        let columns = Some(vec!["a".to_string(), "b".to_string()]);
+        let table = TableConfig { style: Some("two\nlines".into()), columns, ..Default::default() };
+        assert!(engine.add_table(1, 1, 2, 2, table).unwrap_err().to_string().contains("invalid table style name"));
         assert!(column_name(0).is_err());
         assert_eq!(column_name(27).unwrap(), "AA");
     }

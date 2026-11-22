@@ -50,7 +50,11 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>, budget: &mut usize) -> Resu
                 }
             }
             (Some(t), b"tableStyleInfo") => {
-                t.style = tag.attr(b"name").and_then(parse_style).unwrap_or(TableStyle::None);
+                let name = text(&tag, b"name", false).unwrap_or_default();
+                t.style = TableStyle::from_name(&name);
+                if matches!(t.style, TableStyle::Custom(_)) {
+                    cost = name.len();
+                }
                 t.row_stripes = flag(&tag, b"showRowStripes");
                 t.column_stripes = flag(&tag, b"showColumnStripes");
                 t.first_column_highlight = flag(&tag, b"showFirstColumn");
@@ -61,7 +65,9 @@ pub(crate) fn parse<S: Read>(xml: &mut XmlReader<S>, budget: &mut usize) -> Resu
         if let Some(problem) = problem {
             return Err(xml.malformed(problem));
         }
-        *budget = budget.checked_sub(cost).ok_or_else(|| Error::LimitExceeded("the tables of a worksheet hold too many names".into()))?;
+        *budget = budget.checked_sub(cost).ok_or_else(|| {
+            Error::LimitExceeded("the tables of a worksheet hold more names than allowed (ReadOptions::max_table_bytes)".into())
+        })?;
         if start && !descend {
             xml.skip_element()?;
         }
@@ -81,19 +87,6 @@ fn flag(tag: &Tag<'_>, name: &[u8]) -> bool {
 
 pub(crate) fn is_true(raw: Option<&[u8]>) -> bool {
     matches!(raw.map(<[u8]>::trim_ascii), Some(b"1" | b"true"))
-}
-
-/// Maps a built-in style name such as `TableStyleMedium9`; custom styles have no counterpart.
-fn parse_style(raw: &[u8]) -> Option<TableStyle> {
-    let name = std::str::from_utf8(raw).ok()?.trim().strip_prefix("TableStyle")?;
-    let digits = name.find(|c: char| c.is_ascii_digit())?;
-    let number: u8 = name[digits..].parse().ok()?;
-    match (&name[..digits], number) {
-        ("Light", 1..=21) => Some(TableStyle::Light(number)),
-        ("Medium", 1..=28) => Some(TableStyle::Medium(number)),
-        ("Dark", 1..=11) => Some(TableStyle::Dark(number)),
-        _ => None,
-    }
 }
 
 /// Parses `A1:C10` (or a single cell) into `(first row, first column, last row, last column)`.
@@ -145,12 +138,24 @@ mod tests {
     }
 
     #[test]
-    fn maps_built_in_styles() {
-        assert_eq!(parse_style(b"TableStyleMedium9"), Some(TableStyle::Medium(9)));
-        assert_eq!(parse_style(b"TableStyleLight21"), Some(TableStyle::Light(21)));
-        assert_eq!(parse_style(b"TableStyleDark11"), Some(TableStyle::Dark(11)));
-        for custom in ["TableStyleDark12", "TableStyleMedium", "My Style", "PivotStyleLight16", ""] {
-            assert_eq!(parse_style(custom.as_bytes()), None, "{custom}");
+    fn maps_style_names() {
+        assert_eq!(TableStyle::from_name("TableStyleMedium9"), TableStyle::Medium(9));
+        assert_eq!(TableStyle::from_name(" TableStyleLight21 "), TableStyle::Light(21));
+        assert_eq!(TableStyle::from_name("TableStyleDark11"), TableStyle::Dark(11));
+        assert_eq!(TableStyle::from_name(""), TableStyle::None);
+        for custom in ["TableStyleDark12", "TableStyleMedium", "My Style", "PivotStyleLight16", " padded "] {
+            assert_eq!(TableStyle::from_name(custom), TableStyle::Custom(custom.into()), "{custom}");
+        }
+    }
+
+    #[test]
+    fn parses_typed_style_names() {
+        assert_eq!(TableStyle::parse("TableStyleMedium9"), Some(TableStyle::Medium(9)));
+        assert_eq!(TableStyle::parse("Brand"), Some(TableStyle::Custom("Brand".into())));
+        assert_eq!(TableStyle::parse("Table"), Some(TableStyle::Custom("Table".into())));
+        assert_eq!(TableStyle::parse(""), Some(TableStyle::None));
+        for typo in ["TableStyleMedium29", "TableStyleMeduim2", "tablestylemedium2", " TableStyleDark0", "TABLESTYLE", "TableStyleÜ"] {
+            assert_eq!(TableStyle::parse(typo), None, "{typo}");
         }
     }
 }

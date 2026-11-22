@@ -49,7 +49,7 @@ public final class XlsxReader implements Closeable {
         this.options = Objects.requireNonNull(options, "options");
         WorkbookPackage parsed;
         try {
-            parsed = WorkbookPackage.read(source);
+            parsed = WorkbookPackage.read(source, options.maxTokenBytes());
         } catch (IOException | RuntimeException e) {
             try {
                 source.close();
@@ -194,11 +194,14 @@ public final class XlsxReader implements Closeable {
      * <p>Tables live in their own parts, which are read on each call; reading rows does not touch
      * them. They are returned from top to bottom, then left to right, whatever order the file lists
      * them in. A table style that is not one of Excel's built-in styles is reported as
+     * {@link TableStyle#custom(String)} with the name the file stores, a table without a style as
      * {@link TableStyle#NONE}, and {@link ExcelTable#totalsRow()} tells whether the last row of the
      * range is a totals row.
      *
      * <p>A part that the sheet references more than once is read once. A sheet may have at most
-     * 4,096 tables, holding at most 64 MiB of table and column names between them.
+     * {@link ReadOptions#maxTables()} tables (default 4,096), holding at most
+     * {@link ReadOptions#maxTableBytes()} of table, column and custom style names between them
+     * (default 64 MiB).
      *
      * @throws XlsxException if a table part is damaged ({@link XlsxException.Kind#MALFORMED}), a
      *     limit is exceeded ({@link XlsxException.Kind#LIMIT_EXCEEDED}) or the reader is closed
@@ -206,7 +209,7 @@ public final class XlsxReader implements Closeable {
      */
     public List<ExcelTable> tables(int index) throws IOException {
         checkIndex(index);
-        return workbook.readTables(index);
+        return workbook.readTables(index, options.maxTables(), options.maxTableBytes());
     }
 
     /** Opens the sheet at a 0-based position in {@link #sheets()} for reading. */
@@ -214,7 +217,8 @@ public final class XlsxReader implements Closeable {
         checkIndex(index);
         SharedStringTable strings = sharedStrings();
         XmlReader xml = workbook.openSheet(index);
-        return new SheetReader(workbook.sheets().get(index), new SheetParser(xml, strings, workbook.styles(), workbook.date1904(), options.includeEmptyRows()));
+        return new SheetReader(workbook.sheets().get(index), new SheetParser(xml, strings, workbook.styles(), workbook.date1904(), options.includeEmptyRows(),
+                options.maxRowTextBytes()));
     }
 
     private SharedStringTable sharedStrings() throws IOException {

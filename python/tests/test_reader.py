@@ -377,11 +377,11 @@ def test_reads_a_table_with_a_totals_row_saved_by_excel():
 def test_reads_a_table_downloaded_from_google_sheets():
     with hypaxel.open_workbook(os.path.join(TESTDATA, "google-sheets.xlsx")) as wb:
         assert wb.sheet_names == ["Inventory"]
-        # The file uses a custom table style, which reads as no style, and has no filter buttons.
+        # The file uses a custom table style and has no filter buttons.
         assert wb.tables() == [{
             "name": "Table1", "first_row": 1, "first_col": 1, "last_row": 903, "last_col": 11,
             "columns": ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"],
-            "style": None, "header_row": True, "autofilter": False, "row_stripes": True,
+            "style": "Inventory-style", "header_row": True, "autofilter": False, "row_stripes": True,
             "column_stripes": False, "first_column": True, "last_column": True, "totals_row": True,
         }]
 
@@ -432,3 +432,60 @@ def test_table_names_that_look_like_excel_escapes_round_trip():
 
     table = hypaxel.open_workbook(build(fill)).tables()[0]
     assert (table["name"], table["columns"]) == ("T_x0041_", ["a_x0042_"])
+
+
+def test_round_trips_custom_table_styles():
+    def fill(wb):
+        ws = wb.add_worksheet("S")
+        ws.write_rows([["a", None, "b"], [1, None, 2]])
+        ws.add_table(1, 1, 2, 1, columns=["a"], name="Branded", style="Brand & Co")
+        ws.add_table(1, 3, 2, 3, columns=["b"], name="Plain", style="none")
+
+    with hypaxel.open_workbook(build(fill)) as wb:
+        assert [t["style"] for t in wb.tables()] == ["Brand & Co", None]
+
+
+def _sheet_package(sheet_xml: str) -> bytes:
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("_rels/.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+        z.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="S" sheetId="1" r:id="rId1"/></sheets></workbook>')
+        z.writestr("xl/_rels/workbook.xml.rels", '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+        z.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+    return buf.getvalue()
+
+
+def test_reports_hidden_columns_without_a_width():
+    data = _sheet_package('<worksheet><cols><col min="1" max="1" width="9"/><col min="2" max="3" hidden="1"/><col min="4" max="4" style="1"/></cols><sheetData/></worksheet>')
+    with hypaxel.open_workbook(data) as wb:
+        rows = wb.rows()
+        assert rows.column_widths == [(1, 1, 9.0, False), (2, 3, None, True)]
+        assert (rows.column_width(2), rows.column_hidden(3), rows.column_hidden(4)) == (None, True, False)
+
+
+def test_applies_configured_limits():
+    text = "x" * 100_000
+    data = _sheet_package(f'<worksheet><sheetData><row r="1"><c t="inlineStr"><is><t>{text}</t></is></c><c t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>')
+    assert len(hypaxel.read_rows(data)[0]) == 2
+    with pytest.raises(XlsxError, match="max_token_bytes"):
+        hypaxel.read_rows(data, max_token_bytes=1)
+    with pytest.raises(XlsxError, match="max_row_text_bytes"):
+        hypaxel.read_rows(data, max_row_text_bytes=199_999)
+    for option in ["max_tables", "max_table_bytes", "max_token_bytes", "max_row_text_bytes"]:
+        for value in [0, -1]:
+            with pytest.raises(ValueError, match=f"{option} must be at least 1"):
+                hypaxel.open_workbook(data, **{option: value})
+
+    def fill(wb):
+        ws = wb.add_worksheet("S")
+        ws.write_rows([["a", None, "b"], [1, None, 2]])
+        ws.add_table(1, 1, 2, 1, columns=["a"])
+        ws.add_table(1, 3, 2, 3, columns=["b"])
+
+    tables = build(fill)
+    with hypaxel.open_workbook(tables, max_tables=1) as wb, pytest.raises(XlsxError, match="max_tables"):
+        wb.tables()
+    with hypaxel.open_workbook(tables, max_table_bytes=10) as wb, pytest.raises(XlsxError, match="max_table_bytes"):
+        wb.tables()

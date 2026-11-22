@@ -35,7 +35,8 @@ final class TableParser {
 
     /**
      * Parses a table part. {@code budget[0]} is the number of name bytes the caller still accepts;
-     * it is reduced by the table's name and column names, plus {@value #COLUMN_COST} per column.
+     * it is reduced by the table's name, column names and custom style name, plus
+     * {@value #COLUMN_COST} per column.
      */
     static ExcelTable parse(XmlReader xml, long[] budget) throws IOException {
         int[] range = null;
@@ -89,7 +90,11 @@ final class TableParser {
                 columns.add(column == null ? "" : column);
                 charge(budget, (column == null ? 0 : utf8Length(column)) + COLUMN_COST);
             } else if (xml.nameIs(TABLE_STYLE_INFO)) {
-                style = parseStyle(xml.attribute(NAME));
+                String styleName = xml.attribute(NAME);
+                style = styleName == null ? TableStyle.NONE : TableStyle.fromName(styleName);
+                if (style.isCustom()) {
+                    charge(budget, utf8Length(styleName));
+                }
                 rowStripes = isTrue(xml.attribute(SHOW_ROW_STRIPES));
                 columnStripes = isTrue(xml.attribute(SHOW_COLUMN_STRIPES));
                 firstColumn = isTrue(xml.attribute(SHOW_FIRST_COLUMN));
@@ -121,7 +126,7 @@ final class TableParser {
     private static void charge(long[] budget, long cost) {
         budget[0] -= cost;
         if (budget[0] < 0) {
-            throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, "the tables of a worksheet hold too many names");
+            throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, "the tables of a worksheet hold more names than ReadOptions.maxTableBytes allows");
         }
     }
 
@@ -160,33 +165,6 @@ final class TableParser {
         }
         String trimmed = value.strip();
         return trimmed.equals("1") || trimmed.equals("true");
-    }
-
-    /** Maps a built-in style name such as {@code TableStyleMedium9}; custom styles have no counterpart. */
-    static TableStyle parseStyle(String value) {
-        if (value == null) {
-            return TableStyle.NONE;
-        }
-        String name = value.strip();
-        if (!name.startsWith("TableStyle")) {
-            return TableStyle.NONE;
-        }
-        name = name.substring("TableStyle".length());
-        int digits = 0;
-        while (digits < name.length() && (name.charAt(digits) < '0' || name.charAt(digits) > '9')) {
-            digits++;
-        }
-        int number = digits == name.length() || name.length() - digits > 3 ? -1 : Ascii.parseUnsigned(name.substring(digits));
-        switch (name.substring(0, digits)) {
-            case "Light":
-                return number >= 1 && number <= 21 ? TableStyle.light(number) : TableStyle.NONE;
-            case "Medium":
-                return number >= 1 && number <= 28 ? TableStyle.medium(number) : TableStyle.NONE;
-            case "Dark":
-                return number >= 1 && number <= 11 ? TableStyle.dark(number) : TableStyle.NONE;
-            default:
-                return TableStyle.NONE;
-        }
     }
 
     /**

@@ -3,6 +3,7 @@ package de.vensas.hypaxel.internal;
 import de.vensas.hypaxel.ExcelTable;
 import de.vensas.hypaxel.XlsxException;
 import de.vensas.hypaxel.XlsxException.Kind;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -37,6 +38,9 @@ final class TableDefinition {
         }
         if (table.totalsRow()) {
             throw new XlsxException(Kind.INVALID_ARGUMENT, "tables with a totals row can be read but not written");
+        }
+        if (table.style().isCustom()) {
+            validateStyleName(table.style().name());
         }
 
         String name = table.name();
@@ -99,13 +103,50 @@ final class TableDefinition {
         }
         x.raw("</tableColumns><tableStyleInfo");
         if (table.style().name() != null) {
-            x.raw(" name=\"").raw(table.style().name()).raw('"');
+            x.raw(" name=\"").raw(escapeAttribute(table.style().name()).getBytes(StandardCharsets.UTF_8)).raw('"');
         }
         x.raw(table.highlightFirstColumn() ? " showFirstColumn=\"1\"" : " showFirstColumn=\"0\"");
         x.raw(table.highlightLastColumn() ? " showLastColumn=\"1\"" : " showLastColumn=\"0\"");
         x.raw(table.rowStripes() ? " showRowStripes=\"1\"" : " showRowStripes=\"0\"");
         x.raw(table.columnStripes() ? " showColumnStripes=\"1\"" : " showColumnStripes=\"0\"");
         x.raw("/></table>");
+    }
+
+    /**
+     * A custom style name is 1..255 characters on one line and contains only characters XML 1.0
+     * can carry, as it is written verbatim rather than with Excel's {@code _xHHHH_} escapes.
+     */
+    static void validateStyleName(String name) {
+        boolean valid = !name.isEmpty() && name.length() <= 255;
+        for (int i = 0; valid && i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c < 0x20 || c == 0xFFFE || c == 0xFFFF) {
+                valid = false;
+            } else if (Character.isHighSurrogate(c)) {
+                valid = i + 1 < name.length() && Character.isLowSurrogate(name.charAt(++i));
+            } else if (Character.isLowSurrogate(c)) {
+                valid = false;
+            }
+        }
+        if (!valid) {
+            throw new XlsxException(Kind.INVALID_ARGUMENT, "invalid table style name \"" + name
+                    + "\": custom table style names are 1..255 characters without control characters");
+        }
+    }
+
+    private static String escapeAttribute(String text) {
+        StringBuilder out = new StringBuilder(text.length() + 16);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '&' -> out.append("&amp;");
+                case '<' -> out.append("&lt;");
+                case '>' -> out.append("&gt;");
+                case '"' -> out.append("&quot;");
+                default -> out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     /**

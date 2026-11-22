@@ -17,7 +17,7 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
     <PackageTags>excel;xlsx;spreadsheet;openxml;aspnetcore;streaming;performance</PackageTags>
-    <VersionPrefix>0.4.0</VersionPrefix>
+    <VersionPrefix>0.5.0</VersionPrefix>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">

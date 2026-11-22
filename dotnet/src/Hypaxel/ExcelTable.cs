@@ -1,9 +1,13 @@
+using System.Globalization;
 using System.Text;
 using Hypaxel.Internal;
 
 namespace Hypaxel;
 
-/// <summary>A built-in table style, as shown in Excel's table style gallery.</summary>
+/// <summary>
+/// A table style: one of Excel's built-in styles from the table style gallery, or a custom style
+/// that the workbook defines, referenced by name.
+/// </summary>
 public readonly record struct TableStyle
 {
     private enum Family : byte
@@ -12,15 +16,18 @@ public readonly record struct TableStyle
         Light,
         Medium,
         Dark,
+        Custom,
     }
 
     private readonly Family _family;
     private readonly byte _number;
+    private readonly string? _custom;
 
-    private TableStyle(Family family, int number)
+    private TableStyle(Family family, int number, string? custom = null)
     {
         _family = family;
         _number = (byte)number;
+        _custom = custom;
     }
 
     /// <summary>No table formatting (filter buttons and structured references still work).</summary>
@@ -38,11 +45,106 @@ public readonly record struct TableStyle
     /// <summary><c>TableStyleDark1</c> to <c>TableStyleDark11</c>.</summary>
     public static TableStyle Dark(int number) => Create(Family.Dark, number, 11);
 
-    /// <summary>The style name used in the file (e.g. <c>TableStyleMedium2</c>), or null for <see cref="None"/>.</summary>
-    public string? Name => _family == Family.None ? null : $"TableStyle{_family}{_number}";
+    /// <summary>
+    /// A custom table style, written verbatim as the style name. The workbook must define the style
+    /// (for example a template that already contains it); otherwise Excel shows the table unformatted.
+    /// </summary>
+    /// <remarks>A name equal to a built-in one (such as <c>TableStyleMedium9</c>) is kept as a custom style and written as given.</remarks>
+    /// <param name="name">1 to 255 UTF-16 code units on a single line, without characters that XML 1.0 does not allow.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not a valid table style name.</exception>
+    public static TableStyle Custom(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!IsValidCustomName(name))
+        {
+            throw new ArgumentException(InvalidCustomName, nameof(name));
+        }
+
+        return new TableStyle(Family.Custom, 0, name);
+    }
+
+    /// <summary>
+    /// The style a file names: a built-in name (ignoring surrounding white space) gives that built-in style,
+    /// an empty name gives <see cref="None"/>, and any other name gives a custom style with the name unchanged.
+    /// </summary>
+    /// <remarks>The name is not validated; <see cref="Worksheet.AddTable"/> rejects an invalid custom name.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    public static TableStyle FromName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return name.Length == 0 ? None
+            : TryParseBuiltIn(name.AsSpan().Trim(" \t\r\n\f"), out var builtIn) ? builtIn
+            : new TableStyle(Family.Custom, 0, name);
+    }
+
+    /// <summary>True for a custom style.</summary>
+    public bool IsCustom => _family == Family.Custom;
+
+    /// <summary>
+    /// The style name used in the file (e.g. <c>TableStyleMedium2</c> or a custom style's name), or null for <see cref="None"/>.
+    /// </summary>
+    public string? Name => _family switch
+    {
+        Family.None => null,
+        Family.Custom => _custom,
+        _ => $"TableStyle{_family}{_number}",
+    };
 
     /// <inheritdoc />
     public override string ToString() => Name ?? "None";
+
+    internal const string InvalidCustomName = "Invalid table style name: custom style names must be 1 to 255 characters on one line, without control characters.";
+
+    internal static bool IsValidCustomName(string name)
+    {
+        var count = 0;
+        for (var i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (char.IsHighSurrogate(c) && i + 1 < name.Length && char.IsLowSurrogate(name[i + 1]))
+            {
+                i++;
+            }
+            else if (c < ' ' || char.IsSurrogate(c) || c is '\uFFFE' or '\uFFFF')
+            {
+                return false;
+            }
+
+            count++;
+        }
+
+        return count >= 1 && name.Length <= 255;
+    }
+
+    private static bool TryParseBuiltIn(ReadOnlySpan<char> name, out TableStyle style)
+    {
+        style = None;
+        if (!name.StartsWith("TableStyle", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        name = name[10..];
+        var digits = name.IndexOfAnyInRange('0', '9');
+        if (digits < 0 || !byte.TryParse(name[digits..], NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+        {
+            return false;
+        }
+
+        var family = name[..digits];
+        Family? match = family.SequenceEqual("Light") && number is >= 1 and <= 21 ? Family.Light
+            : family.SequenceEqual("Medium") && number is >= 1 and <= 28 ? Family.Medium
+            : family.SequenceEqual("Dark") && number is >= 1 and <= 11 ? Family.Dark
+            : null;
+        if (match is not { } found)
+        {
+            return false;
+        }
+
+        style = new TableStyle(found, number);
+        return true;
+    }
 
     private static TableStyle Create(Family family, int number, int max)
     {
@@ -237,6 +339,11 @@ internal sealed class TableDefinition
         if (table.HasTotalsRow)
         {
             throw new ArgumentException("Tables with a totals row can be read but not written.", nameof(table));
+        }
+
+        if (table.Style.IsCustom && !TableStyle.IsValidCustomName(table.Style.Name!))
+        {
+            throw new ArgumentException(TableStyle.InvalidCustomName, nameof(table));
         }
 
         string name;

@@ -50,8 +50,9 @@ public final class SheetReader implements Closeable, Iterable<Row> {
     }
 
     /**
-     * Returns the column widths the sheet defines, explicit and auto-fitted alike, in file order.
-     * Columns that are not covered have the default width. Like the outline settings, the widths
+     * Returns the column widths the sheet defines, explicit and auto-fitted alike, in file order,
+     * including hidden columns that store no width. Columns that are not covered have the default
+     * width. Like the outline settings, the widths
      * precede the rows in the file, so they are available before the first row is read, and they
      * stay available after the rows were read or the reader was closed.
      *
@@ -65,11 +66,11 @@ public final class SheetReader implements Closeable, Iterable<Row> {
         return parser.columnWidths();
     }
 
-    /** Returns the width of a 1-based column; empty if the sheet leaves it at the default. */
+    /** Returns the width of a 1-based column; empty if the sheet leaves it at the default or stores no width for it. */
     public OptionalDouble columnWidth(int column) throws IOException {
         for (ColumnWidth width : columnWidths()) {
             if (column >= width.firstColumn() && column <= width.lastColumn()) {
-                return OptionalDouble.of(width.width());
+                return width.width();
             }
         }
         return OptionalDouble.empty();

@@ -53,7 +53,7 @@ var (
 	// read.
 	ErrRowsClosed = errors.New("hypaxel: rows are closed")
 	// ErrLimitExceeded reports a workbook that exceeds a safety limit of the Reader, such as
-	// [WithMaxSharedStringsBytes] or the 16 MiB bound on a single XML token.
+	// [WithMaxSharedStringsBytes] or [WithMaxTokenBytes]; the message names the option that sets it.
 	ErrLimitExceeded = errors.New("hypaxel: read limit exceeded")
 )
 

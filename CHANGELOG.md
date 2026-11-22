@@ -3,9 +3,60 @@
 All notable changes to Hypaxel are recorded here. Versions apply to every package (Rust crates,
 Python, Node.js, .NET, Java, Go and PHP).
 
-## Unreleased
+## 0.5.0 (unreleased)
+
+### Added
+
+- **Custom table styles (all implementations)** ([#20](https://github.com/vensas/hypaxel/issues/20)).
+  The table style type can name a style defined in the workbook, not only one of Excel's built-in
+  styles. Readers return a custom style by name instead of as "no style", so a table that was read
+  can be written back with its style. The writer stores the name as given (1–255 UTF-16 code
+  units, no control characters) without Excel's `_xHHHH_` escapes; Excel applies it only if the
+  workbook defines the style. Names of built-in styles still read as the built-in style.
+  - Rust: `TableStyle::Custom(String)`, `TableStyle::from_name` (names read from a file) and
+    `TableStyle::parse` (names typed by a user, rejecting mistyped built-in names).
+  - .NET: `TableStyle.Custom(name)`, `TableStyle.FromName(name)`, `TableStyle.IsCustom`.
+  - Go: `TableStyleCustom(name)` and `TableStyle.Custom()`.
+  - Java: `TableStyle.custom(name)`, `TableStyle.fromName(name)`, `TableStyle.isCustom()`.
+  - PHP: `TableStyle::custom($name)`.
+  - Python and Node.js: `add_table(style=...)` / `addTable({ style })` take a name that is not a
+    built-in one as a custom style, and `tables()` returns the stored name. A name starting with
+    `TableStyle` (in any case) must be a built-in style, so `TableStyleMedium29` or
+    `TableStyleMeduim2` still raise an error instead of producing an unstyled table.
+- **Configurable reader limits (.NET, Rust, Python, Node.js and browsers, Go, Java)**
+  ([#25](https://github.com/vensas/hypaxel/issues/25)). The limits for the tables of a sheet, XML
+  tokens and row text can be set where the shared string limit is set, with the previous fixed
+  values as defaults: most tables per worksheet (4,096), bytes of table, column and style names
+  per worksheet (64 MiB), largest XML token (16 MiB) and text per row (256 MiB). Every
+  implementation rejects values below 1 with its invalid-argument error when the reader is
+  created (Rust `Error::InvalidArgument`, .NET `ArgumentOutOfRangeException`, Go
+  `ErrInvalidArgument`, Java `INVALID_ARGUMENT`, Python `ValueError`, Node.js `XlsxError`); token
+  limits from 1 to 64 KiB count as 64 KiB. Exceeding a limit gives the existing limit error,
+  naming the option. The 16,384
+  columns per table and column ranges per sheet stay fixed: they are Excel's grid width.
+  - Rust: `ReadOptions::max_tables`, `max_table_bytes`, `max_token_bytes`, `max_row_text_bytes`.
+  - .NET: `XlsxReaderOptions.MaxTables`, `MaxTableBytes`, `MaxTokenBytes`, `MaxRowTextBytes`
+    (row text counts two bytes per character, as .NET holds it).
+  - Go: `WithMaxTables`, `WithMaxTableBytes`, `WithMaxTokenBytes`, `WithMaxRowTextBytes`.
+  - Java: `ReadOptions.Builder.maxTables`, `maxTableBytes`, `maxTokenBytes`, `maxRowTextBytes`.
+  - Python: `open_workbook(max_tables=, max_table_bytes=, max_token_bytes=, max_row_text_bytes=)`.
+  - Node.js and browsers: `ReadOptions.maxTables`, `maxTableBytes`, `maxTokenBytes`,
+    `maxRowTextBytes`.
 
 ### Changed
+
+- **Hidden columns without a width are reported (.NET, Rust, Python, Node.js and browsers, Go,
+  Java)** ([#21](https://github.com/vensas/hypaxel/issues/21)). The worksheet layout now lists a
+  column that is hidden but stores no width, which was skipped and so reported as visible. Its
+  width is absent, and the width lookup returns absent for it.
+- **Breaking:** the column width entry's width is optional: Rust `ColumnWidth::width()` →
+  `Option<f64>`, .NET `ColumnWidth.Width` → `double?`, Java `ColumnWidth.width()` →
+  `OptionalDouble`, Go `ColumnWidth` gains `HasWidth`, Python `column_widths` tuples and Node.js
+  `ColumnWidth.width` may hold `None` / `undefined`.
+- **Breaking:** the table style types changed to carry a custom name. Rust `TableStyle` is no
+  longer `Copy` and `name()` takes `&self`; Go `TableStyle` is a struct (still comparable with
+  `==`) and `TableStyleNone` is a variable. Python and Node.js accept names other than
+  `TableStyle…` as custom styles instead of rejecting them.
 
 - Package metadata (all implementations) links the project website,
   [hypaxel.libs.vensas.de](https://hypaxel.libs.vensas.de), as the homepage.

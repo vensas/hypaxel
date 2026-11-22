@@ -7,12 +7,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalDouble;
 
 /** Streaming worksheet parser: one row at a time, with memory bounded by the widest row. */
 public final class SheetParser {
-    /** Largest amount of decoded text one row may hold. */
-    static final int MAX_ROW_TEXT = 256 * 1024 * 1024;
-
     private static final int MAX_ROWS = WorkbookEngine.MAX_ROWS;
     private static final int MAX_COLUMNS = WorkbookEngine.MAX_COLUMNS;
 
@@ -63,6 +61,7 @@ public final class SheetParser {
     private final DateStyles styles;
     private final boolean date1904;
     private final boolean includeEmptyRows;
+    private final int maxRowText;
     private final RowBuffer row;
     private final ByteBuilder scratch = new ByteBuilder(64);
     private int state = BEFORE_DATA;
@@ -72,8 +71,11 @@ public final class SheetParser {
     private boolean outlineSummaryAbove;
     private int rowOutlineLevels;
 
-    public SheetParser(XmlReader xml, SharedStringTable sharedStrings, DateStyles styles, boolean date1904, boolean includeEmptyRows) {
+    /** {@code maxRowText} is the largest amount of decoded text, in bytes, one row may hold. */
+    public SheetParser(XmlReader xml, SharedStringTable sharedStrings, DateStyles styles, boolean date1904, boolean includeEmptyRows,
+            int maxRowText) {
         this.xml = xml;
+        this.maxRowText = Math.min(maxRowText, Integer.MAX_VALUE - 8);
         this.includeEmptyRows = includeEmptyRows;
         this.sharedStringCount = sharedStrings.size();
         this.styles = styles;
@@ -284,7 +286,7 @@ public final class SheetParser {
                 hidden = attributeIsTrue();
             }
         }
-        if (first < 0 || last < 0 || Double.isNaN(width)) {
+        if (first < 0 || last < 0 || Double.isNaN(width) && !hidden) {
             return;
         }
         last = Math.min(last, MAX_COLUMNS);
@@ -294,7 +296,8 @@ public final class SheetParser {
         if (columnWidths.size() >= MAX_COLUMNS) {
             throw xml.malformed("the sheet defines more than 16384 column ranges");
         }
-        columnWidths.add(new ColumnWidth((int) first, (int) last, width, hidden));
+        columnWidths.add(new ColumnWidth((int) first, (int) last,
+                Double.isNaN(width) ? OptionalDouble.empty() : OptionalDouble.of(width), hidden));
     }
 
     /** The current attribute as a non-negative integer; -1 if invalid. */
@@ -416,9 +419,9 @@ public final class SheetParser {
                 continue;
             }
             readCell(type, style, column);
-            if (row.text.length() > MAX_ROW_TEXT) {
+            if (row.text.length() > maxRowText) {
                 throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, xml.part(),
-                        "row " + row.number + " holds more than " + MAX_ROW_TEXT + " bytes of text");
+                        "row " + row.number + " holds more than " + maxRowText + " bytes of text (ReadOptions.maxRowTextBytes)");
             }
         }
         if (!sorted) {
@@ -445,14 +448,14 @@ public final class SheetParser {
             if (xml.nameIs(V)) {
                 hasValue = true;
                 if (isText) {
-                    xml.readTextInto(row.text, true, MAX_ROW_TEXT);
+                    xml.readTextInto(row.text, true, maxRowText);
                 } else if (xml.tryRawText()) {
                     String error = XmlText.decode(scratch, xml.buffer(), xml.textStart, xml.textEnd, true, false);
                     if (error != null) {
                         throw xml.malformed(error);
                     }
                 } else {
-                    xml.readTextInto(scratch, false, MAX_ROW_TEXT);
+                    xml.readTextInto(scratch, false, maxRowText);
                 }
             } else if (type == TYPE_INLINE_STRING && xml.nameIs(IS)) {
                 hasValue = true;
@@ -465,9 +468,9 @@ public final class SheetParser {
             row.text.truncate(textStart);
             return;
         }
-        if (row.text.length() > MAX_ROW_TEXT || scratch.length() > MAX_ROW_TEXT) {
+        if (row.text.length() > maxRowText || scratch.length() > maxRowText) {
             throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, xml.part(),
-                    "row " + row.number + " holds more than " + MAX_ROW_TEXT + " bytes of text");
+                    "row " + row.number + " holds more than " + maxRowText + " bytes of text (ReadOptions.maxRowTextBytes)");
         }
 
         if (type == TYPE_FORMULA_STRING || type == TYPE_INLINE_STRING || type == TYPE_ERROR) {
@@ -495,9 +498,9 @@ public final class SheetParser {
         if (error != null) {
             throw xml.malformed(error);
         }
-        if (row.text.length() > MAX_ROW_TEXT) {
+        if (row.text.length() > maxRowText) {
             throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, xml.part(),
-                    "row " + row.number + " holds more than " + MAX_ROW_TEXT + " bytes of text");
+                    "row " + row.number + " holds more than " + maxRowText + " bytes of text (ReadOptions.maxRowTextBytes)");
         }
         int i = add(column, type);
         row.starts[i] = start;
@@ -596,8 +599,8 @@ public final class SheetParser {
             int event = xml.next();
             if (event == XmlReader.START) {
                 if (xml.nameIs(T)) {
-                    xml.readTextInto(row.text, true, MAX_ROW_TEXT);
-                    if (row.text.length() > MAX_ROW_TEXT) {
+                    xml.readTextInto(row.text, true, maxRowText);
+                    if (row.text.length() > maxRowText) {
                         return;
                     }
                 } else if (xml.nameIs(R_PH) || xml.nameIs(R_PR) || xml.nameIs(PHONETIC_PR)) {

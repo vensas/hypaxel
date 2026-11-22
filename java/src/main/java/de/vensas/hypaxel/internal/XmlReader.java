@@ -22,8 +22,9 @@ public final class XmlReader {
     public static final int TEXT = 4;
     public static final int CDATA = 5;
 
-    /** Largest single token (a tag or a run of text). Excel limits cell text to 32,767 characters. */
+    /** Default largest single token (a tag or a run of text). Excel limits cell text to 32,767 characters. */
     public static final int MAX_TOKEN = 16 * 1024 * 1024;
+    /** Smallest token limit: the initial buffer, which holds any cell text Excel writes plus lookahead. */
     static final int INITIAL_BUFFER = 64 * 1024;
 
     private static final byte[] COMMENT_END = {'-', '-', '>'};
@@ -33,6 +34,7 @@ public final class XmlReader {
 
     private final ByteInput input;
     private final String part;
+    private final int maxToken;
     private byte[] buf;
     private int pos;
     private int end;
@@ -56,12 +58,18 @@ public final class XmlReader {
     private int attrPos;
 
     public XmlReader(ByteInput input, String part) {
-        this(input, part, INITIAL_BUFFER);
+        this(input, part, INITIAL_BUFFER, MAX_TOKEN);
     }
 
-    XmlReader(ByteInput input, String part, int bufferSize) {
+    /** A reader whose tokens may hold up to {@code maxToken} bytes; values below 64 KiB count as 64 KiB. */
+    public XmlReader(ByteInput input, String part, int maxToken) {
+        this(input, part, INITIAL_BUFFER, maxToken);
+    }
+
+    XmlReader(ByteInput input, String part, int bufferSize, int maxToken) {
         this.input = input;
         this.part = part;
+        this.maxToken = Math.max(Math.min(maxToken, Integer.MAX_VALUE - 8), Math.max(INITIAL_BUFFER, bufferSize));
         this.buf = new byte[bufferSize];
     }
 
@@ -116,10 +124,11 @@ public final class XmlReader {
             pos = 0;
         }
         if (end == buf.length) {
-            if (buf.length >= MAX_TOKEN) {
-                throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, part, "an XML token is larger than " + MAX_TOKEN + " bytes");
+            if (buf.length >= maxToken) {
+                throw new XlsxException(XlsxException.Kind.LIMIT_EXCEEDED, part,
+                        "an XML token is larger than " + maxToken + " bytes (ReadOptions.maxTokenBytes)");
             }
-            buf = Arrays.copyOf(buf, Math.min(buf.length * 2, MAX_TOKEN));
+            buf = Arrays.copyOf(buf, (int) Math.min(buf.length * 2L, maxToken));
         }
         int n = input.read(buf, end, buf.length - end);
         if (n <= 0) {
