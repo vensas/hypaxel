@@ -102,7 +102,8 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   `include_empty_rows=True` to get their properties as well (such rows after the last value are
   then returned too, and `skip_empty=True` still drops them). Before the first row it already has the sheet's `column_widths` (a list of
   `(first_col, last_col, width, hidden)`, explicit and auto-fitted alike; `width` is `None` for a
-  hidden column stored without one), `column_width(col)`,
+  hidden column stored without one), `column_runs` (the same runs as `ColumnWidth` objects with
+  `first_column`, `last_column`, `width`, `hidden` and `visible`), `column_width(col)`,
   `column_hidden(col)` (the hidden flag), `column_visible(col)` (False when hidden or 0 wide),
   `outline_summary_above` and `row_outline_levels`.
 
@@ -225,7 +226,7 @@ def export():
 | `Reader.sheet_names`, `Reader.sheets`, `Reader.date_1904`, `Reader.rows(sheet=0, *, skip_empty=False)`, `Reader.close()` | `rows` iterates lists; several iterators can be open at once |
 | `Reader.tables(sheet=0)` | the sheet's Excel tables as dicts with `add_table`'s keys |
 | `RowIterator.row_number`, `outline_level`, `hidden`, `collapsed`, `height` | properties of the row returned last |
-| `RowIterator.column_widths`, `column_width(col)`, `column_hidden(col)`, `column_visible(col)`, `outline_summary_above`, `row_outline_levels` | sheet layout, available before the first row |
+| `RowIterator.column_widths`, `column_runs`, `column_width(col)`, `column_hidden(col)`, `column_visible(col)`, `outline_summary_above`, `row_outline_levels` | sheet layout, available before the first row |
 | `iter_rows` / `read_rows`, `iter_records` / `read_records`, `read_dataframe` | one-call readers; see [Reading](#reading) |
 
 ### Tables, row grouping and auto-fit

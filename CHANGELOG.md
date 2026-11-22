@@ -13,7 +13,8 @@ Python, Node.js, .NET, Java, Go and PHP).
   return its width of 0 and the hidden flag as stored, so callers can tell a zero-width column from
   one hidden with its width kept. Columns the sheet does not list are visible.
   - Rust: `ColumnWidth::is_visible()`, `SheetLayout::is_column_visible(column)`.
-  - Python: `RowIterator.column_visible(col)`.
+  - Python: `RowIterator.column_visible(col)` and `RowIterator.column_runs`, which returns the
+    runs as `ColumnWidth` objects with a `visible` attribute; `column_widths` keeps its 4-tuples.
   - Node.js: `ColumnWidth.visible`, `SheetLayout.columnVisible(column)`.
   - .NET: `ColumnWidth.Visible`, `WorksheetReader.IsColumnVisible(column)`.
   - Go: `ColumnWidth.Visible()`, `SheetLayout.ColumnVisible(column)`.

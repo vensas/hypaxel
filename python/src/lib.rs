@@ -806,6 +806,7 @@ fn _hypaxel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Styled>()?;
     m.add_class::<reader::Reader>()?;
     m.add_class::<reader::RowIterator>()?;
+    m.add_class::<reader::ColumnWidth>()?;
     m.add_function(wrap_pyfunction!(column_name, m)?)?;
     m.add("XlsxError", m.py().get_type::<XlsxError>())?;
     m.add("CONTENT_TYPE", hypaxel::CONTENT_TYPE)?;

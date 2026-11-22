@@ -470,6 +470,10 @@ def test_reports_zero_width_columns_as_not_visible():
     with hypaxel.open_workbook(data) as wb:
         rows = wb.rows()
         assert rows.column_widths[0] == (1, 1, 0.0, False)
+        runs = rows.column_runs
+        assert [(r.first_column, r.width, r.hidden, r.visible) for r in runs] == [(1, 0.0, False, False), (2, 8.0, True, False), (3, 8.0, False, True)]
+        assert isinstance(runs[0], hypaxel.ColumnWidth) and runs[0] == rows.column_runs[0] and runs[0] != runs[1]
+        assert repr(runs[0]) == "ColumnWidth(first_column=1, last_column=1, width=0.0, hidden=False, visible=False)"
         assert [(rows.column_hidden(c), rows.column_visible(c)) for c in (1, 2, 3, 4)] == [(False, False), (True, False), (False, True), (False, True)]
 
 
