@@ -10,9 +10,10 @@ It first checks that every manifest declares the tag's version, then publishes t
 | nuget.org | `Hypaxel`, `Hypaxel.AspNetCore` (with symbols) | Trusted Publishing, no stored API key | [below](#nugetorg) |
 | crates.io | `hypaxel`, `hypaxel-axum` | Trusted Publishing; the first version with a temporary token | [below](#cratesio) |
 | npm | `hypaxel` (native addon for five targets and WebAssembly, with provenance) | Trusted Publishing; the first version with a temporary token | [below](#npm) |
+| PyPI | `hypaxel` (wheels for CPython 3.10–3.14 on seven platforms, and the sdist) | Trusted Publishing, no token at all | [below](#pypi) |
 | Go module proxy | `github.com/vensas/hypaxel/go` | `go/vX.Y.Z` tag in this repository | none |
 
-PyPI and Maven Central are not published yet.
+Maven Central is not published yet.
 
 ## Publishing a release
 
@@ -47,8 +48,8 @@ replaced; fix a broken release with a new version.
 
 A pre-release tag (`v0.5.0-beta1`) needs no manifest change: the manifests keep `0.5.0`, and the
 suffix is added from the tag where the registry supports it (NuGet and npm `0.5.0-beta1`, npm under
-the `next` dist-tag instead of `latest`; Packagist and Go read the tag itself). crates.io is skipped for pre-release tags, because Cargo publishes the version
-in the manifests.
+the `next` dist-tag instead of `latest`; Packagist and Go read the tag itself). crates.io and PyPI are skipped for pre-release tags, because Cargo and maturin
+publish the version in the manifests.
 
 ## nuget.org
 
@@ -153,6 +154,29 @@ After the first release:
 
 Packages published through trusted publishing get a provenance statement automatically; the token
 release passes `--provenance` for the same result.
+
+## PyPI
+
+1. `pypi-wheels` builds wheels for every CPython version from `requires-python` on Linux x86_64
+   and aarch64, each for manylinux (glibc) and musllinux (Alpine), macOS x86_64 and arm64, and
+   Windows x64.
+2. `pypi-sdist` builds the source distribution, which vendors the `hypaxel` crate from `rust/`,
+   and installs it from source to prove it is complete.
+3. `pypi-smoke` installs the wheels with Python 3.10 and 3.14 on Ubuntu 22.04 (x64 and arm64),
+   macOS (Intel and Apple silicon), Windows and Alpine, and writes and reads a workbook
+   (`python/scripts/smoke.py`).
+4. `pypi` uploads the wheels and the sdist with attestations, skipping files PyPI already has.
+
+PyPI can trust a publisher before the project exists, so no token is needed, not even for the
+first release. One-time setup:
+
+1. Sign in to [pypi.org](https://pypi.org) with an account that has two-factor authentication.
+2. Under *Your account → Publishing → Add a new pending publisher* → GitHub, enter PyPI project
+   name `hypaxel`, owner `vensas`, repository `hypaxel`, workflow name `release.yml` and
+   environment name `release`.
+
+A pending publisher does not reserve the name; the first upload creates the project. Afterwards
+the project can be moved to a PyPI organization and given more owners under *Manage → Collaborators*.
 
 ## Go
 
