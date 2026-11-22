@@ -481,6 +481,16 @@ export function defineReadSuite(label, api) {
     assert.deepEqual(await readRecords(bytes, 0, { includeEmptyRows: true }), [{ first: 4 }])
   })
 
+  test('reads a zero-width column saved by excel', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/excel-zero-width.xlsx', import.meta.url))
+    const layout = openWorkbookSync(bytes).rows().layout()
+    assert.deepEqual(layout.columnWidths, [
+      { firstColumn: 1, lastColumn: 1, width: 10.5, hidden: false, visible: true },
+      { firstColumn: 2, lastColumn: 2, width: 0, hidden: true, visible: false },
+    ])
+    assert.deepEqual([1, 2, 3].map((c) => layout.columnVisible(c)), [true, false, true])
+  })
+
   test('reads a table with a totals row saved by excel', async () => {
     const bytes = await readFile(new URL('../../testdata/reader/excel-totals.xlsx', import.meta.url))
     const book = openWorkbookSync(bytes)

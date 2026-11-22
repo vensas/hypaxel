@@ -350,6 +350,14 @@ def test_tables_with_a_totals_row_cannot_be_written():
         ws.add_table(1, 1, 3, 1, columns=["a"], totals_row=True)
 
 
+def test_reads_a_zero_width_column_saved_by_excel():
+    with hypaxel.open_workbook(os.path.join(TESTDATA, "excel-zero-width.xlsx")) as wb:
+        rows = wb.rows()
+        assert [(c.first_column, c.width, c.hidden, c.visible) for c in rows.column_widths] == [(1, 10.5, False, True), (2, 0.0, True, False)]
+        assert [rows.column_visible(c) for c in (1, 2, 3)] == [True, False, True]
+        assert list(rows) == [["A", "B"]]
+
+
 def test_reads_a_table_with_a_totals_row_saved_by_excel():
     with hypaxel.open_workbook(os.path.join(TESTDATA, "excel-totals.xlsx")) as wb:
         assert wb.sheet_names == ["Inventory"]

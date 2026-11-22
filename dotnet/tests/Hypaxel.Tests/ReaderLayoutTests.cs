@@ -817,6 +817,16 @@ public class ReaderLayoutTests
     }
 
     [Fact]
+    public void ReadsZeroWidthColumnSavedByExcel()
+    {
+        using var reader = XlsxReader.Open(TestData("excel-zero-width.xlsx"));
+        using var rows = reader.OpenWorksheet(0);
+        Assert.Equal([new ColumnWidth(1, 1, 10.5), new ColumnWidth(2, 2, 0, Hidden: true)], rows.ColumnWidths);
+        Assert.Equal([true, false], rows.ColumnWidths.Select(c => c.Visible));
+        Assert.Equal([true, false, true], new[] { 1, 2, 3 }.Select(rows.IsColumnVisible));
+    }
+
+    [Fact]
     public void ReadsTableWithTotalsRowSavedByExcel()
     {
         using var reader = XlsxReader.Open(TestData("excel-totals.xlsx"));

@@ -800,6 +800,23 @@ class ReaderLayoutTest {
     }
 
     /**
+     * {@code testdata/reader/excel-zero-width.xlsx} was saved by Excel for Mac from a file that gave
+     * column B a width of 0 without the hidden flag; Excel added the flag and kept the width of 0.
+     */
+    @Test
+    void readsAZeroWidthColumnSavedByExcel() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "excel-zero-width.xlsx"));
+        try (XlsxReader reader = XlsxReader.open(xlsx); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(List.of(new ColumnWidth(1, 1, OptionalDouble.of(10.5), false), new ColumnWidth(2, 2, OptionalDouble.of(0), true)),
+                    rows.columnWidths());
+            assertEquals(List.of(true, false), rows.columnWidths().stream().map(ColumnWidth::visible).toList());
+            assertTrue(rows.columnVisible(1));
+            assertFalse(rows.columnVisible(2));
+            assertTrue(rows.columnVisible(3));
+        }
+    }
+
+    /**
      * {@code testdata/reader/excel-totals.xlsx} is an inventory list saved by Excel for Mac: one
      * table over 1,000 rows with a totals row.
      */
