@@ -266,7 +266,8 @@ err := sheet.AddTable(hypaxel.Table{
 The range may include rows not written yet. Names are unique in the workbook and follow Excel's
 name rules; an empty `Name` gives `Table1`, `Table2`, ... `Style` defaults to Medium 2;
 `TableStyleNone` and `TableStyleLight(n)`, `TableStyleMedium(n)`, `TableStyleDark(n)` select the
-others. `NoHeaderRow`, `NoFilterButtons`, `NoRowStripes`, `ColumnStripes`,
+others, and `TableStyleCustom(name)` names a style defined in the workbook (1-255 characters on
+one line, written as given; Excel shows no style when the workbook does not define it). `NoHeaderRow`, `NoFilterButtons`, `NoRowStripes`, `ColumnStripes`,
 `HighlightFirstColumn` and `HighlightLastColumn` adjust the rest. Tables cannot overlap each
 other, merged cells or the worksheet's `AutoFilter`.
 
@@ -366,8 +367,8 @@ return rows.Err()
 - **Tables** live in parts of their own, which are read on each call to `Tables`; reading rows
   never touches them. They are returned from top to bottom, then left to right, whatever order
   the file lists them in. A table comes back as the `Table` that `AddTable` takes, so it compares
-  equal to the one that was written: a custom (not built-in) style reads as `TableStyleNone`,
-  generated names such as `Table1` and `Column1` are filled in, and `NoFilterButtons` is set for a
+  equal to the one that was written: a custom (not built-in) style reads as
+  `TableStyleCustom(name)` with the name as stored, generated names such as `Table1` and `Column1` are filled in, and `NoFilterButtons` is set for a
   table without a header row. `TotalsRow` is set when the last row of the range is a totals row;
   the writer cannot write totals rows and `AddTable` rejects such a table.
 - **Row properties** are those of the rows that `Next` returns; rows without values are skipped
@@ -376,8 +377,10 @@ return rows.Err()
   `Len() == 0` and carry their index and properties. Rows that the file does not store are never
   returned. `Height` is the stored height, whether set explicitly or by Excel.
 - **Layout** precedes the rows in the file, so `Layout` reads nothing extra. `ColumnWidths` holds
-  explicit and auto-fitted widths alike, each with its `Hidden` flag; columns that are not listed
-  have the default width, and `ColumnHidden(column)` tells whether a column is hidden.
+  explicit and auto-fitted widths alike, each with its `Hidden` flag, and hidden column ranges
+  that store no width, with `HasWidth` false; columns that are not listed have the default width.
+  `ColumnWidth(column)` reports no width for such a range, and `ColumnHidden(column)` tells
+  whether a column is hidden.
 
 **`Reader`**
 
@@ -387,10 +390,14 @@ return rows.Err()
 | `Sheets()`, `SheetNames()` | Sheets in workbook order with `Name`, `Visibility` (`SheetVisible`, `SheetHidden`, `SheetVeryHidden`) and `Kind` (`SheetKindWorksheet`, `SheetKindChartsheet`, `SheetKindOther`) |
 | `Rows(name)`, `RowsAt(index)` | Stream a sheet, by name (exact, then case-insensitive) or 0-based index |
 | `Tables(name)`, `TablesAt(index)` | The Excel tables of a sheet as `[]Table`, ordered by position |
-| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths` (`FirstColumn`, `LastColumn`, `Width`, `Hidden`), `ColumnWidth(column)`, `ColumnHidden(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
+| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths` (`FirstColumn`, `LastColumn`, `Width`, `HasWidth`, `Hidden`), `ColumnWidth(column)`, `ColumnHidden(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
 | `Row.OutlineLevel()`, `Hidden()`, `Collapsed()`, `Height()` | Properties of the current row |
 | `Date1904()` | Whether the workbook uses the 1904 date system |
 | `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |
+| `WithMaxTables(n)` | Option: cap the tables of one worksheet (default 4,096) |
+| `WithMaxTableBytes(n)` | Option: cap the table, column and custom style names of one worksheet's tables, plus 32 bytes per column (default 64 MiB) |
+| `WithMaxTokenBytes(n)` | Option: cap a single XML token (default 16 MiB, at least 64 KiB) |
+| `WithMaxRowTextBytes(n)` | Option: cap the text that the cells of one row hold, apart from shared strings (default 256 MiB) |
 | `WithEmptyRows(on)` | Option: also return rows stored without values, with their properties (default off) |
 | `WithConcurrentInflate(on)` | Option: decompress on a separate goroutine while parsing (default on, off when `GOMAXPROCS` is 1) |
 
@@ -430,8 +437,12 @@ return rows.Err()
   rows without references, out-of-order cells, rich text, inline strings, phonetic runs, CDATA,
   and Excel's `_xHHHH_` escapes.
 - **Safety:** document type declarations are rejected (no entity expansion), every XML token is
-  limited to 16 MiB and every row to 16,384 cells and 256 MiB of text, every sheet to 4,096 tables holding 64 MiB of table and column names, every part to 65,536 relationships to other parts, ZIP entries must match
-  their declared size and CRC-32, and `WithMaxSharedStringsBytes` caps the shared string table.
+  limited to 16 MiB (`WithMaxTokenBytes`), every row to 16,384 cells and 256 MiB of text
+  (`WithMaxRowTextBytes`), every sheet to 4,096 tables (`WithMaxTables`) holding 64 MiB of table,
+  column and style names (`WithMaxTableBytes`), every part to 65,536 relationships to other
+  parts, ZIP entries must match their declared size and CRC-32, and `WithMaxSharedStringsBytes`
+  caps the shared string table. Lower the limits when reading untrusted uploads; an exceeded
+  limit returns `ErrLimitExceeded` naming its option.
   Damaged input returns an error, never a panic or a hang; the reader is fuzz-tested.
 
 Errors name the part they come from, as `*ReadError` with a `Part` field:

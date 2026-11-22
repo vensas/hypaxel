@@ -5,15 +5,20 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
-// TableStyle is one of Excel's built-in table styles. The zero value is TableStyleMedium2,
-// Excel's default for new tables.
-type TableStyle uint16
+// TableStyle is one of Excel's built-in table styles, or a custom style by name. The zero value
+// is TableStyleMedium2, Excel's default for new tables. Styles compare equal with == when they
+// are the same built-in style or custom styles with the same name.
+type TableStyle struct {
+	id     uint16
+	custom string
+}
 
 // TableStyleNone applies no table formatting; filter buttons and structured references still
 // work.
-const TableStyleNone TableStyle = tableNone << 8
+var TableStyleNone = TableStyle{id: tableNone << 8}
 
 const (
 	tableDefault = iota
@@ -21,6 +26,7 @@ const (
 	tableMedium
 	tableDark
 	tableNone
+	tableCustom
 )
 
 var tableStyleFamilies = [...]struct {
@@ -41,6 +47,14 @@ func TableStyleMedium(n int) TableStyle { return newTableStyle(tableMedium, n) }
 // TableStyleDark returns TableStyleDark1 to TableStyleDark11.
 func TableStyleDark(n int) TableStyle { return newTableStyle(tableDark, n) }
 
+// TableStyleCustom returns a style defined in the workbook's styles part (<tableStyles>), by
+// name: 1-255 characters on one line, written as given. Excel falls back to no style when the
+// workbook does not define it, so this is mainly useful for tables read from an existing
+// workbook. [Sheet.AddTable] rejects an invalid name.
+func TableStyleCustom(name string) TableStyle {
+	return TableStyle{id: tableCustom << 8, custom: name}
+}
+
 // newTableStyle returns an invalid style, which [Sheet.AddTable] rejects, for n out of range.
 // TableStyleMedium2 is always the zero value, so that equal styles compare equal.
 func newTableStyle(family, n int) TableStyle {
@@ -48,36 +62,59 @@ func newTableStyle(family, n int) TableStyle {
 		n = 0
 	}
 	if family == tableMedium && n == 2 {
-		return 0
+		return TableStyle{}
 	}
-	return TableStyle(family<<8 | n)
+	return TableStyle{id: uint16(family<<8 | n)}
+}
+
+// Custom returns the name of a custom style, and false for a built-in style or TableStyleNone.
+func (t TableStyle) Custom() (string, bool) {
+	return t.custom, t.id == tableCustom<<8
 }
 
 func (t TableStyle) valid() bool {
-	family, n := int(t>>8), int(t&0xFF)
+	family, n := int(t.id>>8), int(t.id&0xFF)
 	switch family {
-	case tableDefault:
-		return n == 0
-	case tableNone:
+	case tableDefault, tableNone:
 		return n == 0
 	case tableLight, tableMedium, tableDark:
 		return n >= 1 && n <= tableStyleFamilies[family].count
+	case tableCustom:
+		return n == 0 && validTableStyleName(t.custom)
 	}
 	return false
 }
 
-// String returns the style name used in the file, such as "TableStyleMedium2", or "None".
+// validTableStyleName accepts 1-255 UTF-16 code units of valid UTF-8 without C0 control characters or
+// U+FFFE/U+FFFF, which XML 1.0 cannot carry or which would not survive on one line.
+func validTableStyleName(name string) bool {
+	if name == "" || utf16Len(name) > 255 || !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0xFFFE || r == 0xFFFF {
+			return false
+		}
+	}
+	return true
+}
+
+// String returns the style name used in the file, such as "TableStyleMedium2" or a custom
+// style's name, or "None".
 func (t TableStyle) String() string {
-	if t == 0 {
+	if name, ok := t.Custom(); ok {
+		return name
+	}
+	if t.id == 0 {
 		return "TableStyleMedium2"
 	}
 	if !t.valid() {
-		return "TableStyle(" + strconv.Itoa(int(t)) + ")"
+		return "TableStyle(" + strconv.Itoa(int(t.id)) + ")"
 	}
 	if t == TableStyleNone {
 		return "None"
 	}
-	return "TableStyle" + tableStyleFamilies[t>>8].name + strconv.Itoa(int(t&0xFF))
+	return "TableStyle" + tableStyleFamilies[t.id>>8].name + strconv.Itoa(int(t.id&0xFF))
 }
 
 // Table is an Excel table (a ListObject): a named, styled range with a header row and filter
@@ -187,6 +224,9 @@ func newTableMeta(t *Table, id int, taken []string) (tableMeta, error) {
 	if t.TotalsRow {
 		return tableMeta{}, fmt.Errorf("%w: tables with a totals row can be read but not written", ErrInvalidArgument)
 	}
+	if _, custom := t.Style.Custom(); custom && !t.Style.valid() {
+		return tableMeta{}, fmt.Errorf("%w: invalid table style name (1-255 characters on one line)", ErrInvalidArgument)
+	}
 	if !t.Style.valid() {
 		return tableMeta{}, fmt.Errorf("%w: table style number out of range (Light 1-21, Medium 1-28, Dark 1-11)", ErrInvalidArgument)
 	}
@@ -280,7 +320,7 @@ func (t *tableMeta) appendXML(x []byte) []byte {
 	x = append(x, "</tableColumns><tableStyleInfo"...)
 	if t.style != TableStyleNone {
 		x = append(x, ` name="`...)
-		x = append(x, t.style.String()...)
+		x = appendStyleNameAttr(x, t.style.String())
 		x = append(x, '"')
 	}
 	x = appendFlag(x, ` showFirstColumn="`, t.highlightFirstCol)
@@ -296,6 +336,27 @@ func appendFlag(x []byte, attr string, on bool) []byte {
 		return append(x, `1"`...)
 	}
 	return append(x, `0"`...)
+}
+
+// appendStyleNameAttr escapes only XML's specials, so that the name is stored exactly as given:
+// validation already excludes what XML 1.0 cannot carry, and readers do not decode Excel's
+// _xHHHH_ escapes in style names.
+func appendStyleNameAttr(x []byte, s string) []byte {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '&':
+			x = append(x, "&amp;"...)
+		case '<':
+			x = append(x, "&lt;"...)
+		case '>':
+			x = append(x, "&gt;"...)
+		case '"':
+			x = append(x, "&quot;"...)
+		default:
+			x = append(x, s[i])
+		}
+	}
+	return x
 }
 
 // appendColumnNameAttr escapes like appendEscaped but writes line breaks and tabs, which

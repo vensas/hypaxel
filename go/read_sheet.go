@@ -9,9 +9,6 @@ import (
 	"unicode/utf8"
 )
 
-// maxRowText bounds the decoded text of one row.
-const maxRowText = 256 << 20
-
 type cellType uint8
 
 const (
@@ -88,6 +85,7 @@ type Rows struct {
 	scratch    []byte
 	state      uint8
 	emptyRows  bool
+	maxRowText int
 	layoutRead bool
 	previous   uint32
 	layoutErr  error
@@ -345,7 +343,7 @@ func (r *Rows) readColumn() error {
 			hidden = isTrue(value)
 		}
 	}
-	if !hasFirst || !hasLast || !hasWidth {
+	if !hasFirst || !hasLast || !hasWidth && !hidden {
 		return nil
 	}
 	last = min(last, MaxColumns)
@@ -355,8 +353,12 @@ func (r *Rows) readColumn() error {
 	if len(r.layout.ColumnWidths) >= MaxColumns {
 		return r.x.malformed("the sheet defines more than 16384 column ranges")
 	}
-	r.layout.ColumnWidths = append(r.layout.ColumnWidths, ColumnWidth{FirstColumn: int(first), LastColumn: int(last), Width: width, Hidden: hidden})
+	r.layout.ColumnWidths = append(r.layout.ColumnWidths, ColumnWidth{FirstColumn: int(first), LastColumn: int(last), Width: width, HasWidth: hasWidth, Hidden: hidden})
 	return nil
+}
+
+func (r *Rows) rowTextError() error {
+	return partError(r.x.part, ErrLimitExceeded, "row %d holds more than %d bytes of text (see WithMaxRowTextBytes)", r.row.index, r.maxRowText)
 }
 
 func (r *Rows) readCells() error {
@@ -433,8 +435,8 @@ func (r *Rows) readCells() error {
 			cell.column = column
 			row.cells = append(row.cells, cell)
 		}
-		if len(row.text) > maxRowText {
-			return partError(x.part, ErrLimitExceeded, "row %d holds more than %d bytes of text", row.index, maxRowText)
+		if len(row.text) > r.maxRowText {
+			return r.rowTextError()
 		}
 	}
 }
@@ -617,9 +619,9 @@ func (r *Rows) readCell(ct cellType, style uint32) (rawCell, bool, error) {
 				continue
 			}
 			hasValue = true
-			if row.text, err = readRichText(x, row.text, "is", maxRowText); err != nil {
+			if row.text, err = readRichText(x, row.text, "is", r.maxRowText); err != nil {
 				if err == errTextLimit {
-					err = partError(x.part, ErrLimitExceeded, "row %d holds more than %d bytes of text", row.index, maxRowText)
+					err = r.rowTextError()
 				}
 				return rawCell{}, false, err
 			}

@@ -60,3 +60,18 @@ func TestOutlinesTablesAndAutoFitReadBack(t *testing.T) {
 		t.Errorf("column B width %v, want the explicit 20", explicit)
 	}
 }
+
+func TestCustomTableStyleReadBack(t *testing.T) {
+	f := build(t, func(w *hypaxel.Writer) {
+		s := addSheet(t, w, "S")
+		check(t, s.WriteRow("Name"))
+		check(t, s.WriteRow("x"))
+		check(t, s.AddTable(hypaxel.Table{FirstRow: 1, FirstColumn: 1, LastRow: 2, LastColumn: 1, Name: "Branded",
+			Columns: []string{"Name"}, Style: hypaxel.TableStyleCustom("Brand & Co")}))
+	})
+	tables, err := f.GetTables("S")
+	check(t, err)
+	if len(tables) != 1 || tables[0].StyleName != "Brand & Co" {
+		t.Errorf("tables: %+v", tables)
+	}
+}

@@ -172,7 +172,7 @@ func (s *stringTable) get(i uint32) string {
 
 func parseSharedStrings(x *xmlReader, maxBytes int64) (*stringTable, error) {
 	// Offsets are uint32; one more text token must still fit after the limit check.
-	limit := int(min(maxBytes, math.MaxUint32-maxXMLToken))
+	limit := int(min(maxBytes, math.MaxUint32-int64(x.maxToken)))
 	var data []byte
 	var ends []uint32
 	for {

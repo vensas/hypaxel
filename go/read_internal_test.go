@@ -87,7 +87,7 @@ func TestXMLRejectsMalformedInput(t *testing.T) {
 }
 
 func TestXMLBoundsTokens(t *testing.T) {
-	x := newXMLReader(strings.NewReader("<a>"+strings.Repeat("x", maxXMLToken+1)+"</a>"), "big.xml")
+	x := newXMLReader(strings.NewReader("<a>"+strings.Repeat("x", defaultMaxTokenBytes+1)+"</a>"), "big.xml")
 	if _, err := x.next(); err != nil {
 		t.Fatal(err)
 	}

@@ -78,7 +78,7 @@ func TestReadBackTablesRowPropertiesAndLayout(t *testing.T) {
 	rows, err := r.Rows("Orders")
 	noErr(t, err)
 	layout := mustLayout(t, rows)
-	want := SheetLayout{ColumnWidths: []ColumnWidth{{1, 1, 12.5, false}, {3, 3, 30, false}, {4, 4, 5, true}}, OutlineSummaryAbove: true, RowOutlineLevels: 2}
+	want := SheetLayout{ColumnWidths: []ColumnWidth{{1, 1, 12.5, true, false}, {3, 3, 30, true, false}, {4, 4, 5, true, true}}, OutlineSummaryAbove: true, RowOutlineLevels: 2}
 	if !reflect.DeepEqual(*layout, want) {
 		t.Errorf("layout: got %+v, want %+v", *layout, want)
 	}
@@ -160,7 +160,7 @@ func TestReadLayoutFromOtherProducers(t *testing.T) {
 	r := openBytes(t, sheetWithTable(t, sheet, table))
 
 	want := []Table{{FirstRow: 2, FirstColumn: 2, LastRow: 9, LastColumn: 4, Name: "Shown",
-		Columns: []string{"Line\nbreak", "A & B", ""}, Style: TableStyleNone, ColumnStripes: true, HighlightFirstColumn: true, TotalsRow: true}}
+		Columns: []string{"Line\nbreak", "A & B", ""}, Style: TableStyleCustom("My Custom Style"), ColumnStripes: true, HighlightFirstColumn: true, TotalsRow: true}}
 	if got := mustTables(t, r, "S"); !reflect.DeepEqual(got, want) {
 		t.Errorf("tables:\n got %+v\nwant %+v", got, want)
 	}
@@ -168,7 +168,7 @@ func TestReadLayoutFromOtherProducers(t *testing.T) {
 	rows, err := r.Rows("S")
 	noErr(t, err)
 	layout := mustLayout(t, rows)
-	wantLayout := SheetLayout{ColumnWidths: []ColumnWidth{{1, 16384, 8.5, false}, {2, 3, 20, false}, {6, 16384, 7.25, true}}, OutlineSummaryAbove: true, RowOutlineLevels: 7}
+	wantLayout := SheetLayout{ColumnWidths: []ColumnWidth{{1, 16384, 8.5, true, false}, {2, 3, 20, true, false}, {4, 4, 0, false, true}, {6, 16384, 7.25, true, true}}, OutlineSummaryAbove: true, RowOutlineLevels: 7}
 	if !reflect.DeepEqual(*layout, wantLayout) {
 		t.Errorf("layout: got %+v, want %+v", *layout, wantLayout)
 	}
@@ -202,16 +202,17 @@ func TestReadTableVariants(t *testing.T) {
 		{`<table` + ns + ` displayName="T" ref="A1:B2"><tableStyleInfo name="TableStyleLight21"/></table>`,
 			Table{FirstRow: 1, FirstColumn: 1, LastRow: 2, LastColumn: 2, Name: "T", Style: TableStyleLight(21), NoFilterButtons: true, NoRowStripes: true}},
 		{`<table` + ns + ` displayName="T" ref="A1:B2"><tableStyleInfo name="TableStyleDark12" showRowStripes="1"/></table>`,
-			Table{FirstRow: 1, FirstColumn: 1, LastRow: 2, LastColumn: 2, Name: "T", Style: TableStyleNone, NoFilterButtons: true}},
+			Table{FirstRow: 1, FirstColumn: 1, LastRow: 2, LastColumn: 2, Name: "T", Style: TableStyleCustom("TableStyleDark12"), NoFilterButtons: true}},
 	} {
 		got := mustTables(t, openBytes(t, sheetWithTable(t, sheet, c.xml)), "S")
 		if len(got) != 1 || !reflect.DeepEqual(got[0], c.want) {
 			t.Errorf("%s:\n got %+v\nwant %+v", c.xml, got, c.want)
 		}
 	}
-	for name, want := range map[string]TableStyle{"TableStyleMedium28": TableStyleMedium(28), "TableStyleMedium29": TableStyleNone,
-		"TableStyleLight0": TableStyleNone, "TableStyleMedium": TableStyleNone, "PivotStyleLight16": TableStyleNone, "": TableStyleNone,
-		"TableStyleDark1x": TableStyleNone, "TableStyleMedium2": 0} {
+	for name, want := range map[string]TableStyle{"TableStyleMedium28": TableStyleMedium(28), " TableStyleLight3 ": TableStyleLight(3),
+		"TableStyleMedium29": TableStyleCustom("TableStyleMedium29"), "TableStyleLight0": TableStyleCustom("TableStyleLight0"),
+		"TableStyleMedium": TableStyleCustom("TableStyleMedium"), "PivotStyleLight16": TableStyleCustom("PivotStyleLight16"), "": TableStyleNone,
+		" Mine ": TableStyleCustom(" Mine "), "TableStyleDark1x": TableStyleCustom("TableStyleDark1x"), "TableStyleMedium2": {}} {
 		if got := parseTableStyle(name); got != want {
 			t.Errorf("parseTableStyle(%q) = %v, want %v", name, got, want)
 		}
@@ -251,7 +252,7 @@ func TestReadMalformedTablesAndLayout(t *testing.T) {
 	wantErr(t, err, ErrMalformed)
 
 	many := `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-		strings.Repeat(tableRel, maxSheetTables+1) + `</Relationships>`
+		strings.Repeat(tableRel, defaultMaxTables+1) + `</Relationships>`
 	data := singleSheet(t, sheet, "", "xl/worksheets/_rels/sheet1.xml.rels", many, "xl/tables/t.xml", `<table ref="A1"/>`)
 	_, err = openBytes(t, data).Tables("S")
 	wantErr(t, err, ErrLimitExceeded)
@@ -350,8 +351,8 @@ func TestReadReturnsRowsWithoutValuesOnRequest(t *testing.T) {
 }
 
 func TestTableStyleMedium2IsTheZeroValue(t *testing.T) {
-	if TableStyleMedium(2) != TableStyle(0) {
-		t.Fatalf("TableStyleMedium(2) = %d, want 0", TableStyleMedium(2))
+	if TableStyleMedium(2) != (TableStyle{}) {
+		t.Fatalf("TableStyleMedium(2) = %v, want the zero value", TableStyleMedium(2))
 	}
 	if got := TableStyleMedium(2).String(); got != "TableStyleMedium2" {
 		t.Errorf("String() = %q", got)
@@ -424,7 +425,7 @@ func readSavedWorkbook(t *testing.T, file string) ([]Table, SheetLayout, []saved
 }
 
 var savedWorkbookLayout = SheetLayout{
-	ColumnWidths:        []ColumnWidth{{1, 1, 14, false}, {2, 2, 22.5, false}, {4, 4, 6, true}},
+	ColumnWidths:        []ColumnWidth{{1, 1, 14, true, false}, {2, 2, 22.5, true, false}, {4, 4, 6, true, true}},
 	OutlineSummaryAbove: true,
 	RowOutlineLevels:    2,
 }
@@ -525,7 +526,7 @@ func TestReadTableWithTotalsRowSavedByExcel(t *testing.T) {
 		t.Fatalf("layout: %+v", layout)
 	}
 	first, last := layout.ColumnWidths[0], layout.ColumnWidths[10]
-	if first != (ColumnWidth{FirstColumn: 1, LastColumn: 1, Width: 11.6640625}) || last != (ColumnWidth{FirstColumn: 11, LastColumn: 11, Width: 13.1640625}) {
+	if first != (ColumnWidth{FirstColumn: 1, LastColumn: 1, Width: 11.6640625, HasWidth: true}) || last != (ColumnWidth{FirstColumn: 11, LastColumn: 11, Width: 13.1640625, HasWidth: true}) {
 		t.Errorf("column widths: first %+v, last %+v", first, last)
 	}
 
@@ -575,7 +576,7 @@ func TestReadTableDownloadedFromGoogleSheets(t *testing.T) {
 		FirstRow: 1, FirstColumn: 1, LastRow: 903, LastColumn: 11, Name: "Table1",
 		Columns: []string{"SKU", "Item", "Group", "Vendor", "Cost", "Price",
 			"Opening", "Sold", "Closing", "Reorder", "Status"},
-		Style: TableStyleNone, NoFilterButtons: true,
+		Style: TableStyleCustom("Inventory-style"), NoFilterButtons: true,
 		HighlightFirstColumn: true, HighlightLastColumn: true, TotalsRow: true,
 	}}
 	if !reflect.DeepEqual(tables, wantTables) {
@@ -595,7 +596,7 @@ func TestReadTableDownloadedFromGoogleSheets(t *testing.T) {
 		t.Fatalf("layout: %+v", layout)
 	}
 	first, last := layout.ColumnWidths[0], layout.ColumnWidths[11]
-	if first != (ColumnWidth{FirstColumn: 1, LastColumn: 1, Width: 11.63}) || last != (ColumnWidth{FirstColumn: 12, LastColumn: 26, Width: 8.88}) {
+	if first != (ColumnWidth{FirstColumn: 1, LastColumn: 1, Width: 11.63, HasWidth: true}) || last != (ColumnWidth{FirstColumn: 12, LastColumn: 26, Width: 8.88, HasWidth: true}) {
 		t.Errorf("column widths: first %+v, last %+v", first, last)
 	}
 	if width, ok := layout.ColumnWidth(20); !ok || width != 8.88 {
@@ -653,7 +654,7 @@ func TestReadTablesBoundsMemory(t *testing.T) {
 	_, err = openBytes(t, sheetWithTable(t, sheet, heavy)).Tables("S")
 	wantErr(t, err, ErrLimitExceeded)
 	var re *ReadError
-	if !errors.As(err, &re) || re.Part != "xl/tables/t.xml" || !strings.Contains(re.Message, "too many names") {
+	if !errors.As(err, &re) || re.Part != "xl/tables/t.xml" || !strings.Contains(re.Message, "WithMaxTableBytes") {
 		t.Errorf("got %v", err)
 	}
 }
@@ -778,7 +779,7 @@ func TestReadMeasuresArePlainDecimals(t *testing.T) {
 	noErr(t, err)
 	layout, err := rows.Layout()
 	noErr(t, err)
-	if len(layout.ColumnWidths) != 1 || layout.ColumnWidths[0] != (ColumnWidth{FirstColumn: 4, LastColumn: 4, Width: 15}) {
+	if len(layout.ColumnWidths) != 1 || layout.ColumnWidths[0] != (ColumnWidth{FirstColumn: 4, LastColumn: 4, Width: 15, HasWidth: true}) {
 		t.Errorf("column widths: %+v", layout.ColumnWidths)
 	}
 	var heights []float64
@@ -822,10 +823,10 @@ func TestReadSheetExportedByNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantWidths := []ColumnWidth{
-		{FirstColumn: 1, LastColumn: 1, Width: 24.6719},
-		{FirstColumn: 2, LastColumn: 2, Width: 18.3672},
-		{FirstColumn: 3, LastColumn: 5, Width: 18.7188},
-		{FirstColumn: 6, LastColumn: 16384, Width: 27.75},
+		{FirstColumn: 1, LastColumn: 1, Width: 24.6719, HasWidth: true},
+		{FirstColumn: 2, LastColumn: 2, Width: 18.3672, HasWidth: true},
+		{FirstColumn: 3, LastColumn: 5, Width: 18.7188, HasWidth: true},
+		{FirstColumn: 6, LastColumn: 16384, Width: 27.75, HasWidth: true},
 	}
 	if !reflect.DeepEqual(layout.ColumnWidths, wantWidths) || layout.OutlineSummaryAbove || layout.RowOutlineLevels != 0 {
 		t.Errorf("layout: %+v", layout)

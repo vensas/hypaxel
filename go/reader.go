@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime"
 	"slices"
@@ -13,12 +14,23 @@ import (
 	"sync"
 )
 
-const defaultMaxSharedStringsBytes = 1 << 30
+const (
+	defaultMaxSharedStringsBytes = 1 << 30
+	defaultMaxTables             = 4096
+	defaultMaxTableBytes         = 64 << 20
+	defaultMaxTokenBytes         = 16 << 20
+	defaultMaxRowTextBytes       = 256 << 20
+	minTokenBytes                = 64 << 10
+)
 
 var oleMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 type readConfig struct {
 	maxSharedStringsBytes int64
+	maxTables             int
+	maxTableBytes         int
+	maxTokenBytes         int
+	maxRowTextBytes       int
 	pipeline              bool
 	emptyRows             bool
 }
@@ -31,6 +43,37 @@ type ReadOption func(*readConfig)
 // reading untrusted uploads.
 func WithMaxSharedStringsBytes(n int64) ReadOption {
 	return func(c *readConfig) { c.maxSharedStringsBytes = max(n, 0) }
+}
+
+// WithMaxTables caps the tables that [Reader.TablesAt] reads from one worksheet. The default
+// is 4,096; values below 1 are treated as 1.
+func WithMaxTables(n int) ReadOption {
+	return func(c *readConfig) { c.maxTables = max(n, 1) }
+}
+
+// WithMaxTableBytes caps the bytes of table, column and custom style names that
+// [Reader.TablesAt] holds for the tables of one worksheet, counting 32 bytes per column on top
+// of its name. The default is 64 MiB; values below 1 are treated as 1.
+func WithMaxTableBytes(n int64) ReadOption {
+	return func(c *readConfig) { c.maxTableBytes = clampInt(n, 1, math.MaxInt) }
+}
+
+// WithMaxTokenBytes caps a single XML token, such as a tag with its attributes or a run of
+// text, in every part the Reader parses. The default is 16 MiB; values below 64 KiB are treated
+// as 64 KiB, since Excel's cell text alone can approach 100 KB, and values above 2 GiB as 2 GiB.
+func WithMaxTokenBytes(n int64) ReadOption {
+	return func(c *readConfig) { c.maxTokenBytes = clampInt(n, minTokenBytes, math.MaxInt32) }
+}
+
+// WithMaxRowTextBytes caps the decoded text that the cells of one row hold, apart from shared
+// strings. The default is 256 MiB; values below 1 are treated as 1, and values above 2 GiB as
+// 2 GiB.
+func WithMaxRowTextBytes(n int64) ReadOption {
+	return func(c *readConfig) { c.maxRowTextBytes = clampInt(n, 1, math.MaxInt32) }
+}
+
+func clampInt(n, lo, hi int64) int {
+	return int(min(max(n, lo), hi))
 }
 
 // WithConcurrentInflate sets whether a worksheet and the shared string table are decompressed
@@ -124,7 +167,14 @@ func OpenReader(path string, opts ...ReadOption) (*Reader, error) {
 // NewReader reads the workbook structure from src, which holds size bytes, such as an
 // [os.File], a [bytes.Reader] or an [io.SectionReader].
 func NewReader(src io.ReaderAt, size int64, opts ...ReadOption) (*Reader, error) {
-	cfg := readConfig{maxSharedStringsBytes: defaultMaxSharedStringsBytes, pipeline: true}
+	cfg := readConfig{
+		maxSharedStringsBytes: defaultMaxSharedStringsBytes,
+		maxTables:             defaultMaxTables,
+		maxTableBytes:         defaultMaxTableBytes,
+		maxTokenBytes:         defaultMaxTokenBytes,
+		maxRowTextBytes:       defaultMaxRowTextBytes,
+		pipeline:              true,
+	}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -292,7 +342,7 @@ func (r *Reader) RowsAt(index int) (*Rows, error) {
 		return nil, err
 	}
 	rc = r.overlap(x, rc)
-	rows := &Rows{x: x, rc: rc, styles: r.styles, emptyRows: r.cfg.emptyRows, row: Row{sst: sst, date1904: r.date1904}}
+	rows := &Rows{x: x, rc: rc, styles: r.styles, emptyRows: r.cfg.emptyRows, maxRowText: r.cfg.maxRowTextBytes, row: Row{sst: sst, date1904: r.date1904}}
 	if p, ok := rc.(*pipeReader); ok {
 		// Rows dropped without Close would otherwise leave the goroutine blocked forever.
 		runtime.AddCleanup(rows, (*pipeReader).stop, p)
@@ -334,7 +384,9 @@ func (r *Reader) open(part string) (*xmlReader, io.ReadCloser, error) {
 	if err != nil {
 		return nil, nil, sourceError(part, err)
 	}
-	return newXMLReader(rc, part), rc, nil
+	x := newXMLReader(rc, part)
+	x.maxToken = r.cfg.maxTokenBytes
+	return x, rc, nil
 }
 
 type relationship struct {
