@@ -237,7 +237,7 @@ export interface EngineRows {
   close(): void
 }
 
-/** @internal The native (N-API) or WebAssembly workbook reader. */
+/** @internal The read options the engines take. */
 export interface EngineReadOptions {
   maxSharedStringsBytes?: number
   includeEmptyRows?: boolean
@@ -247,6 +247,7 @@ export interface EngineReadOptions {
   maxRowTextBytes?: number
 }
 
+/** @internal The native (N-API) or WebAssembly workbook reader. */
 export interface EngineWorkbook {
   sheets(): EngineSheetInfo[]
   readonly date1904: boolean
