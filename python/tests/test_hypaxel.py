@@ -429,8 +429,8 @@ def test_tables():
         ws.add_table(1, 1, 3, 2)
     with pytest.raises(XlsxError, match="invalid table name"):
         ws.add_table(1, 1, 3, 1, columns=["a"], name="A1")
-    with pytest.raises(ValueError, match="table style"):
-        ws.add_table(1, 1, 3, 1, columns=["a"], style="Fancy")
+    with pytest.raises(XlsxError, match="invalid table style name"):
+        ws.add_table(1, 1, 3, 1, columns=["a"], style="two\nlines")
     ws.add_table(1, 1, 3, 1, columns=["a"])
     with pytest.raises(XlsxError, match="overlap"):
         ws.add_table(2, 1, 4, 1, columns=["b"])

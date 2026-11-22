@@ -266,21 +266,14 @@ fn parse_color(s: &str) -> PyResult<Color> {
     Color::hex(s).ok_or_else(|| PyValueError::new_err(format!("invalid color {s:?}; expected '#RRGGBB' or '#AARRGGBB'")))
 }
 
-/// Parses ``"TableStyleMedium2"``-style names (``None`` or ``"none"`` for no table style).
+/// Maps a style name as stored in the file: built-in names such as ``"TableStyleMedium2"``, any
+/// other name as a custom style; ``None``, ``""`` or ``"none"`` for no table style.
 fn parse_table_style(s: Option<&str>) -> PyResult<TableStyle> {
-    let Some(name) = s.filter(|n| !n.eq_ignore_ascii_case("none")) else { return Ok(TableStyle::None) };
-    let invalid = || PyValueError::new_err(format!("unknown table style {name:?}; expected e.g. 'TableStyleMedium2' or None"));
-    let rest = name.strip_prefix("TableStyle").ok_or_else(invalid)?;
-    let (kind, number): (fn(u8) -> TableStyle, &str) = if let Some(n) = rest.strip_prefix("Light") {
-        (TableStyle::Light, n)
-    } else if let Some(n) = rest.strip_prefix("Medium") {
-        (TableStyle::Medium, n)
-    } else if let Some(n) = rest.strip_prefix("Dark") {
-        (TableStyle::Dark, n)
-    } else {
-        return Err(invalid());
-    };
-    Ok(kind(number.parse().map_err(|_| invalid())?))
+    Ok(match s {
+        None => TableStyle::None,
+        Some(name) if name.eq_ignore_ascii_case("none") => TableStyle::None,
+        Some(name) => TableStyle::from_name(name),
+    })
 }
 
 fn row_options(height: Option<f64>, style: StyleId, outline_level: u8, hidden: bool, collapsed: bool) -> RowOptions {

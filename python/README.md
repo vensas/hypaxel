@@ -91,7 +91,8 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   `style`, `header_row`, `autofilter`, `row_stripes`, `column_stripes`, `first_column`,
   `last_column`, `totals_row`), from top to bottom, then left to right. Tables are stored apart
   from the rows and are read only when you ask. A custom (non-built-in) table style reads as
-  `None`. `totals_row` tells whether the last row of the range is a totals row; such a table can
+  its name, and `add_table` writes any name that is not a built-in one as a custom style (Excel
+  applies it only if the workbook defines it). `totals_row` tells whether the last row of the range is a totals row; such a table can
   be read but not written.
 - **Rows and columns:** the iterator returned by `wb.rows()` describes the row it returned last:
   `row_number`, `outline_level`, `hidden`, `collapsed` and `height` (`None` when the row stores no
@@ -99,7 +100,8 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   row) come back as `[]` with default properties; open the workbook with
   `include_empty_rows=True` to get their properties as well (such rows after the last value are
   then returned too, and `skip_empty=True` still drops them). Before the first row it already has the sheet's `column_widths` (a list of
-  `(first_col, last_col, width, hidden)`, explicit and auto-fitted alike), `column_width(col)`,
+  `(first_col, last_col, width, hidden)`, explicit and auto-fitted alike; `width` is `None` for a
+  hidden column stored without one), `column_width(col)`,
   `column_hidden(col)`,
   `outline_summary_above` and `row_outline_levels`.
 
@@ -118,7 +120,11 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   one type per column, so a column mixing text and dates arrives as text.
 - **Memory:** rows are streamed. A path is read straight from disk; bytes and file objects are held
   in memory once. Beyond that, memory is bounded by the workbook's shared string table and one
-  row. `max_shared_strings_bytes=` (default 1 GiB) caps the table for untrusted uploads.
+  row. For untrusted uploads, `open_workbook` caps what a workbook can make the reader hold:
+  `max_shared_strings_bytes=` (default 1 GiB) for the shared string table, `max_tables=` (4,096)
+  and `max_table_bytes=` (64 MiB of names) for the tables of one sheet, `max_token_bytes=`
+  (16 MiB, at least 64 KiB) for one XML token and `max_row_text_bytes=` (256 MiB) for one row.
+  Exceeding one raises `XlsxError` naming the option.
 - **Errors:** `FileNotFoundError` for missing files and `XlsxError` for everything else. Messages
   name the problem, e.g. a legacy `.xls` or encrypted workbook, a sheet that does not exist (with
   the sheets that do), or a damaged part.
@@ -214,7 +220,7 @@ def export():
 | `Worksheet.merge_cells(r1, c1, r2, c2)`, `autofilter(r1, c1, r2, c2)` | ranges (1-based, inclusive) |
 | `Worksheet.add_table(r1, c1, r2, c2, *, columns=, name=, style="TableStyleMedium2", header_row=, autofilter=, row_stripes=, column_stripes=, first_column=, last_column=)` | Excel table; `columns` must equal the header texts |
 | `Formula("SUM(A1:A9)")`, `Styled(value, style)` | special cell values |
-| `open_workbook(source, *, max_shared_strings_bytes=1 GiB, include_empty_rows=False)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
+| `open_workbook(source, *, max_shared_strings_bytes=1 GiB, include_empty_rows=False, max_tables=4096, max_table_bytes=64 MiB, max_token_bytes=16 MiB, max_row_text_bytes=256 MiB)` → `Reader` | `source`: path, bytes or binary file object; a context manager |
 | `Reader.sheet_names`, `Reader.sheets`, `Reader.date_1904`, `Reader.rows(sheet=0, *, skip_empty=False)`, `Reader.close()` | `rows` iterates lists; several iterators can be open at once |
 | `Reader.tables(sheet=0)` | the sheet's Excel tables as dicts with `add_table`'s keys |
 | `RowIterator.row_number`, `outline_level`, `hidden`, `collapsed`, `height` | properties of the row returned last |
