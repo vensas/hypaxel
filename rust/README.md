@@ -112,10 +112,14 @@ fn main() -> hypaxel::Result<()> {
   producers: package relationships instead of fixed paths, Strict Open XML, prefixed namespaces,
   cells without references, rich text, inline strings and ISO 8601 dates.
 - **Safety:** DTDs are rejected (no entity expansion), every XML token and row is bounded, ZIP
-  entries must match their declared size and CRC, and `ReadOptions::max_shared_strings_bytes`
-  (default 1 GiB) caps the shared string table. A sheet may have at most 4,096 tables holding
-  64 MiB of names, and 16,384 column ranges; a part at most 65,536 relationships. Legacy `.xls` files, encrypted workbooks, CSV
-  and Word files are reported as `Error::InvalidFile`; damaged parts as `Error::Malformed`.
+  entries must match their declared size and CRC. `ReadOptions` sets the limits:
+  `max_shared_strings_bytes` (default 1 GiB) for the shared string table, `max_tables` (4,096)
+  and `max_table_bytes` (64 MiB of names) for the tables of one sheet, `max_token_bytes`
+  (16 MiB, at least 64 KiB) for one XML token and `max_row_text_bytes` (256 MiB) for the text of
+  one row. Exceeding one gives `Error::LimitExceeded` naming the option. A sheet may have at most
+  16,384 column ranges and a part at most 65,536 relationships. Legacy `.xls` files, encrypted
+  workbooks, CSV and Word files are reported as `Error::InvalidFile`; damaged parts as
+  `Error::Malformed`.
 - **Several sheets at once:** `reader.with_source(File::open(path)?)` creates a second reader that
   shares the parsed workbook and string table, e.g. for another thread; `into_worksheet` gives
   rows that own their source.
@@ -124,12 +128,13 @@ fn main() -> hypaxel::Result<()> {
   display options, from top to bottom, then left to right. Tables are stored in their own parts
   and are read only when you ask, so reading values costs the same as before. `autofilter` tells
   whether the file has filter buttons, and a custom (non-built-in) table style reads as
-  `TableStyle::None`. `totals_row` tells whether the last row of the range is a totals row; such
+  `TableStyle::Custom(name)`, which `add_table` writes back by name (Excel applies it only if the
+  workbook defines the style). `TableStyle::from_name` maps a stored name to a style. `totals_row` tells whether the last row of the range is a totals row; such
   a table can be read but not written.
 - **Rows and columns:** each `Row` has `outline_level()`, `is_hidden()`, `is_collapsed()` and
   `height()` (`None` when the row stores no height). `rows.layout()?` gives the `SheetLayout`:
   `column_widths()` (runs of columns with a first column, last column, width and hidden flag,
-  explicit and auto-fitted alike), `column_width(column)`, `is_column_hidden(column)`,
+  explicit and auto-fitted alike; the width is `None` for a hidden column stored without one), `column_width(column)`, `is_column_hidden(column)`,
   `outline_summary_above()` and
   `row_outline_levels()`. These precede the rows in the file, so they are available before the
   first `next_row()`.

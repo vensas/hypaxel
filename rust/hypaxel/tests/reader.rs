@@ -459,7 +459,8 @@ fn reads_back_tables_rows_and_layout_written_by_the_writer() {
     let layout = rows.layout().unwrap().clone();
     assert!(layout.outline_summary_above());
     assert_eq!(layout.row_outline_levels(), 2);
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    let widths: Vec<_> =
+        layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap(), c.is_hidden())).collect();
     assert_eq!(widths, [(1, 1, 12.5, false), (2, 2, 30.0, false), (4, 4, 5.0, true)]);
     assert_eq!((layout.column_width(2), layout.column_width(3)), (Some(30.0), None));
     assert_eq!((layout.is_column_hidden(2), layout.is_column_hidden(3), layout.is_column_hidden(4)), (false, false, true));
@@ -511,7 +512,7 @@ fn reads_tables_and_layout_from_other_producers() {
     let expected = Table::new(2, 2, 9, 4)
         .name("Sales_2026")
         .columns(["Region & area", "Net\ntotal", "Σ"])
-        .style(TableStyle::None)
+        .style(TableStyle::Custom("My Corporate Style".into()))
         .highlight_first_column(true);
     assert_eq!(tables, [Table { totals_row: true, ..expected }]);
 
@@ -539,7 +540,7 @@ fn reads_tables_and_layout_from_other_producers() {
     let layout = rows.layout().unwrap();
     assert!(layout.outline_summary_above());
     assert_eq!(layout.row_outline_levels(), 7);
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width())).collect();
+    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap())).collect();
     assert_eq!(widths, [(1, 1, 8.5), (3, 16_384, 4.0)]);
     assert_eq!((layout.column_width(1), layout.column_width(2), layout.column_width(9_000)), (Some(8.5), None, Some(4.0)));
     assert_eq!((layout.is_column_hidden(1), layout.is_column_hidden(9_000)), (false, true));
@@ -662,7 +663,8 @@ fn reads_tables_rows_and_layout_saved_by_excel() {
     let layout = rows.layout().unwrap();
     assert!(layout.outline_summary_above());
     assert_eq!(layout.row_outline_levels(), 2);
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    let widths: Vec<_> =
+        layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap(), c.is_hidden())).collect();
     assert_eq!(widths, [(1, 1, 14.0, false), (2, 2, 22.5, false), (4, 4, 6.0, true)]);
 
     let mut seen = Vec::new();
@@ -700,7 +702,8 @@ fn reads_tables_rows_and_layout_saved_by_libreoffice() {
     let layout = rows.layout().unwrap();
     assert!(layout.outline_summary_above());
     assert_eq!(layout.row_outline_levels(), 2);
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    let widths: Vec<_> =
+        layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap(), c.is_hidden())).collect();
     assert_eq!(widths, [(1, 1, 14.0, false), (2, 2, 22.5, false), (4, 4, 6.0, true)]);
 
     let mut seen = Vec::new();
@@ -736,7 +739,8 @@ fn reads_a_table_with_a_totals_row_saved_by_excel() {
     let mut rows = reader.worksheet_at(0).unwrap();
     let layout = rows.layout().unwrap();
     assert!(!layout.outline_summary_above());
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    let widths: Vec<_> =
+        layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap(), c.is_hidden())).collect();
     assert_eq!(widths.len(), 11);
     assert_eq!((widths[0], widths[10]), ((1, 1, 11.6640625, false), (11, 11, 13.1640625, false)));
 
@@ -806,7 +810,7 @@ fn reads_a_table_downloaded_from_google_sheets() {
     let expected = Table::new(1, 1, 903, 11)
         .name("Table1")
         .columns(columns)
-        .style(TableStyle::None)
+        .style(TableStyle::Custom("Inventory-style".into()))
         .autofilter(false)
         .highlight_first_column(true)
         .highlight_last_column(true);
@@ -815,7 +819,8 @@ fn reads_a_table_downloaded_from_google_sheets() {
     let mut rows = reader.worksheet_at(0).unwrap();
     let layout = rows.layout().unwrap();
     assert!(!layout.outline_summary_above());
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    let widths: Vec<_> =
+        layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap(), c.is_hidden())).collect();
     assert_eq!(widths.len(), 12);
     assert_eq!((widths[0], widths[11]), ((1, 1, 11.63, false), (12, 26, 8.88, false)));
     assert_eq!(layout.column_width(20), Some(8.88));
@@ -935,7 +940,8 @@ fn reads_a_sheet_exported_by_numbers() {
 
     let mut rows = reader.worksheet_at(0).unwrap();
     let layout = rows.layout().unwrap();
-    let widths: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    let widths: Vec<_> =
+        layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width().unwrap(), c.is_hidden())).collect();
     assert_eq!(widths, [(1, 1, 24.6719, false), (2, 2, 18.3672, false), (3, 5, 18.7188, false), (6, 16_384, 27.75, false)]);
     assert_eq!((layout.outline_summary_above(), layout.row_outline_levels()), (false, 0));
 
@@ -981,4 +987,78 @@ fn table_names_that_look_like_excel_escapes_round_trip() {
         r#"<table name="T_x005f_x0041_" displayName="T_x005f_x0041_" ref="A1:A2"><tableColumns><tableColumn name="a"/></tableColumns></table>"#,
     );
     assert_eq!(reader(&excel).tables_at(0).unwrap()[0].name.as_deref(), Some("T_x0041_"));
+}
+
+#[test]
+fn reads_hidden_columns_without_a_width() {
+    let sheet = single_sheet(
+        r#"<worksheet><cols><col min="1" max="1" width="9"/><col min="2" max="3" hidden="1"/><col min="4" max="4" style="2"/><col min="5" max="5" hidden="0"/></cols><sheetData/></worksheet>"#,
+        "",
+        &[],
+    );
+    let mut reader = reader(&sheet);
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    let columns: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect();
+    assert_eq!(columns, [(1, 1, Some(9.0), false), (2, 3, None, true)]);
+    assert_eq!((layout.column_width(2), layout.is_column_hidden(2), layout.is_column_hidden(3)), (None, true, true));
+    assert_eq!((layout.is_column_hidden(4), layout.is_column_hidden(5)), (false, false));
+}
+
+#[test]
+fn round_trips_custom_table_styles() {
+    let custom = Table::new(1, 1, 2, 1).name("Branded").columns(["a"]).style(TableStyle::Custom("Brand & Co_x0041_".into()));
+    let lookalike = Table::new(1, 3, 2, 3).name("Lookalike").columns(["b"]).style(TableStyle::Custom("TableStyleMedium9".into()));
+    let bytes = write(|w| {
+        let mut s = w.add_worksheet("S")?;
+        s.add_row(("a", "", "b"))?;
+        s.add_row(("1", "", "2"))?;
+        s.add_table(&custom)?;
+        s.add_table(&lookalike)?;
+        Ok(())
+    });
+    let tables = reader(&bytes).tables_at(0).unwrap();
+    assert_eq!(tables, [custom, lookalike.style(TableStyle::Medium(9))]);
+
+    for bad in ["", "line\nbreak", "tab\there", "nul\u{0}", &"x".repeat(256)] {
+        let table = Table::new(1, 1, 2, 1).columns(["a"]).style(TableStyle::Custom(bad.to_owned()));
+        let mut writer = XlsxWriter::new(Vec::<u8>::new());
+        let mut sheet = writer.add_worksheet("S").unwrap();
+        assert!(matches!(sheet.add_table(&table), Err(Error::InvalidArgument(_))), "{bad:?}");
+    }
+}
+
+#[test]
+fn applies_configured_limits() {
+    let open = |bytes: &[u8], options: ReadOptions| XlsxReader::with_options(Cursor::new(bytes.to_vec()), &options).unwrap();
+    let table = r#"<table name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns><tableStyleInfo name="A rather long custom style"/></table>"#;
+    let rels =
+        format!("<Relationships>{TABLE_REL}{}</Relationships>", TABLE_REL.replace("rId1", "rId2").replace("table1.xml", "table2.xml"));
+    let two = single_sheet(
+        "<worksheet><sheetData/></worksheet>",
+        "",
+        &[("xl/worksheets/_rels/sheet1.xml.rels", rels.as_str()), ("xl/tables/table1.xml", table), ("xl/tables/table2.xml", table)],
+    );
+    assert_eq!(open(&two, ReadOptions::new()).tables_at(0).unwrap().len(), 2);
+    let err = open(&two, ReadOptions::new().max_tables(1)).tables_at(0).unwrap_err();
+    assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_tables")), "{err}");
+    assert_eq!(open(&two, ReadOptions::new().max_table_bytes(2 * (1 + 2 * 33 + 26))).tables_at(0).unwrap().len(), 2);
+    let err = open(&two, ReadOptions::new().max_table_bytes(2 * (1 + 2 * 33 + 26) - 1)).tables_at(0).unwrap_err();
+    assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_table_bytes")), "{err}");
+
+    let text = "x".repeat(100_000);
+    let sheet = single_sheet(
+        &format!(
+            r#"<worksheet><sheetData><row r="1"><c t="inlineStr"><is><t>{text}</t></is></c><c t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>"#
+        ),
+        "",
+        &[],
+    );
+    let first_row = |options: ReadOptions| open(&sheet, options).worksheet_at(0).unwrap().next_row().map(|r| r.is_some());
+    assert!(first_row(ReadOptions::new()).unwrap());
+    let err = first_row(ReadOptions::new().max_token_bytes(1)).unwrap_err();
+    assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_token_bytes") && m.contains("65536")), "{err}");
+    assert!(first_row(ReadOptions::new().max_row_text_bytes(200_000)).unwrap());
+    let err = first_row(ReadOptions::new().max_row_text_bytes(199_999)).unwrap_err();
+    assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_row_text_bytes")), "{err}");
 }

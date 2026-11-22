@@ -6,8 +6,9 @@ use crate::engine::{MAX_COLUMNS, MAX_ROWS, push_range};
 use crate::error::{Error, Result};
 use crate::xml;
 
-/// Built-in table styles, as shown in Excel's table style gallery.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Table styles: Excel's built-in styles, as shown in its table style gallery, or a custom style
+/// by name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TableStyle {
     /// No table formatting (filter buttons and structured references still work).
     None,
@@ -17,6 +18,10 @@ pub enum TableStyle {
     Medium(u8),
     /// `TableStyleDark1` ..= `TableStyleDark11`.
     Dark(u8),
+    /// A style defined in the workbook's styles part (`<tableStyles>`), by name: 1–255 characters
+    /// on one line. Excel falls back to no style when the workbook does not define it, so this is
+    /// mainly useful for tables read from an existing workbook.
+    Custom(String),
 }
 
 impl Default for TableStyle {
@@ -28,22 +33,60 @@ impl Default for TableStyle {
 
 impl TableStyle {
     /// The style's name in the file, e.g. `TableStyleMedium2`; `None` for [`TableStyle::None`].
-    pub fn name(self) -> Option<String> {
+    pub fn name(&self) -> Option<String> {
         match self {
             TableStyle::None => None,
             TableStyle::Light(n) => Some(format!("TableStyleLight{n}")),
             TableStyle::Medium(n) => Some(format!("TableStyleMedium{n}")),
             TableStyle::Dark(n) => Some(format!("TableStyleDark{n}")),
+            TableStyle::Custom(name) => Some(name.clone()),
         }
     }
 
-    fn is_valid(self) -> bool {
-        match self {
-            TableStyle::None => true,
-            TableStyle::Light(n) => (1..=21).contains(&n),
-            TableStyle::Medium(n) => (1..=28).contains(&n),
-            TableStyle::Dark(n) => (1..=11).contains(&n),
+    /// The style with this name as stored in a file: a built-in style for names such as
+    /// `TableStyleMedium9`, [`TableStyle::None`] for an empty name, otherwise
+    /// [`TableStyle::Custom`] with the name unchanged.
+    pub fn from_name(name: &str) -> TableStyle {
+        if name.is_empty() {
+            return TableStyle::None;
         }
+        built_in(name).unwrap_or_else(|| TableStyle::Custom(name.to_owned()))
+    }
+
+    fn validate(&self) -> Result<()> {
+        let valid = match self {
+            TableStyle::None => true,
+            TableStyle::Light(n) => (1..=21).contains(n),
+            TableStyle::Medium(n) => (1..=28).contains(n),
+            TableStyle::Dark(n) => (1..=11).contains(n),
+            TableStyle::Custom(name) => {
+                let ok = !name.is_empty()
+                    && name.encode_utf16().count() <= 255
+                    && !name.chars().any(|c| c < ' ' || c == '\u{FFFE}' || c == '\u{FFFF}');
+                if !ok {
+                    return Err(Error::InvalidArgument("invalid table style name (1–255 characters on one line)"));
+                }
+                true
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(Error::InvalidArgument("table style number out of range (Light 1–21, Medium 1–28, Dark 1–11)"))
+        }
+    }
+}
+
+/// Maps a built-in style name such as `TableStyleMedium9`, ignoring surrounding whitespace.
+fn built_in(name: &str) -> Option<TableStyle> {
+    let name = name.trim().strip_prefix("TableStyle")?;
+    let digits = name.find(|c: char| c.is_ascii_digit())?;
+    let number: u8 = name[digits..].parse().ok()?;
+    match (&name[..digits], number) {
+        ("Light", 1..=21) => Some(TableStyle::Light(number)),
+        ("Medium", 1..=28) => Some(TableStyle::Medium(number)),
+        ("Dark", 1..=11) => Some(TableStyle::Dark(number)),
+        _ => None,
     }
 }
 
@@ -199,9 +242,7 @@ impl TableMeta {
         if table.totals_row {
             return Err(Error::InvalidArgument("tables with a totals row can be read but not written"));
         }
-        if !table.style.is_valid() {
-            return Err(Error::InvalidArgument("table style number out of range (Light 1–21, Medium 1–28, Dark 1–11)"));
-        }
+        table.style.validate()?;
 
         let name = match &table.name {
             Some(name) => {
@@ -241,7 +282,7 @@ impl TableMeta {
             name,
             range: (r1, c1, r2, c2),
             columns,
-            style: table.style,
+            style: table.style.clone(),
             header_row: table.header_row,
             autofilter: table.autofilter && table.header_row,
             row_stripes: table.row_stripes,
@@ -287,7 +328,7 @@ impl TableMeta {
         x.extend_from_slice(b"</tableColumns><tableStyleInfo");
         if let Some(name) = self.style.name() {
             x.extend_from_slice(b" name=\"");
-            x.extend_from_slice(name.as_bytes());
+            escape_plain(x, &name);
             x.push(b'"');
         }
         for (attr, on) in [
@@ -320,6 +361,20 @@ fn escape_attribute(x: &mut Vec<u8>, text: &str) {
         start = i + 1;
     }
     xml::escape_into(x, &text[start..]);
+}
+
+/// Style names are stored without Excel's `_xHHHH_` escapes; control characters are rejected
+/// before this is called.
+fn escape_plain(x: &mut Vec<u8>, text: &str) {
+    for b in text.bytes() {
+        match b {
+            b'&' => x.extend_from_slice(b"&amp;"),
+            b'<' => x.extend_from_slice(b"&lt;"),
+            b'>' => x.extend_from_slice(b"&gt;"),
+            b'"' => x.extend_from_slice(b"&quot;"),
+            _ => x.push(b),
+        }
+    }
 }
 
 /// Table names follow Excel's defined-name rules: they start with a letter, `_` or `\`, contain only

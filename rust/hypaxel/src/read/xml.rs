@@ -12,8 +12,11 @@ use super::zip::unwrap_io;
 use crate::error::{Error, Result};
 
 const INITIAL_BUFFER: usize = 64 * 1024;
-/// Largest single token (a tag or a run of text). Excel limits cell text to 32,767 characters.
-pub(crate) const MAX_TOKEN: usize = 16 * 1024 * 1024;
+/// Default for the largest single token (a tag or a run of text). Excel limits cell text to 32,767
+/// characters.
+pub(crate) const DEFAULT_MAX_TOKEN: usize = 16 * 1024 * 1024;
+pub(crate) const MIN_MAX_TOKEN: usize = INITIAL_BUFFER;
+pub(crate) const MAX_MAX_TOKEN: usize = 1 << 30;
 
 /// Bytes kept buffered ahead of a fast-path match, so that a whole cell fits.
 const CELL_LOOKAHEAD: usize = 4096;
@@ -66,6 +69,7 @@ pub(crate) struct XmlReader<S> {
     eof: bool,
     depth: usize,
     started: bool,
+    max_token: usize,
 }
 
 fn local(name: &[u8]) -> &[u8] {
@@ -77,7 +81,27 @@ fn local(name: &[u8]) -> &[u8] {
 
 impl<S> XmlReader<S> {
     pub fn new(src: S, part: &str) -> Self {
-        Self { src, part: part.into(), buf: vec![0; INITIAL_BUFFER], pos: 0, end: 0, eof: false, depth: 0, started: false }
+        Self {
+            src,
+            part: part.into(),
+            buf: vec![0; INITIAL_BUFFER],
+            pos: 0,
+            end: 0,
+            eof: false,
+            depth: 0,
+            started: false,
+            max_token: DEFAULT_MAX_TOKEN,
+        }
+    }
+
+    /// Sets the largest token accepted, clamped to `MIN_MAX_TOKEN..=MAX_MAX_TOKEN`.
+    pub fn with_max_token(mut self, bytes: usize) -> Self {
+        self.max_token = bytes.clamp(MIN_MAX_TOKEN, MAX_MAX_TOKEN);
+        self
+    }
+
+    pub fn max_token(&self) -> usize {
+        self.max_token
     }
 
     pub fn part(&self) -> &str {
@@ -101,10 +125,13 @@ impl<S: Read> XmlReader<S> {
             self.pos = 0;
         }
         if self.end == self.buf.len() {
-            if self.buf.len() >= MAX_TOKEN {
-                return Err(Error::LimitExceeded(format!("{} contains an XML token larger than {MAX_TOKEN} bytes", self.part)));
+            if self.buf.len() >= self.max_token {
+                return Err(Error::LimitExceeded(format!(
+                    "{} contains an XML token larger than {} bytes (ReadOptions::max_token_bytes)",
+                    self.part, self.max_token
+                )));
             }
-            let len = (self.buf.len() * 2).min(MAX_TOKEN);
+            let len = (self.buf.len() * 2).min(self.max_token);
             self.buf.resize(len, 0);
         }
         loop {

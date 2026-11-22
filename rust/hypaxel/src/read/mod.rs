@@ -27,22 +27,28 @@ use crate::table::Table;
 /// Most relationships to other parts that one part may have. Links to external targets are not
 /// kept and do not count.
 const MAX_RELATIONSHIPS: usize = 65_536;
-/// Most tables read from one worksheet.
-const MAX_TABLES: usize = 4096;
-/// Most bytes of table and column names held for the tables of one worksheet, counting 32 bytes
-/// per column on top of its name.
-const MAX_TABLE_TEXT: usize = 64 * 1024 * 1024;
 
 /// Limits that protect against oversized or malicious workbooks.
 #[derive(Debug, Clone)]
 pub struct ReadOptions {
     max_shared_strings_bytes: u64,
+    max_tables: usize,
+    max_table_bytes: usize,
+    max_token_bytes: usize,
+    max_row_text_bytes: usize,
     include_empty_rows: bool,
 }
 
 impl Default for ReadOptions {
     fn default() -> Self {
-        Self { max_shared_strings_bytes: 1 << 30, include_empty_rows: false }
+        Self {
+            max_shared_strings_bytes: 1 << 30,
+            max_tables: 4096,
+            max_table_bytes: 64 << 20,
+            max_token_bytes: xml::DEFAULT_MAX_TOKEN,
+            max_row_text_bytes: 256 << 20,
+            include_empty_rows: false,
+        }
     }
 }
 
@@ -57,6 +63,32 @@ impl ReadOptions {
     /// rows; everything else is streamed. Lower this when reading untrusted uploads.
     pub fn max_shared_strings_bytes(mut self, bytes: u64) -> Self {
         self.max_shared_strings_bytes = bytes;
+        self
+    }
+
+    /// Most tables read from one worksheet by [`XlsxReader::tables`] (default 4,096).
+    pub fn max_tables(mut self, count: usize) -> Self {
+        self.max_tables = count;
+        self
+    }
+
+    /// Most bytes of names held for the tables of one worksheet (default 64 MiB): table, column
+    /// and custom style names, counting 32 bytes per column on top of its name.
+    pub fn max_table_bytes(mut self, bytes: usize) -> Self {
+        self.max_table_bytes = bytes;
+        self
+    }
+
+    /// Largest single XML token, such as a tag with its attributes or a run of text (default
+    /// 16 MiB). Values are clamped to 64 KiB–1 GiB.
+    pub fn max_token_bytes(mut self, bytes: usize) -> Self {
+        self.max_token_bytes = bytes.clamp(xml::MIN_MAX_TOKEN, xml::MAX_MAX_TOKEN);
+        self
+    }
+
+    /// Most bytes of text one row may hold (default 256 MiB).
+    pub fn max_row_text_bytes(mut self, bytes: usize) -> Self {
+        self.max_row_text_bytes = bytes;
         self
     }
 
@@ -179,7 +211,7 @@ impl<R: Read + Seek> XlsxReader<R> {
 
     pub fn with_options(mut source: R, options: &ReadOptions) -> Result<Self> {
         let dir = Directory::read(&mut source)?;
-        let mut package = Package { dir: &dir, source: &mut source };
+        let mut package = Package { dir: &dir, source: &mut source, max_token: options.max_token_bytes };
 
         let workbook_part = match package.relationships("_rels/.rels")? {
             Some(rels) => rels.into_iter().find(|r| r.is("officeDocument")).map(|r| r.target),
@@ -252,7 +284,7 @@ impl<R: Read + Seek> XlsxReader<R> {
         }
         let table = match &self.meta.shared_strings_part {
             Some(part) => {
-                let mut package = Package { dir: &self.meta.dir, source: &mut self.source };
+                let mut package = Package { dir: &self.meta.dir, source: &mut self.source, max_token: self.meta.options.max_token_bytes };
                 let mut xml = package.xml(part)?;
                 SharedStrings::parse(&mut xml, self.meta.options.max_shared_strings_bytes)?
             }
@@ -314,23 +346,24 @@ impl<R: Read + Seek> XlsxReader<R> {
     ///
     /// Tables live in their own parts, which are read on each call; reading rows does not touch
     /// them. They are returned from top to bottom, then left to right, whatever order the file
-    /// lists them in. A part that the sheet references more than once is read once. A table style that is not one of Excel's built-in styles is reported as
-    /// [`TableStyle::None`](crate::TableStyle::None).
+    /// lists them in. A part that the sheet references more than once is read once. A table style that is not one
+    /// of Excel's built-in styles is reported as [`TableStyle::Custom`](crate::TableStyle::Custom).
     pub fn tables_at(&mut self, index: usize) -> Result<Vec<Table>> {
         self.check_index(index)?;
         let Some(part) = self.meta.sheets[index].part.as_deref() else {
             return Ok(Vec::new());
         };
-        let mut package = Package { dir: &self.meta.dir, source: &mut self.source };
+        let mut package = Package { dir: &self.meta.dir, source: &mut self.source, max_token: self.meta.options.max_token_bytes };
         let rels = package.relationships(&rels_path(part))?.unwrap_or_default();
         let mut targets: Vec<&str> = rels.iter().filter(|r| r.is("table")).map(|r| r.target.as_str()).collect();
-        if targets.len() > MAX_TABLES {
-            return Err(Error::LimitExceeded(format!("{part} has more than {MAX_TABLES} tables")));
+        let max_tables = self.meta.options.max_tables;
+        if targets.len() > max_tables {
+            return Err(Error::LimitExceeded(format!("{part} has more than {max_tables} tables (ReadOptions::max_tables)")));
         }
         let mut seen = HashSet::new();
         targets.retain(|target| seen.insert(*target));
         let mut tables = Vec::with_capacity(targets.len());
-        let mut budget = MAX_TABLE_TEXT;
+        let mut budget = self.meta.options.max_table_bytes;
         for target in targets {
             let mut xml = package.xml(target)?;
             tables.push(table::parse(&mut xml, &mut budget)?);
@@ -361,8 +394,9 @@ fn open_rows<S: Read + Seek>(meta: &Meta, sst: Arc<SharedStrings>, index: usize,
         part: part.to_string(),
         message: format!("the worksheet part of sheet {:?} is missing", info.name),
     })?;
-    let xml = XmlReader::new(Directory::open(entry, source)?, part);
-    Ok(Rows::new(xml, sst, meta.styles.clone(), meta.is_1904, meta.options.include_empty_rows))
+    let options = &meta.options;
+    let xml = XmlReader::new(Directory::open(entry, source)?, part).with_max_token(options.max_token_bytes);
+    Ok(Rows::new(xml, sst, meta.styles.clone(), meta.is_1904, options.include_empty_rows, options.max_row_text_bytes))
 }
 
 struct Relationship {
@@ -382,12 +416,13 @@ impl Relationship {
 struct Package<'a, R> {
     dir: &'a Directory,
     source: &'a mut R,
+    max_token: usize,
 }
 
 impl<R: Read + Seek> Package<'_, R> {
     fn xml(&mut self, part: &str) -> Result<XmlReader<EntryReader<&mut R>>> {
         let entry = self.dir.find(part).ok_or_else(|| Error::Malformed { part: part.into(), message: "the part is missing".into() })?;
-        Ok(XmlReader::new(Directory::open(entry, &mut *self.source)?, part))
+        Ok(XmlReader::new(Directory::open(entry, &mut *self.source)?, part).with_max_token(self.max_token))
     }
 
     fn relationships(&mut self, part: &str) -> Result<Option<Vec<Relationship>>> {

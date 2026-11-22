@@ -14,7 +14,6 @@ use crate::engine::{MAX_COLUMNS, MAX_ROWS};
 use crate::error::{Error, Result};
 
 /// Largest amount of decoded text one row may hold.
-const MAX_ROW_TEXT: usize = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 enum Raw {
@@ -50,12 +49,12 @@ enum State {
     Done,
 }
 
-/// A run of adjacent columns that share one width.
+/// A run of adjacent columns that share one width and hidden flag.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ColumnWidth {
     first: u32,
     last: u32,
-    width: f64,
+    width: Option<f64>,
     hidden: bool,
 }
 
@@ -70,8 +69,9 @@ impl ColumnWidth {
         self.last
     }
 
-    /// Width in characters of the default font, as in [`Column::width`](crate::Column).
-    pub fn width(&self) -> f64 {
+    /// Width in characters of the default font, as in [`Column::width`](crate::Column); `None`
+    /// when the file stores no width (a hidden column, for example).
+    pub fn width(&self) -> Option<f64> {
         self.width
     }
 
@@ -89,15 +89,16 @@ pub struct SheetLayout {
 }
 
 impl SheetLayout {
-    /// The column widths the sheet defines, explicit and auto-fitted alike, in file order.
-    /// Columns that are not covered have the default width.
+    /// The column widths the sheet defines, explicit and auto-fitted alike, in file order, and the
+    /// hidden columns, with or without a width. Columns that are not covered have the default
+    /// width and are visible.
     pub fn column_widths(&self) -> &[ColumnWidth] {
         &self.columns
     }
 
     /// The width of a 1-based column; `None` if the sheet leaves it at the default.
     pub fn column_width(&self, column: u32) -> Option<f64> {
-        self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).map(|c| c.width)
+        self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).and_then(|c| c.width)
     }
 
     /// True if a 1-based column is hidden.
@@ -162,6 +163,7 @@ pub struct Rows<R> {
     styles: Arc<Styles>,
     is_1904: bool,
     include_empty: bool,
+    max_row_text: usize,
     state: State,
     previous_row: u32,
     number: u32,
@@ -187,6 +189,7 @@ impl<R: Read> Rows<R> {
         styles: Arc<Styles>,
         is_1904: bool,
         include_empty: bool,
+        max_row_text: usize,
     ) -> Self {
         Self {
             xml,
@@ -194,6 +197,7 @@ impl<R: Read> Rows<R> {
             styles,
             is_1904,
             include_empty,
+            max_row_text,
             state: State::BeforeData,
             previous_row: 0,
             number: 0,
@@ -340,7 +344,7 @@ impl<R: Read> Rows<R> {
                             _ => {}
                         }
                     }
-                    if let (Some(first), Some(last), Some(width)) = (first, last, width) {
+                    if let (Some(first), Some(last), true) = (first, last, width.is_some() || hidden) {
                         let last = last.min(MAX_COLUMNS);
                         if (1..=last).contains(&first) {
                             if self.layout.columns.len() >= MAX_COLUMNS as usize {
@@ -587,8 +591,11 @@ impl<R: Read> Rows<R> {
     }
 
     fn check_row_text(&self) -> Result<()> {
-        if self.text.len() > MAX_ROW_TEXT {
-            return Err(Error::LimitExceeded(format!("row {} holds more than {MAX_ROW_TEXT} bytes of text", self.number)));
+        if self.text.len() > self.max_row_text {
+            return Err(Error::LimitExceeded(format!(
+                "row {} holds more than {} bytes of text (ReadOptions::max_row_text_bytes)",
+                self.number, self.max_row_text
+            )));
         }
         Ok(())
     }
