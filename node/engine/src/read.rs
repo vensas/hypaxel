@@ -6,7 +6,8 @@
 //! it one row follows another:
 //!
 //! - `LAYOUT` `u8` flags (bit 0: summary rows above their groups), `u8` row outline levels, `u32`
-//!   count, then per column width `u32` first column, `u32` last column, `f64` width, `u8` hidden
+//!   count, then per column width `u32` first column, `u32` last column, `f64` width (NaN if
+//!   none), `u8` flags (bit 0 hidden, bit 1 visible)
 //! - `ROW_PROPS`, only before a row that is grouped, hidden, collapsed or has a height: `u8` flags
 //!   (bits 0–2 outline level, bit 3 hidden, bit 4 collapsed, bit 5 a height follows), `f64` height
 //! - `ROW` `u32` row number, `u32` width (the 1-based column of the last cell with a value),
@@ -51,6 +52,9 @@ const TAG_SHARED: u8 = 11;
 const TAG_COPY: u8 = 12;
 const TAG_LAYOUT: u8 = 13;
 const TAG_ROW_PROPS: u8 = 14;
+
+const COLUMN_HIDDEN: u8 = 1;
+const COLUMN_VISIBLE: u8 = 1 << 1;
 
 const PROP_HIDDEN: u8 = 1 << 3;
 const PROP_COLLAPSED: u8 = 1 << 4;
@@ -415,7 +419,9 @@ fn put_layout(out: &mut Vec<u8>, layout: &SheetLayout) {
         put_u32(out, column.first_column());
         put_u32(out, column.last_column());
         out.extend_from_slice(&column.width().unwrap_or(f64::NAN).to_le_bytes());
-        out.push(column.is_hidden() as u8);
+        let hidden = if column.is_hidden() { COLUMN_HIDDEN } else { 0 };
+        let visible = if column.is_visible() { COLUMN_VISIBLE } else { 0 };
+        out.push(hidden | visible);
     }
 }
 

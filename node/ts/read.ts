@@ -140,6 +140,9 @@ const TAG_COPY = 12
 const TAG_LAYOUT = 13
 const TAG_ROW_PROPS = 14
 
+const COLUMN_HIDDEN = 1
+const COLUMN_VISIBLE = 1 << 1
+
 const PROP_LEVEL = 0b111
 const PROP_HIDDEN = 1 << 3
 const PROP_COLLAPSED = 1 << 4
@@ -370,16 +373,15 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     const widths: ColumnWidth[] = []
     let p = 7
     for (let i = 0; i < count; i++, p += 17) {
-      const stored = view.getFloat64(p + 8, true)
-      const width = Number.isNaN(stored) ? undefined : stored
-      const hidden = view.getUint8(p + 16) === 1
+      const width = view.getFloat64(p + 8, true)
+      const flags = view.getUint8(p + 16)
       widths.push(
         Object.freeze({
           firstColumn: view.getUint32(p, true),
           lastColumn: view.getUint32(p + 4, true),
-          width,
-          hidden,
-          visible: !hidden && (width === undefined || width > 0),
+          width: Number.isNaN(width) ? undefined : width,
+          hidden: (flags & COLUMN_HIDDEN) !== 0,
+          visible: (flags & COLUMN_VISIBLE) !== 0,
         }),
       )
     }
