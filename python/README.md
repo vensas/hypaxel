@@ -29,7 +29,7 @@ Hypaxel is built on the [`hypaxel` Rust crate](https://github.com/vensas/hypaxel
 ## Install
 
 ```bash
-pip install hypaxel                 # not published yet: build from source, see "Development"
+pip install hypaxel
 pip install "hypaxel[pandas]"       # extras: pandas, polars, starlette
 ```
 

@@ -32,7 +32,7 @@ The [.NET](https://github.com/vensas/hypaxel/blob/main/dotnet/README.md) and [Py
 ## Install
 
 ```bash
-npm install hypaxel        # not published yet: build from source, see "Development"
+npm install hypaxel
 ```
 
 Requires Node.js 22 or later, or a browser with WebAssembly (every current browser).

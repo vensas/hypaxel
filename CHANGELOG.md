@@ -3,7 +3,7 @@
 All notable changes to Hypaxel are recorded here. Versions apply to every package (Rust crates,
 Python, Node.js, .NET, Java, Go and PHP).
 
-## 0.4.0 (unreleased)
+## 0.4.0 (2026-11-22)
 
 ### Added
 

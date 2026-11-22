@@ -34,8 +34,6 @@ and Scala.
 
 ## Install
 
-Not published yet: build from source, see [Development](#development). The coordinates will be:
-
 ```xml
 <dependency>
   <groupId>de.vensas</groupId>
