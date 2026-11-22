@@ -12,7 +12,9 @@ public class ReaderLayoutTests
         ["SKU", "Item", "Group", "Vendor", "Cost", "Price", "Opening", "Sold", "Closing", "Reorder", "Status"];
     private const string TableRelType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
 
-    private static XlsxReader Reader(byte[] bytes) => new(new MemoryStream(bytes));
+    private static XlsxReader Reader(byte[] bytes, XlsxReaderOptions? options = null) => new(new MemoryStream(bytes), options);
+
+    private static string? FirstString(XlsxRow row) => row.TryGetString(1, out var value) ? value : null;
 
     private static byte[] SheetWithTables(string sheetXml, params string[] tables)
     {
@@ -212,7 +214,7 @@ public class ReaderLayoutTests
         Assert.True(rows.OutlineSummaryAbove);
         Assert.Equal(7, rows.RowOutlineLevels);
         Assert.Equal(
-            [new ColumnWidth(1, 16384, 9.5), new ColumnWidth(2, 3, 20), new ColumnWidth(5, 16384, 10, Hidden: true)],
+            [new ColumnWidth(1, 16384, 9.5), new ColumnWidth(2, 3, 20), new ColumnWidth(4, 4, null, Hidden: true), new ColumnWidth(5, 16384, 10, Hidden: true)],
             rows.ColumnWidths);
         Assert.False(rows.IsColumnHidden(9));
         Assert.True(rows.ColumnWidths[2].Hidden);
@@ -286,7 +288,7 @@ public class ReaderLayoutTests
         Assert.Equal("Sales_2024", first.Name);
         Assert.Equal((2, 2, 10, 4), (first.FirstRow, first.FirstColumn, first.LastRow, first.LastColumn));
         Assert.Equal(["Region & \nCountry", "Net", "Größe _x0041_"], first.Columns);
-        Assert.Equal(TableStyle.None, first.Style);
+        Assert.Equal(TableStyle.Custom("My Custom Style"), first.Style);
         Assert.True(first.ShowHeaderRow);
         Assert.True(first.ShowAutoFilter);
         Assert.True(first.ShowRowStripes);
@@ -313,22 +315,81 @@ public class ReaderLayoutTests
     }
 
     [Theory]
-    [InlineData("TableStyleLight1", "TableStyleLight1")]
-    [InlineData("TableStyleLight21", "TableStyleLight21")]
-    [InlineData(" TableStyleDark11 ", "TableStyleDark11")]
-    [InlineData("TableStyleDark12", null)]
-    [InlineData("TableStyleLight0", null)]
-    [InlineData("TableStyleMedium", null)]
-    [InlineData("TableStyleMedium2x", null)]
-    [InlineData("TableStyleMedium999", null)]
-    [InlineData("PivotStyleLight16", null)]
-    [InlineData("tablestylemedium2", null)]
-    [InlineData("", null)]
-    public void MapsOnlyBuiltInTableStyles(string name, string? expected)
+    [InlineData("TableStyleLight1", "TableStyleLight1", false)]
+    [InlineData("TableStyleLight21", "TableStyleLight21", false)]
+    [InlineData(" TableStyleDark11 ", "TableStyleDark11", false)]
+    [InlineData("TableStyleDark12", "TableStyleDark12", true)]
+    [InlineData("TableStyleLight0", "TableStyleLight0", true)]
+    [InlineData("TableStyleMedium", "TableStyleMedium", true)]
+    [InlineData("TableStyleMedium2x", "TableStyleMedium2x", true)]
+    [InlineData("TableStyleMedium999", "TableStyleMedium999", true)]
+    [InlineData("PivotStyleLight16", "PivotStyleLight16", true)]
+    [InlineData("tablestylemedium2", "tablestylemedium2", true)]
+    [InlineData(" My Style ", " My Style ", true)]
+    [InlineData("A &amp; B &#x41;", "A & B A", true)]
+    [InlineData("Style_x0041_", "Style_x0041_", true)]
+    [InlineData("", null, false)]
+    public void MapsBuiltInAndCustomTableStyles(string name, string? expected, bool custom)
     {
         var table = $"""<table xmlns="{Main}" ref="A1:A2"><tableStyleInfo name="{name}"/></table>""";
         using var reader = Reader(SheetWithTables("<sheetData/>", table));
-        Assert.Equal(expected, Assert.Single(reader.GetTables(0)).Style.Name);
+        var style = Assert.Single(reader.GetTables(0)).Style;
+        Assert.Equal(expected, style.Name);
+        Assert.Equal(custom, style.IsCustom);
+    }
+
+    [Fact]
+    public void ReadsBackCustomTableStyles()
+    {
+        var custom = new ExcelTable(1, 1, 2, 1) { Name = "Branded", Columns = ["a"], Style = TableStyle.Custom("Brand <&> Ü") };
+        var builtIn = new ExcelTable(1, 3, 2, 3) { Name = "Plain", Columns = ["c"], Style = TableStyle.Medium(9) };
+        var lookalike = new ExcelTable(1, 5, 2, 5) { Name = "Lookalike", Columns = ["e"], Style = TableStyle.Custom("TableStyleMedium9") };
+        var bytes = Write(w =>
+        {
+            var sheet = w.AddWorksheet("Data");
+            sheet.AddRow("a", null, "c", null, "e");
+            sheet.AddRow(1, null, 2, null, 3);
+            sheet.AddTable(custom);
+            sheet.AddTable(builtIn);
+            sheet.AddTable(lookalike);
+        });
+
+        using var reader = Reader(bytes);
+        var tables = reader.GetTables(0);
+        Assert.Equal(custom, tables[0]);
+        Assert.Equal(builtIn, tables[1]);
+        Assert.Equal(TableStyle.Medium(9), tables[2].Style);
+    }
+
+    [Fact]
+    public void ReadsHiddenColumnsWithoutAWidth()
+    {
+        var sheet = $"""
+            <worksheet xmlns="{Main}">
+              <cols>
+                <col min="1" max="1" width="12"/>
+                <col min="2" max="3" hidden="1"/>
+                <col min="4" max="4" style="2"/>
+                <col min="5" max="5" hidden="true" customWidth="1"/>
+                <col min="6" max="6" hidden="0"/>
+              </cols>
+              <sheetData/>
+            </worksheet>
+            """;
+        using var reader = Reader(SingleSheet(sheet));
+        using var rows = reader.OpenWorksheet(0);
+        Assert.Equal(
+            [new ColumnWidth(1, 1, 12), new ColumnWidth(2, 3, null, Hidden: true), new ColumnWidth(5, 5, null, Hidden: true)],
+            rows.ColumnWidths);
+        Assert.True(rows.IsColumnHidden(2));
+        Assert.True(rows.IsColumnHidden(3));
+        Assert.False(rows.IsColumnHidden(4));
+        Assert.True(rows.IsColumnHidden(5));
+        Assert.False(rows.IsColumnHidden(6));
+        Assert.Null(rows.GetColumnWidth(2));
+        Assert.Null(rows.GetColumnWidth(3));
+        Assert.Null(rows.GetColumnWidth(4));
+        Assert.Equal(12, rows.GetColumnWidth(1));
     }
 
     [Theory]
@@ -401,6 +462,121 @@ public class ReaderLayoutTests
             var e = Assert.Throws<XlsxReadException>(() => reader.GetTables(0));
             Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
             Assert.Contains("too many names", e.Message);
+        }
+    }
+
+    [Fact]
+    public void ReaderLimitsHaveTheirDefaults()
+    {
+        var options = new XlsxReaderOptions();
+        Assert.Equal(4096, options.MaxTables);
+        Assert.Equal(64L * 1024 * 1024, options.MaxTableBytes);
+        Assert.Equal(16 * 1024 * 1024, options.MaxTokenBytes);
+        Assert.Equal(256L * 1024 * 1024, options.MaxRowTextBytes);
+    }
+
+    [Theory]
+    [InlineData(nameof(XlsxReaderOptions.MaxTables))]
+    [InlineData(nameof(XlsxReaderOptions.MaxTableBytes))]
+    [InlineData(nameof(XlsxReaderOptions.MaxTokenBytes))]
+    [InlineData(nameof(XlsxReaderOptions.MaxRowTextBytes))]
+    public void ReaderLimitsMustBePositive(string option)
+    {
+        foreach (var value in new[] { 0, -1 })
+        {
+            var options = new XlsxReaderOptions();
+            var property = typeof(XlsxReaderOptions).GetProperty(option)!;
+            property.SetValue(options, Convert.ChangeType(value, property.PropertyType, System.Globalization.CultureInfo.InvariantCulture));
+            var e = Assert.Throws<ArgumentOutOfRangeException>(() => Reader(SingleSheet($"""<worksheet xmlns="{Main}"><sheetData/></worksheet>"""), options));
+            Assert.Equal(option, e.ParamName);
+        }
+    }
+
+    [Fact]
+    public void MaxTablesIsConfigurable()
+    {
+        var table = (string name) => $"""<table xmlns="{Main}" name="{name}" ref="A1:B2"/>""";
+        var bytes = SheetWithTables("<sheetData/>", table("A"), table("B"), table("C"));
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxTables = 3 }))
+        {
+            Assert.Equal(3, reader.GetTables(0).Count);
+        }
+
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxTables = 2 }))
+        {
+            var e = Assert.Throws<XlsxReadException>(() => reader.GetTables(0));
+            Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
+            Assert.Contains("XlsxReaderOptions.MaxTables", e.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData("", 67)]
+    [InlineData("""<tableStyleInfo name="TableStyleLight2"/>""", 67)]
+    [InlineData("""<tableStyleInfo name="Brand &amp; Co"/>""", 77)]
+    public void MaxTableBytesIsConfigurable(string style, long size)
+    {
+        var bytes = SheetWithTables("<sheetData/>", $"""<table xmlns="{Main}" name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns>{style}</table>""");
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxTableBytes = size }))
+        {
+            Assert.Single(reader.GetTables(0));
+        }
+
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxTableBytes = size - 1 }))
+        {
+            var e = Assert.Throws<XlsxReadException>(() => reader.GetTables(0));
+            Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
+            Assert.Contains("XlsxReaderOptions.MaxTableBytes", e.Message);
+        }
+    }
+
+    [Fact]
+    public void MaxTokenBytesIsConfigurable()
+    {
+        var text = new string('x', 100_000);
+        var bytes = SingleSheet($"""<worksheet xmlns="{Main}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>""");
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxTokenBytes = 100_100 }))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            Assert.True(rows.Read());
+            Assert.Equal(text, FirstString(rows.Row));
+        }
+
+        foreach (var limit in new[] { 99_999, 64 * 1024, 1 })
+        {
+            using var reader = Reader(bytes, new XlsxReaderOptions { MaxTokenBytes = limit });
+            using var rows = reader.OpenWorksheet(0);
+            var e = Assert.Throws<XlsxReadException>(() => rows.Read());
+            Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
+            Assert.Contains("XlsxReaderOptions.MaxTokenBytes", e.Message);
+        }
+
+        var small = SingleSheet($"""<worksheet xmlns="{Main}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{new string('y', 60_000)}</t></is></c></row></sheetData></worksheet>""");
+        using (var reader = Reader(small, new XlsxReaderOptions { MaxTokenBytes = 1 }))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            Assert.True(rows.Read());
+            Assert.Equal(60_000, FirstString(rows.Row)!.Length);
+        }
+    }
+
+    [Fact]
+    public void MaxRowTextBytesIsConfigurable()
+    {
+        var bytes = SingleSheet($"""<worksheet xmlns="{Main}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>0123456789</t></is></c></row></sheetData></worksheet>""");
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxRowTextBytes = 20 }))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            Assert.True(rows.Read());
+            Assert.Equal("0123456789", FirstString(rows.Row));
+        }
+
+        using (var reader = Reader(bytes, new XlsxReaderOptions { MaxRowTextBytes = 19 }))
+        {
+            using var rows = reader.OpenWorksheet(0);
+            var e = Assert.Throws<XlsxReadException>(() => rows.Read());
+            Assert.Equal(XlsxReadErrorKind.LimitExceeded, e.Kind);
+            Assert.Contains("XlsxReaderOptions.MaxRowTextBytes", e.Message);
         }
     }
 
@@ -669,7 +845,7 @@ public class ReaderLayoutTests
         {
             Name = "Table1",
             Columns = InventoryColumns,
-            Style = TableStyle.None,
+            Style = TableStyle.Custom("Inventory-style"),
             ShowHeaderRow = true,
             ShowAutoFilter = false,
             ShowRowStripes = true,

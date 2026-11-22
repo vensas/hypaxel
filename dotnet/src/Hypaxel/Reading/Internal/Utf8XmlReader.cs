@@ -54,13 +54,17 @@ internal sealed class Utf8XmlReader : IDisposable
     /// <summary>Bytes kept buffered ahead of a fast-path match, so that a whole cell fits.</summary>
     private const int CellLookahead = 4096;
 
-    /// <summary>Largest single token (a tag or a run of text). Excel limits cell text to 32,767 characters.</summary>
-    internal const int MaxToken = 16 * 1024 * 1024;
+    /// <summary>Default largest single token (a tag or a run of text). Excel limits cell text to 32,767 characters.</summary>
+    internal const int DefaultMaxToken = 16 * 1024 * 1024;
+
+    /// <summary>Smallest token limit; lower configured values are raised to it.</summary>
+    internal const int MinMaxToken = 64 * 1024;
 
     private static readonly SearchValues<byte> s_whitespace = SearchValues.Create(" \t\r\n\f"u8);
     private static readonly SearchValues<byte> s_tagEndOrQuote = SearchValues.Create(">\"'"u8);
 
     private readonly Stream _source;
+    private readonly int _maxToken;
     private byte[] _buffer;
     private int _pos;
     private int _end;
@@ -72,9 +76,10 @@ internal sealed class Utf8XmlReader : IDisposable
     private int _valueStart;
     private int _valueLength;
 
-    public Utf8XmlReader(Stream source, string part, int initialBuffer = InitialBuffer)
+    public Utf8XmlReader(Stream source, string part, int initialBuffer = InitialBuffer, int maxToken = DefaultMaxToken)
     {
         _source = source;
+        _maxToken = Math.Max(maxToken, MinMaxToken);
         Part = part;
         _buffer = ArrayPool<byte>.Shared.Rent(initialBuffer);
     }
@@ -112,20 +117,24 @@ internal sealed class Utf8XmlReader : IDisposable
             _pos = 0;
         }
 
-        if (_end == _buffer.Length)
+        var capacity = Math.Min(_buffer.Length, _maxToken);
+        if (_end == capacity)
         {
-            if (_buffer.Length >= MaxToken)
+            if (capacity >= _maxToken)
             {
-                throw XlsxReadException.LimitExceeded(Part, $"The part contains an XML token larger than {MaxToken} bytes.");
+                throw XlsxReadException.LimitExceeded(
+                    Part,
+                    $"The part contains an XML token larger than {_maxToken} bytes (XlsxReaderOptions.MaxTokenBytes).");
             }
 
-            var larger = ArrayPool<byte>.Shared.Rent(Math.Min(_buffer.Length * 2, MaxToken));
+            var larger = ArrayPool<byte>.Shared.Rent((int)Math.Min(_buffer.Length * 2L, _maxToken));
             _buffer.AsSpan(0, _end).CopyTo(larger);
             ArrayPool<byte>.Shared.Return(_buffer);
             _buffer = larger;
+            capacity = Math.Min(_buffer.Length, _maxToken);
         }
 
-        var read = _source.Read(_buffer, _end, _buffer.Length - _end);
+        var read = _source.Read(_buffer, _end, capacity - _end);
         if (read == 0)
         {
             _eof = true;

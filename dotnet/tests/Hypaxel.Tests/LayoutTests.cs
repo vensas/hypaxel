@@ -257,6 +257,78 @@ public class LayoutTests
         Assert.Contains("name=\"Table2\"", output.Part("xl/tables/table2.xml"));
     }
 
+    [Fact]
+    public void CustomTableStyles()
+    {
+        using var output = Write(w =>
+        {
+            var s = w.AddWorksheet("S");
+            s.AddRow("a", "b");
+            s.AddRow(1, 2);
+            s.AddRow(3, 4);
+            s.AddTable(new ExcelTable(1, 1, 2, 1) { Columns = ["a"], Style = TableStyle.Custom("Corporate <Blue> & \"Bold\"") });
+            s.AddTable(new ExcelTable(1, 2, 3, 2) { Columns = ["b"], Style = TableStyle.Custom("TableStyleMedium9") });
+        });
+
+        Assert.Contains("<tableStyleInfo name=\"Corporate &lt;Blue&gt; &amp; &quot;Bold&quot;\" showFirstColumn=\"0\"", output.Part("xl/tables/table1.xml"));
+        Assert.Contains("<tableStyleInfo name=\"TableStyleMedium9\"", output.Part("xl/tables/table2.xml"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("tab\there")]
+    [InlineData("line\nbreak")]
+    [InlineData("carriage\rreturn")]
+    [InlineData("bell\u0007")]
+    [InlineData("\uFFFE")]
+    public void CustomTableStyleNames_Invalid(string name)
+    {
+        var e = Assert.Throws<ArgumentException>(() => TableStyle.Custom(name));
+        Assert.Contains("invalid table style name", e.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CustomTableStyleNames_Length()
+    {
+        Assert.Equal(new string('s', 255), TableStyle.Custom(new string('s', 255)).Name);
+        Assert.Equal(254, TableStyle.Custom(string.Concat(Enumerable.Repeat("\U0001F600", 127))).Name!.Length);
+        Assert.Throws<ArgumentException>(() => TableStyle.Custom(string.Concat(Enumerable.Repeat("\U0001F600", 128))));
+        Assert.Throws<ArgumentException>(() => TableStyle.Custom(new string('s', 256)));
+        Assert.Throws<ArgumentNullException>(() => TableStyle.Custom(null!));
+        Assert.Throws<ArgumentException>(() => TableStyle.Custom("lone \uD800 surrogate"));
+        Assert.Throws<ArgumentException>(() => TableStyle.Custom("lone \uDC00"));
+    }
+
+    [Fact]
+    public void CustomTableStylesAreValidatedWhenAdded()
+    {
+        using var w = new XlsxWriter(new MemoryStream());
+        var s = w.AddWorksheet("S");
+        var table = new ExcelTable(1, 1, 3, 1) { Columns = ["a"], Style = TableStyle.FromName(new string('s', 256)) };
+        var e = Assert.Throws<ArgumentException>(() => s.AddTable(table));
+        Assert.Contains("invalid table style name", e.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Throws<ArgumentException>(() => s.AddTable(table with { Style = TableStyle.FromName("x\u0001") }));
+    }
+
+    [Fact]
+    public void TableStyleEqualityAndNames()
+    {
+        Assert.Equal(TableStyle.Custom("Brand"), TableStyle.Custom("Brand"));
+        Assert.Equal(TableStyle.Custom("Brand").GetHashCode(), TableStyle.Custom("Brand").GetHashCode());
+        Assert.NotEqual(TableStyle.Custom("Brand"), TableStyle.Custom("brand"));
+        Assert.NotEqual(TableStyle.Custom("TableStyleMedium9"), TableStyle.Medium(9));
+        Assert.Equal("Brand", TableStyle.Custom("Brand").ToString());
+        Assert.True(TableStyle.Custom("Brand").IsCustom);
+        Assert.False(TableStyle.Medium(9).IsCustom);
+        Assert.False(TableStyle.None.IsCustom);
+
+        Assert.Equal(TableStyle.Medium(9), TableStyle.FromName(" TableStyleMedium9 "));
+        Assert.Equal(TableStyle.None, TableStyle.FromName(""));
+        Assert.Equal(TableStyle.Custom(" Brand "), TableStyle.FromName(" Brand "));
+        Assert.Equal(TableStyle.Custom("TableStyleMedium29"), TableStyle.FromName("TableStyleMedium29"));
+        Assert.Throws<ArgumentNullException>(() => TableStyle.FromName(null!));
+    }
+
     [Theory]
     [InlineData("Orders")]
     [InlineData("_t")]

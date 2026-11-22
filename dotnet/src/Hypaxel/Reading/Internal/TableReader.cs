@@ -11,7 +11,8 @@ internal static class TableReader
 
     /// <param name="xml">The table part.</param>
     /// <param name="budget">Name bytes the caller still accepts; reduced by what the table holds.</param>
-    public static ExcelTable Parse(Utf8XmlReader xml, ref long budget)
+    /// <param name="limit">The configured <see cref="XlsxReaderOptions.MaxTableBytes"/>, for the error message.</param>
+    public static ExcelTable Parse(Utf8XmlReader xml, ref long budget, long limit)
     {
         ExcelTable? table = null;
         List<string>? columns = null;
@@ -56,7 +57,7 @@ internal static class TableReader
                     HasTotalsRow = XmlAttributes.TryGet(attributes, "totalsRowCount"u8, out var totals)
                         && uint.TryParse(Trim(totals), NumberStyles.None, CultureInfo.InvariantCulture, out var totalsRows) && totalsRows > 0,
                 };
-                Charge(xml, ref budget, table.Name is null ? 0 : Encoding.UTF8.GetByteCount(table.Name));
+                Charge(xml, ref budget, limit, table.Name is null ? 0 : Encoding.UTF8.GetByteCount(table.Name));
                 descend = true;
             }
             else if (name.SequenceEqual("autoFilter"u8))
@@ -78,12 +79,17 @@ internal static class TableReader
                 buffer.Clear();
                 var decoded = XmlAttributes.TryGet(attributes, "name"u8, out var raw) && XmlText.Decode(buffer, raw, entities: true, excelEscapes: true) is null;
                 var columnName = decoded ? buffer.Span.ToString() : string.Empty;
-                Charge(xml, ref budget, Encoding.UTF8.GetByteCount(columnName) + ColumnCost);
+                Charge(xml, ref budget, limit, Encoding.UTF8.GetByteCount(columnName) + ColumnCost);
                 columns.Add(columnName);
             }
             else if (name.SequenceEqual("tableStyleInfo"u8))
             {
                 style = XmlAttributes.TryGet(attributes, "name"u8, out var styleName) ? ParseStyle(styleName) : TableStyle.None;
+                if (style.IsCustom)
+                {
+                    Charge(xml, ref budget, limit, Encoding.UTF8.GetByteCount(style.Name!));
+                }
+
                 rowStripes = Flag(attributes, "showRowStripes"u8);
                 columnStripes = Flag(attributes, "showColumnStripes"u8);
                 firstColumn = Flag(attributes, "showFirstColumn"u8);
@@ -113,12 +119,14 @@ internal static class TableReader
         };
     }
 
-    private static void Charge(Utf8XmlReader xml, ref long budget, int cost)
+    private static void Charge(Utf8XmlReader xml, ref long budget, long limit, int cost)
     {
         budget -= cost;
         if (budget < 0)
         {
-            throw XlsxReadException.LimitExceeded(xml.Part, "The tables of a worksheet hold too many names.");
+            throw XlsxReadException.LimitExceeded(
+                xml.Part,
+                $"The tables of a worksheet hold too many names: more than {limit} bytes (XlsxReaderOptions.MaxTableBytes).");
         }
     }
 
@@ -144,28 +152,12 @@ internal static class TableReader
             ? value
             : null;
 
-    /// <summary>Maps a built-in style name such as <c>TableStyleMedium9</c>; custom styles have no counterpart.</summary>
-    internal static TableStyle ParseStyle(ReadOnlySpan<byte> raw)
-    {
-        raw = Trim(raw);
-        if (!raw.StartsWith("TableStyle"u8))
-        {
-            return TableStyle.None;
-        }
-
-        raw = raw[10..];
-        var digits = raw.IndexOfAnyInRange((byte)'0', (byte)'9');
-        if (digits < 0 || !byte.TryParse(raw[digits..], NumberStyles.None, CultureInfo.InvariantCulture, out var number))
-        {
-            return TableStyle.None;
-        }
-
-        var family = raw[..digits];
-        return family.SequenceEqual("Light"u8) && number is >= 1 and <= 21 ? TableStyle.Light(number)
-            : family.SequenceEqual("Medium"u8) && number is >= 1 and <= 28 ? TableStyle.Medium(number)
-            : family.SequenceEqual("Dark"u8) && number is >= 1 and <= 11 ? TableStyle.Dark(number)
-            : TableStyle.None;
-    }
+    /// <summary>
+    /// Maps a style name as <see cref="TableStyle.FromName"/> does: built-in names to built-in styles, others to custom styles.
+    /// A name that is not valid XML text gives <see cref="TableStyle.None"/>.
+    /// </summary>
+    internal static TableStyle ParseStyle(ReadOnlySpan<byte> raw) =>
+        XmlText.DecodeAttribute(raw) is { } name ? TableStyle.FromName(name) : TableStyle.None;
 
     /// <summary>Parses <c>A1:C10</c> (or a single cell) into a 1-based, inclusive range.</summary>
     internal static bool TryParseRange(ReadOnlySpan<byte> raw, out int firstRow, out int firstColumn, out int lastRow, out int lastColumn)
