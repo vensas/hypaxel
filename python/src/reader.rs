@@ -18,6 +18,7 @@ const MAX_EXACT_INT: f64 = 9_007_199_254_740_992.0;
 fn read_err(e: hypaxel::Error) -> PyErr {
     match e {
         hypaxel::Error::Io(io) => io.into(),
+        limit @ hypaxel::Error::LimitExceeded(_) => XlsxError::new_err(limit.to_string().replace("ReadOptions::", "")),
         other => XlsxError::new_err(other.to_string()),
     }
 }
