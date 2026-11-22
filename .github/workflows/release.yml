@@ -406,7 +406,8 @@ jobs:
           if [ -n "$NPM_BOOTSTRAP_TOKEN" ]; then
             npm config set //registry.npmjs.org/:_authToken "$NPM_BOOTSTRAP_TOKEN"
           fi
-          npm publish "package/hypaxel-$VERSION.tgz" --access public --tag "$DIST_TAG" --provenance
+          # The ./ matters: npm reads "package/hypaxel-….tgz" as the GitHub repository package/….
+          npm publish "./package/hypaxel-$VERSION.tgz" --access public --tag "$DIST_TAG" --provenance
 
   # maturin takes the version from python/Cargo.toml, which carries no pre-release suffix, so a
   # pre-release tag is not published to PyPI. Wheels are built for every CPython version that
