@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "hypaxel"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "crc32fast",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "hypaxel-js-engine"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "hypaxel",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "hypaxel-node"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "hypaxel-js-engine",
  "napi",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "hypaxel-wasm"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "hypaxel-js-engine",
  "js-sys",
