@@ -577,8 +577,8 @@ jobs:
           cache: maven
           cache-dependency-path: java/pom.xml
           server-id: central
-          server-username: MAVEN_CENTRAL_USERNAME
-          server-password: MAVEN_CENTRAL_PASSWORD
+          server-username-env-var: MAVEN_CENTRAL_USERNAME
+          server-password-env-var: MAVEN_CENTRAL_PASSWORD
       - name: Skip a version Maven Central already has
         id: published
         run: |
