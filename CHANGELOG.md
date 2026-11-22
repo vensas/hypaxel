@@ -133,7 +133,7 @@ Python, Node.js, .NET, Java, Go and PHP).
   tags without ever moving a published one (`docs/publishing-php.md`). The Composer archive leaves
   out tests, benchmarks, examples and tool configuration.
 - Releases: one `Release` workflow publishes a release tag to Packagist, to nuget.org, crates.io,
-  npm and PyPI through Trusted Publishing, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
+  npm and PyPI through Trusted Publishing, to Maven Central, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
   a module in a subdirectory. It first checks that every manifest declares the tag's version
   (`docs/releasing.md`). The PHP split workflow now only keeps the split repository's `main` in
   step.
@@ -147,6 +147,9 @@ Python, Node.js, .NET, Java, Go and PHP).
   musllinux), macOS x86_64 and arm64 and Windows x64, plus an sdist that builds from source. Each
   release installs the wheels with Python 3.10 and 3.14 on every platform before uploading them.
   The README's links work on PyPI.
+- Java: a `release` Maven profile builds the sources and javadoc jars, signs every artifact and
+  publishes `de.vensas:hypaxel` to Maven Central through the Central Portal. The README's
+  coordinates name the current version.
 - .NET: both NuGet packages carry the README, a symbol package (`.snupkg`) and a project URL, and CI
   builds are deterministic with Source Link. `Hypaxel.AspNetCore` gains its package README. The
   README lists the `dotnet add package` commands, and its links work on nuget.org.

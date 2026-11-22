@@ -40,12 +40,12 @@ Not published yet: build from source, see [Development](#development). The coord
 <dependency>
   <groupId>de.vensas</groupId>
   <artifactId>hypaxel</artifactId>
-  <version>0.2.0</version>
+  <version>0.4.0</version>
 </dependency>
 ```
 
 ```kotlin
-implementation("de.vensas:hypaxel:0.2.0")
+implementation("de.vensas:hypaxel:0.4.0")
 ```
 
 Requires Java 17 or later.

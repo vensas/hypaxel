@@ -16,7 +16,7 @@ on:
       registry:
         description: Where to publish it
         type: choice
-        options: [all, packagist, nuget, crates, npm, pypi, go]
+        options: [all, packagist, nuget, crates, npm, pypi, maven, go]
         default: all
 
 permissions:
@@ -522,6 +522,59 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           skip-existing: true
+
+  # Maven Central takes only a user token, no Trusted Publishing. The token and the signing key
+  # are secrets of the release environment and reach only the deploy step.
+  maven:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'maven'
+    runs-on: ubuntu-latest
+    environment: release
+    defaults:
+      run:
+        working-directory: java
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: java/pom.xml
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+      - name: Skip a version Maven Central already has
+        id: published
+        run: |
+          if curl -fsI "https://repo1.maven.org/maven2/de/vensas/hypaxel/$VERSION/hypaxel-$VERSION.pom" >/dev/null; then
+            echo "de.vensas:hypaxel:$VERSION is already on Maven Central."
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set a pre-release version
+        if: steps.published.outputs.done != 'true' && needs.version.outputs.suffix != ''
+        run: >
+          ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.21.0:set
+          -DnewVersion="$VERSION" -DgenerateBackupPoms=false
+      - if: steps.published.outputs.done != 'true'
+        run: ./mvnw -B verify
+      - name: Publish to Maven Central
+        if: steps.published.outputs.done != 'true'
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          for name in MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD MAVEN_GPG_KEY MAVEN_GPG_PASSPHRASE; do
+            test -n "${!name}" || { echo "::error::$name is not set"; exit 1; }
+          done
+          ./mvnw -B -Prelease deploy -DskipTests
 
   go:
     needs: version

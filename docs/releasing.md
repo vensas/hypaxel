@@ -11,9 +11,8 @@ It first checks that every manifest declares the tag's version, then publishes t
 | crates.io | `hypaxel`, `hypaxel-axum` | Trusted Publishing; the first version with a temporary token | [below](#cratesio) |
 | npm | `hypaxel` (native addon for five targets and WebAssembly, with provenance) | Trusted Publishing; the first version with a temporary token | [below](#npm) |
 | PyPI | `hypaxel` (wheels for CPython 3.10–3.14 on seven platforms, and the sdist) | Trusted Publishing, no token at all | [below](#pypi) |
+| Maven Central | `de.vensas:hypaxel` (jar, sources, javadoc, signed) | Central Portal user token and GPG key | [below](#maven-central) |
 | Go module proxy | `github.com/vensas/hypaxel/go` | `go/vX.Y.Z` tag in this repository | none |
-
-Maven Central is not published yet.
 
 ## Publishing a release
 
@@ -47,7 +46,7 @@ already exists with a different commit fails the run. Published versions are nev
 replaced; fix a broken release with a new version.
 
 A pre-release tag (`v0.5.0-beta1`) needs no manifest change: the manifests keep `0.5.0`, and the
-suffix is added from the tag where the registry supports it (NuGet and npm `0.5.0-beta1`, npm under
+suffix is added from the tag where the registry supports it (NuGet, npm and Maven `0.5.0-beta1`, npm under
 the `next` dist-tag instead of `latest`; Packagist and Go read the tag itself). crates.io and PyPI are skipped for pre-release tags, because Cargo and maturin
 publish the version in the manifests.
 
@@ -177,6 +176,48 @@ first release. One-time setup:
 
 A pending publisher does not reserve the name; the first upload creates the project. Afterwards
 the project can be moved to a PyPI organization and given more owners under *Manage → Collaborators*.
+
+## Maven Central
+
+The `maven` job runs `./mvnw verify` from the tag, then `./mvnw -Prelease deploy`. The `release`
+profile in `java/pom.xml` adds the sources and javadoc jars, signs every file with the GPG key
+(Bouncy Castle, so no `gpg` installation is needed) and uploads the bundle through the Central
+Portal, which validates and publishes it and waits until it is published. A version that is
+already on Maven Central is skipped; a published version can never be replaced. New versions
+appear on `repo1.maven.org` within about half an hour of publishing.
+
+Maven Central has no Trusted Publishing, so this is the one registry with long-lived secrets. They
+are secrets of the `release` environment and reach only the deploy step. One-time setup:
+
+1. **Verify the namespace.** Sign in to [central.sonatype.com](https://central.sonatype.com), open
+   *View Namespaces → Add Namespace* and enter `de.vensas`. Copy the verification key, add it as a
+   DNS TXT record on `vensas.de` (not a subdomain), wait until it resolves, and only then click
+   *Verify Namespace*: a lookup that fails is cached.
+2. **Create a user token** under *View Account → Generate User Token* and store both parts:
+
+   ```bash
+   gh secret set MAVEN_CENTRAL_USERNAME --repo vensas/hypaxel --env release
+   gh secret set MAVEN_CENTRAL_PASSWORD --repo vensas/hypaxel --env release
+   ```
+
+3. **Create a signing key** used only for releases, with a passphrase, and publish its public key.
+   Central verifies signatures against keyservers and only with the primary key:
+
+   ```bash
+   gpg --quick-gen-key "Hypaxel releases <address@vensas.de>" rsa4096 sign 2y
+   gpg --list-secret-keys --keyid-format long          # note the fingerprint
+   gpg --keyserver keyserver.ubuntu.com --send-keys <fingerprint>
+   gpg --keyserver keys.openpgp.org --send-keys <fingerprint>
+   gpg --armor --export-secret-keys <fingerprint> | gh secret set MAVEN_GPG_KEY --repo vensas/hypaxel --env release
+   gh secret set MAVEN_GPG_PASSPHRASE --repo vensas/hypaxel --env release
+   ```
+
+   Keep a backup of the key in the company's password manager. Before the key expires, extend it
+   (`gpg --quick-set-expire`), send it to the keyservers again and update the secret.
+
+To test the release profile locally without uploading, run
+`MAVEN_GPG_KEY="$(gpg --armor --export-secret-keys <fingerprint>)" MAVEN_GPG_PASSPHRASE=... ./mvnw -Prelease verify`
+in `java/`: it builds and signs everything that would be uploaded.
 
 ## Go
 
