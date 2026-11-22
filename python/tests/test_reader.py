@@ -240,7 +240,7 @@ def test_reads_back_tables_row_properties_and_layout():
             wb.tables("Missing")
 
         rows = wb.rows("Data")
-        assert rows.column_widths == [(1, 1, 12.5, False), (2, 2, 30.0, False)]
+        assert _columns(rows) == [(1, 1, 12.5, False), (2, 2, 30.0, False)]
         assert (rows.column_width(2), rows.column_width(3)) == (30.0, None)
         assert rows.column_hidden(2) is False and rows.column_hidden(3) is False
         assert rows.outline_summary_above is True and rows.row_outline_levels == 2
@@ -326,7 +326,7 @@ def test_reads_tables_rows_and_layout_saved_by_other_applications(producer):
         assert wb.tables("Plain") == []
 
         rows = wb.rows("Orders", skip_empty=False)
-        assert rows.column_widths == [(1, 1, 14.0, False), (2, 2, 22.5, False), (4, 4, 6.0, True)]
+        assert _columns(rows) == [(1, 1, 14.0, False), (2, 2, 22.5, False), (4, 4, 6.0, True)]
         assert rows.column_hidden(4) is True
         assert rows.outline_summary_above is True and rows.row_outline_levels == 2
         seen = [(rows.row_number, len(row), rows.outline_level, rows.hidden, rows.collapsed, rows.height) for row in rows]
@@ -350,6 +350,14 @@ def test_tables_with_a_totals_row_cannot_be_written():
         ws.add_table(1, 1, 3, 1, columns=["a"], totals_row=True)
 
 
+def test_reads_a_zero_width_column_saved_by_excel():
+    with hypaxel.open_workbook(os.path.join(TESTDATA, "excel-zero-width.xlsx")) as wb:
+        rows = wb.rows()
+        assert [(c.first_column, c.width, c.hidden, c.visible) for c in rows.column_widths] == [(1, 10.5, False, True), (2, 0.0, True, False)]
+        assert [rows.column_visible(c) for c in (1, 2, 3)] == [True, False, True]
+        assert list(rows) == [["A", "B"]]
+
+
 def test_reads_a_table_with_a_totals_row_saved_by_excel():
     with hypaxel.open_workbook(os.path.join(TESTDATA, "excel-totals.xlsx")) as wb:
         assert wb.sheet_names == ["Inventory"]
@@ -362,7 +370,7 @@ def test_reads_a_table_with_a_totals_row_saved_by_excel():
         }]
 
         rows = wb.rows()
-        widths = rows.column_widths
+        widths = _columns(rows)
         assert len(widths) == 11
         assert (widths[0], widths[-1]) == ((1, 1, 11.6640625, False), (11, 11, 13.1640625, False))
         assert rows.outline_summary_above is False
@@ -386,7 +394,7 @@ def test_reads_a_table_downloaded_from_google_sheets():
         }]
 
         rows = wb.rows()
-        widths = rows.column_widths
+        widths = _columns(rows)
         assert len(widths) == 12
         assert (widths[0], widths[-1]) == ((1, 1, 11.63, False), (12, 26, 8.88, False))
         assert rows.column_width(20) == 8.88
@@ -408,7 +416,7 @@ def test_reads_a_sheet_exported_by_numbers():
         # Numbers writes its table as plain cells, not as an Excel table.
         assert wb.tables() == []
         rows = wb.rows()
-        assert rows.column_widths == [(1, 1, 24.6719, False), (2, 2, 18.3672, False), (3, 5, 18.7188, False), (6, 16384, 27.75, False)]
+        assert _columns(rows) == [(1, 1, 24.6719, False), (2, 2, 18.3672, False), (3, 5, 18.7188, False), (6, 16384, 27.75, False)]
         assert (rows.outline_summary_above, rows.row_outline_levels) == (False, 0)
         seen = [(rows.row_number, rows.height, row) for row in rows]
         assert seen == [
@@ -457,12 +465,28 @@ def _sheet_package(sheet_xml: str) -> bytes:
     return buf.getvalue()
 
 
+def _columns(rows):
+    return [(c.first_column, c.last_column, c.width, c.hidden) for c in rows.column_widths]
+
+
 def test_reports_hidden_columns_without_a_width():
     data = _sheet_package('<worksheet><cols><col min="1" max="1" width="9"/><col min="2" max="3" hidden="1"/><col min="4" max="4" style="1"/></cols><sheetData/></worksheet>')
     with hypaxel.open_workbook(data) as wb:
         rows = wb.rows()
-        assert rows.column_widths == [(1, 1, 9.0, False), (2, 3, None, True)]
+        assert _columns(rows) == [(1, 1, 9.0, False), (2, 3, None, True)]
         assert (rows.column_width(2), rows.column_hidden(3), rows.column_hidden(4)) == (None, True, False)
+
+
+def test_reports_zero_width_columns_as_not_visible():
+    data = _sheet_package('<worksheet><cols><col min="1" max="1" width="0"/><col min="2" max="2" width="8" hidden="1"/><col min="3" max="3" width="8"/></cols><sheetData/></worksheet>')
+    with hypaxel.open_workbook(data) as wb:
+        rows = wb.rows()
+        assert _columns(rows)[0] == (1, 1, 0.0, False)
+        runs = rows.column_widths
+        assert [(r.first_column, r.width, r.hidden, r.visible) for r in runs] == [(1, 0.0, False, False), (2, 8.0, True, False), (3, 8.0, False, True)]
+        assert isinstance(runs[0], hypaxel.ColumnWidth) and runs[0] == rows.column_widths[0] and runs[0] != runs[1]
+        assert repr(runs[0]) == "ColumnWidth(first_column=1, last_column=1, width=0.0, hidden=False, visible=False)"
+        assert [(rows.column_hidden(c), rows.column_visible(c)) for c in (1, 2, 3, 4)] == [(False, False), (True, False), (False, True), (False, True)]
 
 
 def test_applies_configured_limits():

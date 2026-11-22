@@ -329,8 +329,8 @@ export function defineReadSuite(label, api) {
     assert.equal(rows.rowNumber, 0)
     const layout = rows.layout()
     assert.deepEqual(layout.columnWidths, [
-      { firstColumn: 1, lastColumn: 1, width: 12.5, hidden: false },
-      { firstColumn: 2, lastColumn: 2, width: 30, hidden: false },
+      { firstColumn: 1, lastColumn: 1, width: 12.5, hidden: false, visible: true },
+      { firstColumn: 2, lastColumn: 2, width: 30, hidden: false, visible: true },
     ])
     assert.equal(layout.columnHidden(2), false)
     assert.deepEqual([layout.columnWidth(2), layout.columnWidth(3)], [30, undefined])
@@ -426,9 +426,9 @@ export function defineReadSuite(label, api) {
       const rows = book.rows('Orders')
       const layout = rows.layout()
       assert.deepEqual(layout.columnWidths, [
-        { firstColumn: 1, lastColumn: 1, width: 14, hidden: false },
-        { firstColumn: 2, lastColumn: 2, width: 22.5, hidden: false },
-        { firstColumn: 4, lastColumn: 4, width: 6, hidden: true },
+        { firstColumn: 1, lastColumn: 1, width: 14, hidden: false, visible: true },
+        { firstColumn: 2, lastColumn: 2, width: 22.5, hidden: false, visible: true },
+        { firstColumn: 4, lastColumn: 4, width: 6, hidden: true, visible: false },
       ])
       assert.deepEqual([layout.columnHidden(4), layout.outlineSummaryAbove, layout.rowOutlineLevels], [true, true, 2])
       const seen = []
@@ -481,6 +481,16 @@ export function defineReadSuite(label, api) {
     assert.deepEqual(await readRecords(bytes, 0, { includeEmptyRows: true }), [{ first: 4 }])
   })
 
+  test('reads a zero-width column saved by excel', async () => {
+    const bytes = await readFile(new URL('../../testdata/reader/excel-zero-width.xlsx', import.meta.url))
+    const layout = openWorkbookSync(bytes).rows().layout()
+    assert.deepEqual(layout.columnWidths, [
+      { firstColumn: 1, lastColumn: 1, width: 10.5, hidden: false, visible: true },
+      { firstColumn: 2, lastColumn: 2, width: 0, hidden: true, visible: false },
+    ])
+    assert.deepEqual([1, 2, 3].map((c) => layout.columnVisible(c)), [true, false, true])
+  })
+
   test('reads a table with a totals row saved by excel', async () => {
     const bytes = await readFile(new URL('../../testdata/reader/excel-totals.xlsx', import.meta.url))
     const book = openWorkbookSync(bytes)
@@ -521,8 +531,8 @@ export function defineReadSuite(label, api) {
     const rows = book.rows()
     const { columnWidths, outlineSummaryAbove } = rows.layout()
     assert.equal(columnWidths.length, 11)
-    assert.deepEqual(columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.6640625, hidden: false })
-    assert.deepEqual(columnWidths[10], { firstColumn: 11, lastColumn: 11, width: 13.1640625, hidden: false })
+    assert.deepEqual(columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.6640625, hidden: false, visible: true })
+    assert.deepEqual(columnWidths[10], { firstColumn: 11, lastColumn: 11, width: 13.1640625, hidden: false, visible: true })
     assert.equal(outlineSummaryAbove, false)
     const data = []
     for (const row of rows) {
@@ -562,8 +572,8 @@ export function defineReadSuite(label, api) {
     const rows = book.rows()
     const layout = rows.layout()
     assert.equal(layout.columnWidths.length, 12)
-    assert.deepEqual(layout.columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.63, hidden: false })
-    assert.deepEqual(layout.columnWidths[11], { firstColumn: 12, lastColumn: 26, width: 8.88, hidden: false })
+    assert.deepEqual(layout.columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 11.63, hidden: false, visible: true })
+    assert.deepEqual(layout.columnWidths[11], { firstColumn: 12, lastColumn: 26, width: 8.88, hidden: false, visible: true })
     assert.deepEqual([layout.columnWidth(20), layout.outlineSummaryAbove], [8.88, false])
     const data = []
     for (const row of rows) {
@@ -699,10 +709,22 @@ export function defineReadSuite(label, api) {
     )
     const layout = openWorkbookSync(bytes).rows().layout()
     assert.deepEqual(layout.columnWidths, [
-      { firstColumn: 1, lastColumn: 1, width: 9, hidden: false },
-      { firstColumn: 2, lastColumn: 3, width: undefined, hidden: true },
+      { firstColumn: 1, lastColumn: 1, width: 9, hidden: false, visible: true },
+      { firstColumn: 2, lastColumn: 3, width: undefined, hidden: true, visible: false },
     ])
     assert.deepEqual([layout.columnWidth(2), layout.columnHidden(3), layout.columnHidden(4)], [undefined, true, false])
+  })
+
+  test('reports zero-width columns as not visible', async () => {
+    const bytes = await sheetPackage(
+      '<worksheet><cols><col min="1" max="1" width="0"/><col min="2" max="2" width="8" hidden="1"/><col min="3" max="3" width="8"/></cols><sheetData/></worksheet>',
+    )
+    const layout = openWorkbookSync(bytes).rows().layout()
+    assert.deepEqual(layout.columnWidths[0], { firstColumn: 1, lastColumn: 1, width: 0, hidden: false, visible: false })
+    assert.deepEqual(
+      [1, 2, 3, 4].map((c) => [layout.columnHidden(c), layout.columnVisible(c)]),
+      [[false, false], [true, false], [false, true], [false, true]],
+    )
   })
 
   test('applies configured limits', async () => {

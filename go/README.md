@@ -380,7 +380,8 @@ return rows.Err()
   explicit and auto-fitted widths alike, each with its `Hidden` flag, and hidden column ranges
   that store no width, with `HasWidth` false; columns that are not listed have the default width.
   `ColumnWidth(column)` reports no width for such a range, and `ColumnHidden(column)` tells
-  whether a column is hidden.
+  whether a column has the hidden flag. `ColumnVisible(column)` and `ColumnWidth.Visible()` are false
+  for hidden and zero-width columns, which Excel does not show.
 
 **`Reader`**
 
@@ -390,7 +391,7 @@ return rows.Err()
 | `Sheets()`, `SheetNames()` | Sheets in workbook order with `Name`, `Visibility` (`SheetVisible`, `SheetHidden`, `SheetVeryHidden`) and `Kind` (`SheetKindWorksheet`, `SheetKindChartsheet`, `SheetKindOther`) |
 | `Rows(name)`, `RowsAt(index)` | Stream a sheet, by name (exact, then case-insensitive) or 0-based index |
 | `Tables(name)`, `TablesAt(index)` | The Excel tables of a sheet as `[]Table`, ordered by position |
-| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths` (`FirstColumn`, `LastColumn`, `Width`, `HasWidth`, `Hidden`), `ColumnWidth(column)`, `ColumnHidden(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
+| `Rows.Layout()` | `*SheetLayout`: `ColumnWidths` (`FirstColumn`, `LastColumn`, `Width`, `HasWidth`, `Hidden`, `Visible()`), `ColumnWidth(column)`, `ColumnHidden(column)`, `ColumnVisible(column)`, `OutlineSummaryAbove`, `RowOutlineLevels` |
 | `Row.OutlineLevel()`, `Hidden()`, `Collapsed()`, `Height()` | Properties of the current row |
 | `Date1904()` | Whether the workbook uses the 1904 date system |
 | `WithMaxSharedStringsBytes(n)` | Option: cap the shared string table (default 1 GiB) |

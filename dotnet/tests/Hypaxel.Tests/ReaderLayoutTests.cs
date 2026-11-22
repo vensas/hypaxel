@@ -392,6 +392,29 @@ public class ReaderLayoutTests
         Assert.Equal(12, rows.GetColumnWidth(1));
     }
 
+    [Fact]
+    public void ReportsZeroWidthColumnsAsNotVisible()
+    {
+        const string sheet = """
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <cols>
+                <col min="1" max="1" width="0"/>
+                <col min="2" max="2" width="0" hidden="1"/>
+                <col min="3" max="3" width="8" hidden="1"/>
+                <col min="4" max="4" hidden="1"/>
+                <col min="5" max="5" width="8"/>
+              </cols>
+              <sheetData/>
+            </worksheet>
+            """;
+        using var reader = Reader(SingleSheet(sheet));
+        using var rows = reader.OpenWorksheet(0);
+        Assert.Equal([false, false, false, false, true], rows.ColumnWidths.Select(c => c.Visible));
+        Assert.Equal(0, rows.GetColumnWidth(1));
+        Assert.False(rows.IsColumnHidden(1));
+        Assert.Equal([false, false, false, false, true, true], Enumerable.Range(1, 6).Select(rows.IsColumnVisible));
+    }
+
     [Theory]
     [InlineData("""<table xmlns="M"/>""", "no valid cell range")]
     [InlineData("""<table xmlns="M" ref=""/>""", "no valid cell range")]
@@ -791,6 +814,16 @@ public class ReaderLayoutTests
             ShowRowStripes = false,
         };
         AssertSavedWorkbook("libreoffice.xlsx", orders, plain, defaultHeight: 15.0, secondRowCollapsed: false);
+    }
+
+    [Fact]
+    public void ReadsZeroWidthColumnSavedByExcel()
+    {
+        using var reader = XlsxReader.Open(TestData("excel-zero-width.xlsx"));
+        using var rows = reader.OpenWorksheet(0);
+        Assert.Equal([new ColumnWidth(1, 1, 10.5), new ColumnWidth(2, 2, 0, Hidden: true)], rows.ColumnWidths);
+        Assert.Equal([true, false], rows.ColumnWidths.Select(c => c.Visible));
+        Assert.Equal([true, false, true], new[] { 1, 2, 3 }.Select(rows.IsColumnVisible));
     }
 
     [Fact]

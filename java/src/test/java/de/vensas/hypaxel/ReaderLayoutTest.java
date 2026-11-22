@@ -217,6 +217,23 @@ class ReaderLayoutTest {
     }
 
     @Test
+    void reportsZeroWidthColumnsAsNotVisible() throws IOException {
+        String sheet = "<worksheet " + NS + "><cols><col min=\"1\" max=\"1\" width=\"0\"/><col min=\"2\" max=\"2\" width=\"0\" hidden=\"1\"/>"
+                + "<col min=\"3\" max=\"3\" width=\"8\" hidden=\"1\"/><col min=\"4\" max=\"4\" hidden=\"1\"/>"
+                + "<col min=\"5\" max=\"5\" width=\"8\"/></cols><sheetData/></worksheet>";
+        try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(List.of(false, false, false, false, true), rows.columnWidths().stream().map(ColumnWidth::visible).toList());
+            assertEquals(OptionalDouble.of(0), rows.columnWidth(1));
+            assertFalse(rows.columnHidden(1));
+            for (int column = 1; column <= 4; column++) {
+                assertFalse(rows.columnVisible(column));
+            }
+            assertTrue(rows.columnVisible(5));
+            assertTrue(rows.columnVisible(6));
+        }
+    }
+
+    @Test
     void rejectsMalformedTableParts() throws IOException {
         XlsxException e = tableError("<worksheet " + NS + "/>");
         assertEquals(XlsxException.Kind.MALFORMED, e.kind());
@@ -780,6 +797,23 @@ class ReaderLayoutTest {
         assertSeedLayout(xlsx, include);
         assertEquals(List.of("1:3:0:false:false:15.0", "2:3:1:false:false:15.0", "3:3:2:true:false:15.0", "4:3:1:false:true:30.0",
                 "6:0:0:false:false:45.0", "7:2:0:false:false:15.0", "8:2:0:false:false:15.0"), rowSummaries(xlsx, include));
+    }
+
+    /**
+     * {@code testdata/reader/excel-zero-width.xlsx} was saved by Excel for Mac from a file that gave
+     * column B a width of 0 without the hidden flag; Excel added the flag and kept the width of 0.
+     */
+    @Test
+    void readsAZeroWidthColumnSavedByExcel() throws IOException {
+        byte[] xlsx = Files.readAllBytes(Path.of("..", "testdata", "reader", "excel-zero-width.xlsx"));
+        try (XlsxReader reader = XlsxReader.open(xlsx); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(List.of(new ColumnWidth(1, 1, OptionalDouble.of(10.5), false), new ColumnWidth(2, 2, OptionalDouble.of(0), true)),
+                    rows.columnWidths());
+            assertEquals(List.of(true, false), rows.columnWidths().stream().map(ColumnWidth::visible).toList());
+            assertTrue(rows.columnVisible(1));
+            assertFalse(rows.columnVisible(2));
+            assertTrue(rows.columnVisible(3));
+        }
     }
 
     /**

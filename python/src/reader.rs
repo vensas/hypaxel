@@ -177,8 +177,42 @@ impl Reader {
     }
 }
 
-/// `(first_col, last_col, width, hidden)`.
-type ColumnWidthTuple = (u32, u32, Option<f64>, bool);
+/// A run of adjacent columns that share one width and hidden flag, from
+/// :attr:`RowIterator.column_widths`.
+#[pyclass(module = "hypaxel", frozen, eq)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct ColumnWidth {
+    /// 1-based first column of the run.
+    #[pyo3(get)]
+    first_column: u32,
+    /// 1-based last column of the run.
+    #[pyo3(get)]
+    last_column: u32,
+    /// Width in characters of the default font, or None if the file stores none.
+    #[pyo3(get)]
+    width: Option<f64>,
+    /// True if the file sets the hidden flag.
+    #[pyo3(get)]
+    hidden: bool,
+    /// False if the columns are hidden or have a width of 0; Excel shows neither.
+    #[pyo3(get)]
+    visible: bool,
+}
+
+#[pymethods]
+impl ColumnWidth {
+    fn __repr__(&self) -> String {
+        let width = self.width.map_or_else(|| "None".to_owned(), |w| format!("{w:?}"));
+        let flag = |b: bool| if b { "True" } else { "False" };
+        format!(
+            "ColumnWidth(first_column={}, last_column={}, width={width}, hidden={}, visible={})",
+            self.first_column,
+            self.last_column,
+            flag(self.hidden),
+            flag(self.visible)
+        )
+    }
+}
 
 #[pymethods]
 impl Reader {
@@ -513,16 +547,32 @@ impl RowIterator {
         self.current.height
     }
 
-    /// The column widths the sheet defines as ``(first_col, last_col, width, hidden)`` tuples
-    /// (1-based, inclusive). Available before the first row is read.
+    /// The column widths the sheet defines as :class:`ColumnWidth` runs (1-based, inclusive).
+    /// Available before the first row is read.
     #[getter]
-    fn column_widths(&mut self) -> PyResult<Vec<ColumnWidthTuple>> {
-        Ok(self.layout()?.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect())
+    fn column_widths(&mut self) -> PyResult<Vec<ColumnWidth>> {
+        Ok(self
+            .layout()?
+            .column_widths()
+            .iter()
+            .map(|c| ColumnWidth {
+                first_column: c.first_column(),
+                last_column: c.last_column(),
+                width: c.width(),
+                hidden: c.is_hidden(),
+                visible: c.is_visible(),
+            })
+            .collect())
     }
 
     /// True if a 1-based column is hidden.
     fn column_hidden(&mut self, column: u32) -> PyResult<bool> {
         Ok(self.layout()?.is_column_hidden(column))
+    }
+
+    /// False if a 1-based column is hidden or has a width of 0; Excel shows neither.
+    fn column_visible(&mut self, column: u32) -> PyResult<bool> {
+        Ok(self.layout()?.is_column_visible(column))
     }
 
     /// The width of a 1-based column, or None if the sheet leaves it at the default.

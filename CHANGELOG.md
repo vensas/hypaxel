@@ -3,6 +3,29 @@
 All notable changes to Hypaxel are recorded here. Versions apply to every package (Rust crates,
 Python, Node.js, .NET, Java, Go and PHP).
 
+## 0.6.0 (unreleased)
+
+### Added
+
+- **Column visibility on read (.NET, Rust, Python, Node.js, Go, Java)**
+  ([#39](https://github.com/vensas/hypaxel/issues/39)). Excel does not show a column with a width
+  of 0 even without the hidden flag. Readers now report such a column as not visible, and still
+  return its width of 0 and the hidden flag as stored, so callers can tell a zero-width column from
+  one hidden with its width kept. Columns the sheet does not list are visible.
+  - Rust: `ColumnWidth::is_visible()`, `SheetLayout::is_column_visible(column)`.
+  - Python: `ColumnWidth.visible`, `RowIterator.column_visible(col)`.
+  - Node.js: `ColumnWidth.visible`, `SheetLayout.columnVisible(column)`.
+  - .NET: `ColumnWidth.Visible`, `WorksheetReader.IsColumnVisible(column)`.
+  - Go: `ColumnWidth.Visible()`, `SheetLayout.ColumnVisible(column)`.
+  - Java: `ColumnWidth.visible()`, `SheetReader.columnVisible(column)`.
+
+### Changed
+
+- **Python: `RowIterator.column_widths` returns `ColumnWidth` objects** (breaking). Each run has
+  `first_column`, `last_column`, `width`, `hidden` and `visible` instead of being a
+  `(first_col, last_col, width, hidden)` tuple; code that unpacks the tuples must read the
+  attributes instead.
+
 ## 0.5.0 (2026-11-22)
 
 ### Added

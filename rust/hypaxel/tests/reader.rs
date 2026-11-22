@@ -724,6 +724,19 @@ fn reads_tables_rows_and_layout_saved_by_libreoffice() {
     );
 }
 
+/// `testdata/reader/excel-zero-width.xlsx` was saved by Excel for Mac from a file that gave column
+/// B a width of 0 without the hidden flag; Excel added the flag and kept the width of 0.
+#[test]
+fn reads_a_zero_width_column_saved_by_excel() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata/reader/excel-zero-width.xlsx");
+    let mut reader = XlsxReader::open(path).unwrap();
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    let columns: Vec<_> = layout.column_widths().iter().map(|c| (c.first_column(), c.width(), c.is_hidden(), c.is_visible())).collect();
+    assert_eq!(columns, [(1, Some(10.5), false, true), (2, Some(0.0), true, false)]);
+    assert!(layout.is_column_visible(1) && !layout.is_column_visible(2) && layout.is_column_visible(3));
+}
+
 /// `testdata/reader/excel-totals.xlsx` is an inventory list saved by Excel for Mac: one table
 /// over 1,000 rows with a totals row.
 #[test]
@@ -1003,6 +1016,26 @@ fn reads_hidden_columns_without_a_width() {
     assert_eq!(columns, [(1, 1, Some(9.0), false), (2, 3, None, true)]);
     assert_eq!((layout.column_width(2), layout.is_column_hidden(2), layout.is_column_hidden(3)), (None, true, true));
     assert_eq!((layout.is_column_hidden(4), layout.is_column_hidden(5)), (false, false));
+}
+
+#[test]
+fn reports_zero_width_columns_as_not_visible() {
+    let sheet = single_sheet(
+        r#"<worksheet><cols><col min="1" max="1" width="0"/><col min="2" max="2" width="0" hidden="1"/><col min="3" max="3" width="8" hidden="1"/><col min="4" max="4" hidden="1"/><col min="5" max="5" width="8"/></cols><sheetData/></worksheet>"#,
+        "",
+        &[],
+    );
+    let mut reader = reader(&sheet);
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    let columns: Vec<_> = layout.column_widths().iter().map(|c| (c.width(), c.is_hidden(), c.is_visible())).collect();
+    assert_eq!(
+        columns,
+        [(Some(0.0), false, false), (Some(0.0), true, false), (Some(8.0), true, false), (None, true, false), (Some(8.0), false, true)]
+    );
+    assert_eq!((layout.column_width(1), layout.is_column_hidden(1), layout.is_column_visible(1)), (Some(0.0), false, false));
+    assert!((2..=4).all(|c| !layout.is_column_visible(c)));
+    assert!(layout.is_column_visible(5) && layout.is_column_visible(6));
 }
 
 #[test]

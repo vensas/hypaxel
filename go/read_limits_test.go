@@ -124,3 +124,23 @@ func TestReadHiddenColumnsWithoutWidth(t *testing.T) {
 		t.Error("a style-only column is skipped")
 	}
 }
+
+func TestReadZeroWidthColumnsAsNotVisible(t *testing.T) {
+	data := singleSheet(t, `<worksheet><cols><col min="1" max="1" width="0"/><col min="2" max="2" width="0" hidden="1"/>`+
+		`<col min="3" max="3" width="8" hidden="1"/><col min="4" max="4" hidden="1"/><col min="5" max="5" width="8"/></cols><sheetData/></worksheet>`, "")
+	rows, err := openBytes(t, data).Rows("S")
+	noErr(t, err)
+	layout := mustLayout(t, rows)
+	if w, ok := layout.ColumnWidth(1); !ok || w != 0 || layout.ColumnHidden(1) {
+		t.Errorf("column 1: width %v %v, hidden %v", w, ok, layout.ColumnHidden(1))
+	}
+	want := []bool{false, false, false, false, true, true}
+	for i, visible := range want {
+		if got := layout.ColumnVisible(i + 1); got != visible {
+			t.Errorf("column %d: visible %v, want %v", i+1, got, visible)
+		}
+		if i < len(layout.ColumnWidths) && layout.ColumnWidths[i].Visible() != visible {
+			t.Errorf("run %d: visible %v", i, layout.ColumnWidths[i].Visible())
+		}
+	}
+}

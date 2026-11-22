@@ -487,6 +487,28 @@ func TestReadWorkbookSavedByLibreOffice(t *testing.T) {
 	}
 }
 
+// excel-zero-width.xlsx was saved by Excel for Mac from a file that gave column B a width of 0
+// without the hidden flag; Excel added the flag and kept the width of 0.
+func TestReadZeroWidthColumnSavedByExcel(t *testing.T) {
+	r, err := OpenReader("../testdata/reader/excel-zero-width.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	rows, err := r.RowsAt(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layout := mustLayout(t, rows)
+	want := []ColumnWidth{{1, 1, 10.5, true, false}, {2, 2, 0, true, true}}
+	if !reflect.DeepEqual(layout.ColumnWidths, want) {
+		t.Errorf("got %+v, want %+v", layout.ColumnWidths, want)
+	}
+	if !layout.ColumnVisible(1) || layout.ColumnVisible(2) || !layout.ColumnVisible(3) || layout.ColumnWidths[1].Visible() {
+		t.Error("column B should be the only column that is not visible")
+	}
+}
+
 // excel-totals.xlsx is an inventory list saved by Excel for Mac: one table over 1,000 rows with
 // a totals row.
 func TestReadTableWithTotalsRowSavedByExcel(t *testing.T) {
