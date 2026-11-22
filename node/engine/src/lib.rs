@@ -145,11 +145,12 @@ pub struct TableConfig {
 }
 
 fn parse_table_style(name: Option<&str>) -> Result<TableStyle> {
-    Ok(match name {
-        None => TableStyle::default(),
-        Some(name) if name.eq_ignore_ascii_case("none") => TableStyle::None,
-        Some(name) => TableStyle::from_name(name),
-    })
+    match name {
+        None => Ok(TableStyle::default()),
+        Some(name) if name.eq_ignore_ascii_case("none") => Ok(TableStyle::None),
+        Some(name) => TableStyle::parse(name)
+            .ok_or_else(|| invalid(format!("unknown built-in table style {name:?} (Light 1–21, Medium 1–28, Dark 1–11)"))),
+    }
 }
 
 fn parse_color(s: &str) -> Result<Color> {

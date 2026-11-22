@@ -180,8 +180,9 @@ for await (const row of workbook.rows('Orders', { skipEmpty: true })) {
   `addTable` takes (`name`, `columns`, `style`, `headerRow`, `autofilter`, `rowStripes`,
   `columnStripes`, `firstColumn`, `lastColumn`, `totalsRow`), from top to bottom, then left to
   right. Tables are stored apart from the rows and are read only when you ask. A custom
-  (non-built-in) table style reads as its name, and `addTable` writes any name that is not a
-  built-in one as a custom style (Excel applies it only if the workbook defines it). `totalsRow` tells whether the last row of the
+  (non-built-in) table style reads as its name, and `addTable` writes a name that is not a
+  built-in one as a custom style (Excel applies it only if the workbook defines it). Names
+  starting with `TableStyle` must be built-in, so a typo such as `'TableStyleMeduim2'` throws. `totalsRow` tells whether the last row of the
   range is a totals row; such a table can be read but not written.
 - **Rows and columns:** the object returned by `workbook.rows()` describes the row it returned
   last: `rowNumber`, `outlineLevel`, `hidden`, `collapsed` and `height` (`undefined` when the row
