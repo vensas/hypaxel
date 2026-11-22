@@ -1046,6 +1046,16 @@ fn applies_configured_limits() {
     let err = open(&two, ReadOptions::new().max_table_bytes(2 * (1 + 2 * 33 + 26) - 1)).tables_at(0).unwrap_err();
     assert!(matches!(&err, Error::LimitExceeded(m) if m.contains("max_table_bytes")), "{err}");
 
+    for options in [
+        ReadOptions::new().max_tables(0),
+        ReadOptions::new().max_table_bytes(0),
+        ReadOptions::new().max_token_bytes(0),
+        ReadOptions::new().max_row_text_bytes(0),
+    ] {
+        let err = XlsxReader::with_options(Cursor::new(two.clone()), &options).unwrap_err();
+        assert!(matches!(&err, Error::InvalidArgument(m) if m.contains("at least 1")), "{err}");
+    }
+
     let built_in = sheet_with_table(
         r#"<table name="T" ref="A1:B2"><tableColumns><tableColumn name="a"/><tableColumn name="b"/></tableColumns><tableStyleInfo name="TableStyleMedium2"/></table>"#,
     );

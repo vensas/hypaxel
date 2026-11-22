@@ -67,6 +67,9 @@ impl ReadOptions {
     }
 
     /// Most tables read from one worksheet by [`XlsxReader::tables`] (default 4,096).
+    ///
+    /// This and the other `max_*` limits except `max_shared_strings_bytes` must be at least 1;
+    /// opening a reader with a lower value fails with [`Error::InvalidArgument`].
     pub fn max_tables(mut self, count: usize) -> Self {
         self.max_tables = count;
         self
@@ -80,9 +83,9 @@ impl ReadOptions {
     }
 
     /// Largest single XML token, such as a tag with its attributes or a run of text (default
-    /// 16 MiB). Values are clamped to 64 KiB–1 GiB.
+    /// 16 MiB). Values from 1 to 64 KiB count as 64 KiB, and values above 1 GiB as 1 GiB.
     pub fn max_token_bytes(mut self, bytes: usize) -> Self {
-        self.max_token_bytes = bytes.clamp(xml::MIN_MAX_TOKEN, xml::MAX_MAX_TOKEN);
+        self.max_token_bytes = bytes;
         self
     }
 
@@ -98,6 +101,21 @@ impl ReadOptions {
     pub fn include_empty_rows(mut self, include: bool) -> Self {
         self.include_empty_rows = include;
         self
+    }
+
+    fn validated(&self) -> Result<Self> {
+        let checks = [
+            (self.max_tables, "ReadOptions::max_tables must be at least 1"),
+            (self.max_table_bytes, "ReadOptions::max_table_bytes must be at least 1"),
+            (self.max_token_bytes, "ReadOptions::max_token_bytes must be at least 1"),
+            (self.max_row_text_bytes, "ReadOptions::max_row_text_bytes must be at least 1"),
+        ];
+        if let Some((_, message)) = checks.into_iter().find(|(value, _)| *value < 1) {
+            return Err(Error::InvalidArgument(message));
+        }
+        let mut options = self.clone();
+        options.max_token_bytes = options.max_token_bytes.clamp(xml::MIN_MAX_TOKEN, xml::MAX_MAX_TOKEN);
+        Ok(options)
     }
 }
 
@@ -209,7 +227,10 @@ impl<R: Read + Seek> XlsxReader<R> {
         Self::with_options(source, &ReadOptions::default())
     }
 
+    /// Like [`new`](Self::new), with custom limits. Fails with [`Error::InvalidArgument`] if a
+    /// limit is out of range.
     pub fn with_options(mut source: R, options: &ReadOptions) -> Result<Self> {
+        let options = &options.validated()?;
         let dir = Directory::read(&mut source)?;
         let mut package = Package { dir: &dir, source: &mut source, max_token: options.max_token_bytes };
 
