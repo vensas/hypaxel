@@ -266,14 +266,15 @@ fn parse_color(s: &str) -> PyResult<Color> {
     Color::hex(s).ok_or_else(|| PyValueError::new_err(format!("invalid color {s:?}; expected '#RRGGBB' or '#AARRGGBB'")))
 }
 
-/// Maps a style name as stored in the file: built-in names such as ``"TableStyleMedium2"``, any
-/// other name as a custom style; ``None``, ``""`` or ``"none"`` for no table style.
+/// Built-in names such as ``"TableStyleMedium2"``, any other name as a custom style; ``None``,
+/// ``""`` or ``"none"`` for no table style. Names starting with ``TableStyle`` must be built-in.
 fn parse_table_style(s: Option<&str>) -> PyResult<TableStyle> {
-    Ok(match s {
-        None => TableStyle::None,
-        Some(name) if name.eq_ignore_ascii_case("none") => TableStyle::None,
-        Some(name) => TableStyle::from_name(name),
-    })
+    match s {
+        None => Ok(TableStyle::None),
+        Some(name) if name.eq_ignore_ascii_case("none") => Ok(TableStyle::None),
+        Some(name) => TableStyle::parse(name)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown built-in table style {name:?} (Light 1–21, Medium 1–28, Dark 1–11)"))),
+    }
 }
 
 fn row_options(height: Option<f64>, style: StyleId, outline_level: u8, hidden: bool, collapsed: bool) -> RowOptions {

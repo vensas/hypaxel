@@ -91,8 +91,9 @@ with hypaxel.open_workbook(upload_bytes) as wb:             # path, bytes or bin
   `style`, `header_row`, `autofilter`, `row_stripes`, `column_stripes`, `first_column`,
   `last_column`, `totals_row`), from top to bottom, then left to right. Tables are stored apart
   from the rows and are read only when you ask. A custom (non-built-in) table style reads as
-  its name, and `add_table` writes any name that is not a built-in one as a custom style (Excel
-  applies it only if the workbook defines it). `totals_row` tells whether the last row of the range is a totals row; such a table can
+  its name, and `add_table` writes a name that is not a built-in one as a custom style (Excel
+  applies it only if the workbook defines it). Names starting with `TableStyle` must be built-in,
+  so a typo such as `"TableStyleMeduim2"` raises `ValueError`. `totals_row` tells whether the last row of the range is a totals row; such a table can
   be read but not written.
 - **Rows and columns:** the iterator returned by `wb.rows()` describes the row it returned last:
   `row_number`, `outline_level`, `hidden`, `collapsed` and `height` (`None` when the row stores no
