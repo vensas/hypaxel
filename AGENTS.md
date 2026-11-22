@@ -47,73 +47,17 @@ Do not assume a roadmap item exists. Check the code and `CHANGELOG.md` first.
 
 ## Architecture Rules
 
-- .NET, Rust, Go, Java and PHP are independent native engines with no runtime dependencies. Keep them that way; the Go workflow fails if the library module gains a dependency.
+- .NET, Rust, Go, Java and PHP are independent native engines. .NET, Go, Java and PHP have no runtime dependencies; Rust keeps a small set of required crates and puts integrations behind optional features. Keep it that way.
 - Python and Node.js are thin, idiomatic layers over `rust/hypaxel`. Put format logic in the Rust core, not in the bindings. A change to `rust/hypaxel` can break both, and their workflows run on it.
-- The native Node.js build and the WebAssembly build share `node/engine` and must produce byte-identical files.
 - A feature added to one implementation should have the same semantics in the others. Shared features are listed once in `README.md`; note in the changelog which implementations a change covers.
 - Writers are forward-only and constant-memory by default. Anything that buffers (such as auto-fit) must stay bounded and be opt-in.
 - Readers treat input as untrusted: reject DTDs, oversized tokens and ZIP entries that do not match their declared size or CRC, and keep the configurable limits.
 
 ---
 
-# Build, Test and Lint
+# Per-Implementation Instructions
 
-Run commands from the implementation's directory. These mirror the CI workflows.
-
-**Rust** (`rust/`, MSRV 1.85)
-
-```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-features --all-targets
-cargo test --workspace --all-features
-cargo test -p hypaxel --no-default-features
-```
-
-**Python** (`python/`, CPython 3.10+)
-
-```bash
-uv venv && uv pip install maturin pytest pytest-asyncio pandas polars numpy openpyxl xlsxwriter fastapi httpx pydantic
-.venv/bin/maturin develop --release
-.venv/bin/python -m pytest
-```
-
-**Node.js** (`node/`, Node.js 22+, needs the `wasm32-unknown-unknown` target and `wasm-bindgen`)
-
-```bash
-npm ci
-npm run build          # native, wasm and TypeScript
-npm test
-npm run test:browser
-cargo fmt --all --check && cargo clippy --workspace --all-targets
-```
-
-**.NET** (`dotnet/`, targets .NET 8, 9, 10, 11)
-
-```bash
-dotnet build -c Release
-dotnet test -c Release
-```
-
-**Go** (`go/`, Go 1.26+)
-
-```bash
-gofmt -l . && go vet ./...
-go test -race -cover ./...
-(cd tests && go vet ./... && go test ./...)   # read-back tests against excelize
-```
-
-**Java** (`java/`, Java 17+)
-
-```bash
-./mvnw -B verify
-```
-
-**PHP** (`php/`, PHP 8.2+)
-
-```bash
-composer install
-composer check         # php-cs-fixer, phpstan, phpunit
-```
+Each implementation has its own `AGENTS.md` with its build, test and lint commands and its engine-specific rules: `rust/`, `python/`, `node/`, `dotnet/`, `go/`, `java/` and `php/`. Read the one for the directory you work in.
 
 CI enforces at least 80% line coverage for PHP. Aim for the same in every implementation.
 
