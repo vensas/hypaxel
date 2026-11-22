@@ -27,8 +27,12 @@ Python, Node.js, .NET, Java, Go and PHP).
   ([#25](https://github.com/vensas/hypaxel/issues/25)). The limits for the tables of a sheet, XML
   tokens and row text can be set where the shared string limit is set, with the previous fixed
   values as defaults: most tables per worksheet (4,096), bytes of table, column and style names
-  per worksheet (64 MiB), largest XML token (16 MiB; values below 64 KiB count as 64 KiB) and text
-  per row (256 MiB). Exceeding one gives the existing limit error, naming the option. The 16,384
+  per worksheet (64 MiB), largest XML token (16 MiB) and text per row (256 MiB). Every
+  implementation rejects values below 1 with its invalid-argument error when the reader is
+  created (Rust `Error::InvalidArgument`, .NET `ArgumentOutOfRangeException`, Go
+  `ErrInvalidArgument`, Java `INVALID_ARGUMENT`, Python `ValueError`, Node.js `XlsxError`); token
+  limits from 1 to 64 KiB count as 64 KiB. Exceeding a limit gives the existing limit error,
+  naming the option. The 16,384
   columns per table and column ranges per sheet stay fixed: they are Excel's grid width.
   - Rust: `ReadOptions::max_tables`, `max_table_bytes`, `max_token_bytes`, `max_row_text_bytes`.
   - .NET: `XlsxReaderOptions.MaxTables`, `MaxTableBytes`, `MaxTokenBytes`, `MaxRowTextBytes`
