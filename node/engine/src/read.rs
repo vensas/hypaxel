@@ -69,6 +69,19 @@ const MILLIS_PER_DAY: i64 = 86_400_000;
 fn read_error(e: hypaxel::Error) -> Error {
     match e {
         hypaxel::Error::Io(io) if io.kind() == io::ErrorKind::NotFound => failed(format!("file not found: {io}")),
+        hypaxel::Error::LimitExceeded(_) => {
+            let mut message = e.to_string();
+            for (rust, js) in [
+                ("ReadOptions::max_shared_strings_bytes", "maxSharedStringsBytes"),
+                ("ReadOptions::max_tables", "maxTables"),
+                ("ReadOptions::max_table_bytes", "maxTableBytes"),
+                ("ReadOptions::max_token_bytes", "maxTokenBytes"),
+                ("ReadOptions::max_row_text_bytes", "maxRowTextBytes"),
+            ] {
+                message = message.replace(rust, js);
+            }
+            failed(message)
+        }
         other => failed(other.to_string()),
     }
 }

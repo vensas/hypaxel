@@ -710,8 +710,8 @@ export function defineReadSuite(label, api) {
     const cell = `<c t="inlineStr"><is><t>${text}</t></is></c>`
     const bytes = await sheetPackage(`<worksheet><sheetData><row r="1">${cell}${cell}</row></sheetData></worksheet>`)
     assert.equal(openWorkbookSync(bytes).rows().toArray()[0].length, 2)
-    assert.throws(() => openWorkbookSync(bytes, { maxTokenBytes: 1 }).rows().toArray(), /maxTokenBytes|max_token_bytes/)
-    assert.throws(() => openWorkbookSync(bytes, { maxRowTextBytes: 199_999 }).rows().toArray(), /max_row_text_bytes/)
+    assert.throws(() => openWorkbookSync(bytes, { maxTokenBytes: 1 }).rows().toArray(), /maxTokenBytes/)
+    assert.throws(() => openWorkbookSync(bytes, { maxRowTextBytes: 199_999 }).rows().toArray(), /maxRowTextBytes/)
     assert.throws(() => openWorkbookSync(bytes, { maxTables: 0 }), XlsxError)
 
     const writer = new Writer()
@@ -722,7 +722,7 @@ export function defineReadSuite(label, api) {
     sheet.addTable(1, 3, 2, 3, { columns: ['b'] })
     const tables = writer.finish()
     assert.equal(openWorkbookSync(tables).tables().length, 2)
-    assert.throws(() => openWorkbookSync(tables, { maxTables: 1 }).tables(), /max_tables/)
-    assert.throws(() => openWorkbookSync(tables, { maxTableBytes: 10 }).tables(), /max_table_bytes/)
+    assert.throws(() => openWorkbookSync(tables, { maxTables: 1 }).tables(), /maxTables/)
+    assert.throws(() => openWorkbookSync(tables, { maxTableBytes: 10 }).tables(), /maxTableBytes/)
   })
 }
