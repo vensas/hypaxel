@@ -5,7 +5,7 @@
 **Project:** Hypaxel (repository `vensas/hypaxel`)  
 **What it is:** High-performance, constant-memory XLSX writers and streaming readers for web services  
 **Licence:** Apache License 2.0, copyright vensas GmbH  
-**Version:** one version number for every package (currently 0.4.0, released 2026-11-22)  
+**Version:** one version number for every package (currently 0.5.0, released 2026-11-22)  
 **Status:** published to Packagist, nuget.org, crates.io, npm, PyPI, Maven Central and the Go module proxy; `docs/releasing.md` describes releases
 
 Hypaxel writes `.xlsx` files as a forward-only stream: each cell is serialized to UTF-8 XML as it is written, compressed, and flushed through a small buffer. Memory stays flat regardless of row count. Readers stream rows the same way, with memory bounded by the shared string table plus one row.
