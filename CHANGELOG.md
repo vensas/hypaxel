@@ -13,12 +13,18 @@ Python, Node.js, .NET, Java, Go and PHP).
   return its width of 0 and the hidden flag as stored, so callers can tell a zero-width column from
   one hidden with its width kept. Columns the sheet does not list are visible.
   - Rust: `ColumnWidth::is_visible()`, `SheetLayout::is_column_visible(column)`.
-  - Python: `RowIterator.column_visible(col)` and `RowIterator.column_runs`, which returns the
-    runs as `ColumnWidth` objects with a `visible` attribute; `column_widths` keeps its 4-tuples.
+  - Python: `ColumnWidth.visible`, `RowIterator.column_visible(col)`.
   - Node.js: `ColumnWidth.visible`, `SheetLayout.columnVisible(column)`.
   - .NET: `ColumnWidth.Visible`, `WorksheetReader.IsColumnVisible(column)`.
   - Go: `ColumnWidth.Visible()`, `SheetLayout.ColumnVisible(column)`.
   - Java: `ColumnWidth.visible()`, `SheetReader.columnVisible(column)`.
+
+### Changed
+
+- **Python: `RowIterator.column_widths` returns `ColumnWidth` objects** (breaking). Each run has
+  `first_column`, `last_column`, `width`, `hidden` and `visible` instead of being a
+  `(first_col, last_col, width, hidden)` tuple; code that unpacks the tuples must read the
+  attributes instead.
 
 ## 0.5.0 (2026-11-22)
 

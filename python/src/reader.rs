@@ -177,11 +177,8 @@ impl Reader {
     }
 }
 
-/// `(first_col, last_col, width, hidden)`.
-type ColumnWidthTuple = (u32, u32, Option<f64>, bool);
-
 /// A run of adjacent columns that share one width and hidden flag, from
-/// :attr:`RowIterator.column_runs`.
+/// :attr:`RowIterator.column_widths`.
 #[pyclass(module = "hypaxel", frozen, eq)]
 #[derive(Clone, Copy, PartialEq)]
 pub struct ColumnWidth {
@@ -550,17 +547,10 @@ impl RowIterator {
         self.current.height
     }
 
-    /// The column widths the sheet defines as ``(first_col, last_col, width, hidden)`` tuples
-    /// (1-based, inclusive). Available before the first row is read.
+    /// The column widths the sheet defines as :class:`ColumnWidth` runs (1-based, inclusive).
+    /// Available before the first row is read.
     #[getter]
-    fn column_widths(&mut self) -> PyResult<Vec<ColumnWidthTuple>> {
-        Ok(self.layout()?.column_widths().iter().map(|c| (c.first_column(), c.last_column(), c.width(), c.is_hidden())).collect())
-    }
-
-    /// The column runs the sheet defines as :class:`ColumnWidth` objects, with a ``visible``
-    /// attribute. Available before the first row is read.
-    #[getter]
-    fn column_runs(&mut self) -> PyResult<Vec<ColumnWidth>> {
+    fn column_widths(&mut self) -> PyResult<Vec<ColumnWidth>> {
         Ok(self
             .layout()?
             .column_widths()
