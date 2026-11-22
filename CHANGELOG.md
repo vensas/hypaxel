@@ -132,9 +132,11 @@ Python, Node.js, .NET, Java, Go and PHP).
   read-only repository with `git subtree split`, fast-forwarding its `main` and creating release
   tags without ever moving a published one (`docs/publishing-php.md`). The Composer archive leaves
   out tests, benchmarks, examples and tool configuration.
-
-## 0.3.0 (2026-11-20)
-
+- Releases: one `Release` workflow publishes a release tag to Packagist, to nuget.org and
+  crates.io through Trusted Publishing, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
+  a module in a subdirectory. It first checks that every manifest declares the tag's version
+  (`docs/releasing.md`). The PHP split workflow now only keeps the split repository's `main` in
+  step.
 ### Added
 
 - **Streaming XLSX reader (.NET, Rust, Python, Go, Java).** Rows are read one at a time, with

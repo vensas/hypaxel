@@ -1,0 +1,238 @@
+name: Release
+
+# Publishes a release tag (vX.Y.Z, or vX.Y.Z-beta1) to the package registries. Tag pushes need a
+# workflow without path filters: a tag on a commit that is already on main changes no files, so a
+# path-filtered workflow never starts. A manual run publishes an existing tag, to all registries or
+# to one; a version a registry already has is left alone. Every job that publishes runs in the
+# release environment; builds and tests run outside it. See docs/releasing.md.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.4.0
+        required: true
+      registry:
+        description: Where to publish it
+        type: choice
+        options: [all, packagist, nuget, crates, go]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  version:
+    if: github.repository == 'vensas/hypaxel'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      suffix: ${{ steps.version.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: version
+        run: scripts/release-version.sh "$TAG" | tee -a "$GITHUB_OUTPUT"
+
+  packagist:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'packagist'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the configuration
+        env:
+          SPLIT_REPOSITORY: ${{ vars.PHP_SPLIT_REPOSITORY }}
+          DEPLOY_KEY: ${{ secrets.PHP_SPLIT_DEPLOY_KEY }}
+        run: |
+          test -n "$SPLIT_REPOSITORY" || { echo "::error::PHP_SPLIT_REPOSITORY is not set"; exit 1; }
+          test -n "$DEPLOY_KEY" || { echo "::error::PHP_SPLIT_DEPLOY_KEY is not set"; exit 1; }
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.4"
+          coverage: none
+          tools: composer:v2
+      - name: Configure the deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.PHP_SPLIT_DEPLOY_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          (umask 077 && printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/php_split")
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" \
+            > "$HOME/.ssh/known_hosts_github"
+          echo "GIT_SSH_COMMAND=ssh -i $HOME/.ssh/php_split -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_github" \
+            >> "$GITHUB_ENV"
+      - name: Publish the tag to the split repository
+        env:
+          SPLIT_REMOTE: git@github.com:${{ vars.PHP_SPLIT_REPOSITORY }}.git
+        run: scripts/split-php.sh tag "$TAG"
+
+  nuget-pack:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'nuget'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dotnet
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+            11.0.x
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release -p:VersionSuffix="$VERSION_SUFFIX"
+      - run: dotnet test --no-build -c Release
+      - run: |
+          for project in Hypaxel Hypaxel.AspNetCore; do
+            dotnet pack "src/$project/$project.csproj" --no-build -c Release \
+              -p:VersionSuffix="$VERSION_SUFFIX" -o artifacts
+            test -f "artifacts/$project.$VERSION.nupkg" \
+              || { echo "::error::$project was not packed as version $VERSION"; exit 1; }
+          done
+          ls -l artifacts
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget-packages
+          path: dotnet/artifacts/*.*nupkg
+          if-no-files-found: error
+
+  nuget:
+    needs: nuget-pack
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check the configuration
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: test -n "$NUGET_USER" || { echo "::error::NUGET_USER is not set"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nuget-packages
+          path: packages
+      - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "packages/*.nupkg" --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # Cargo publishes the version in the manifests, which carry no pre-release suffix, so a
+  # pre-release tag is not published to crates.io.
+  crates-check:
+    needs: version
+    if: needs.version.outputs.suffix == '' && ((inputs.registry || 'all') == 'all' || inputs.registry == 'crates')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      - run: cargo test --workspace --all-features --locked
+      # Packages every crate in dependency order and builds it from the packaged sources.
+      - run: cargo package --workspace --locked
+
+  crates:
+    needs: [version, crates-check]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: rust
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # crates.io accepts a crate's first version only with an API token; later versions use
+      # Trusted Publishing. Remove the secret once the crates have a trusted publisher.
+      HAS_BOOTSTRAP_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+        if: env.HAS_BOOTSTRAP_TOKEN != 'true'
+        id: auth
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in hypaxel hypaxel-axum; do
+            if curl -fsS "https://index.crates.io/hy/pa/$crate" 2>/dev/null \
+                | jq -e --arg v "$VERSION" 'select(.vers == $v)' >/dev/null; then
+              echo "$crate $VERSION is already on crates.io."
+              continue
+            fi
+            cargo publish -p "$crate" --locked
+          done
+
+  go:
+    needs: version
+    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'go'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The module lives in go/, so Go resolves its versions from go/vX.Y.Z tags.
+      - name: Tag the Go module
+        run: |
+          commit=$(git rev-parse "refs/tags/$TAG^{commit}")
+          if existing=$(git rev-parse -q --verify "refs/tags/go/$TAG^{commit}"); then
+            if [ "$existing" != "$commit" ]; then
+              echo "::error::go/$TAG already points to $existing, not $commit; published versions are never moved"
+              exit 1
+            fi
+            echo "go/$TAG already exists."
+          else
+            git tag "go/$TAG" "$commit"
+            git push origin "refs/tags/go/$TAG"
+          fi
+      - name: Make the version known to the Go module proxy
+        run: |
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 15 \
+            "https://proxy.golang.org/github.com/vensas/hypaxel/go/@v/$TAG.info"
