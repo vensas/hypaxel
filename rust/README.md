@@ -135,7 +135,8 @@ fn main() -> hypaxel::Result<()> {
 - **Rows and columns:** each `Row` has `outline_level()`, `is_hidden()`, `is_collapsed()` and
   `height()` (`None` when the row stores no height). `rows.layout()?` gives the `SheetLayout`:
   `column_widths()` (runs of columns with a first column, last column, width and hidden flag,
-  explicit and auto-fitted alike; the width is `None` for a hidden column stored without one), `column_width(column)`, `is_column_hidden(column)`,
+  explicit and auto-fitted alike; the width is `None` for a hidden column stored without one), `column_width(column)`, `is_column_hidden(column)` (the hidden flag),
+  `is_column_visible(column)` (false for hidden and zero-width columns, which Excel does not show; each run has `is_visible()` too),
   `outline_summary_above()` and
   `row_outline_levels()`. These precede the rows in the file, so they are available before the
   first `next_row()`.

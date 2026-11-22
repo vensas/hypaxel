@@ -217,6 +217,23 @@ class ReaderLayoutTest {
     }
 
     @Test
+    void reportsZeroWidthColumnsAsNotVisible() throws IOException {
+        String sheet = "<worksheet " + NS + "><cols><col min=\"1\" max=\"1\" width=\"0\"/><col min=\"2\" max=\"2\" width=\"0\" hidden=\"1\"/>"
+                + "<col min=\"3\" max=\"3\" width=\"8\" hidden=\"1\"/><col min=\"4\" max=\"4\" hidden=\"1\"/>"
+                + "<col min=\"5\" max=\"5\" width=\"8\"/></cols><sheetData/></worksheet>";
+        try (XlsxReader reader = XlsxReader.open(singleSheet(sheet, "")); SheetReader rows = reader.worksheet(0)) {
+            assertEquals(List.of(false, false, false, false, true), rows.columnWidths().stream().map(ColumnWidth::visible).toList());
+            assertEquals(OptionalDouble.of(0), rows.columnWidth(1));
+            assertFalse(rows.columnHidden(1));
+            for (int column = 1; column <= 4; column++) {
+                assertFalse(rows.columnVisible(column));
+            }
+            assertTrue(rows.columnVisible(5));
+            assertTrue(rows.columnVisible(6));
+        }
+    }
+
+    @Test
     void rejectsMalformedTableParts() throws IOException {
         XlsxException e = tableError("<worksheet " + NS + "/>");
         assertEquals(XlsxException.Kind.MALFORMED, e.kind());

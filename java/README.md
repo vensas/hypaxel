@@ -172,9 +172,10 @@ their number and properties. Rows that the file does not store are never returne
 | Method | Purpose |
 | --- | --- |
 | `nextRow()`, `iterator()`, `stream()` | The rows with at least one value, front to back; with `includeEmptyRows`, every row the file stores |
-| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`, `hidden()`) the sheet defines, explicit and auto-fitted, in file order, including hidden columns without a width; `width()` is an `OptionalDouble`, empty when the file stores none |
+| `columnWidths()` | `ColumnWidth` runs (`firstColumn()`, `lastColumn()`, `width()`, `hidden()`, `visible()`) the sheet defines, explicit and auto-fitted, in file order, including hidden columns without a width; `width()` is an `OptionalDouble`, empty when the file stores none |
 | `columnWidth(column)` | Width of a 1-based column as `OptionalDouble`; empty for the default width or a hidden column without a width |
-| `columnHidden(column)` | Whether a 1-based column is hidden |
+| `columnHidden(column)` | Whether a 1-based column has the hidden flag |
+| `columnVisible(column)` | False for a hidden or zero-width column, which Excel does not show |
 | `outlineSummaryAbove()`, `rowOutlineLevels()` | The sheet's outline settings |
 
 The layout getters work before the first row, after the rows were read and after `close()` once the

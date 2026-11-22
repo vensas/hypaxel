@@ -21,8 +21,13 @@ type ColumnWidth struct {
 	Width float64
 	// HasWidth reports that the file stores a width; a hidden column range may store none.
 	HasWidth bool
-	// Hidden reports that the columns are hidden.
+	// Hidden reports that the file sets the hidden flag.
 	Hidden bool
+}
+
+// Visible reports false if the columns are hidden or have a width of 0; Excel shows neither.
+func (c ColumnWidth) Visible() bool {
+	return !c.Hidden && (!c.HasWidth || c.Width > 0)
 }
 
 // SheetLayout holds the worksheet settings stored ahead of the rows. It is returned by
@@ -57,6 +62,16 @@ func (l *SheetLayout) ColumnHidden(column int) bool {
 		}
 	}
 	return false
+}
+
+// ColumnVisible reports false if a 1-based column is hidden or has a width of 0.
+func (l *SheetLayout) ColumnVisible(column int) bool {
+	for _, c := range l.ColumnWidths {
+		if column >= c.FirstColumn && column <= c.LastColumn {
+			return c.Visible()
+		}
+	}
+	return true
 }
 
 // Tables returns the Excel tables of the sheet with this name, matched exactly and then

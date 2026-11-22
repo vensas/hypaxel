@@ -88,7 +88,10 @@ export interface ColumnWidth {
   readonly lastColumn: number
   /** Width in characters of the default font; `undefined` when the file stores none (a hidden column, for example). */
   readonly width: number | undefined
+  /** True if the file sets the hidden flag. */
   readonly hidden: boolean
+  /** False if the columns are hidden or have a width of 0; Excel shows neither. */
+  readonly visible: boolean
 }
 
 /** Worksheet settings stored ahead of the rows. See {@link SheetRows.layout}. */
@@ -111,6 +114,11 @@ export class SheetLayout {
   /** True if a 1-based column is hidden. */
   columnHidden(column: number): boolean {
     return this.columnWidths.find((c) => c.firstColumn <= column && column <= c.lastColumn)?.hidden ?? false
+  }
+
+  /** False if a 1-based column is hidden or has a width of 0. */
+  columnVisible(column: number): boolean {
+    return this.columnWidths.find((c) => c.firstColumn <= column && column <= c.lastColumn)?.visible ?? true
   }
 }
 
@@ -362,13 +370,16 @@ export class SheetRows implements IterableIterator<ReadValue[]>, AsyncIterable<R
     const widths: ColumnWidth[] = []
     let p = 7
     for (let i = 0; i < count; i++, p += 17) {
-      const width = view.getFloat64(p + 8, true)
+      const stored = view.getFloat64(p + 8, true)
+      const width = Number.isNaN(stored) ? undefined : stored
+      const hidden = view.getUint8(p + 16) === 1
       widths.push(
         Object.freeze({
           firstColumn: view.getUint32(p, true),
           lastColumn: view.getUint32(p + 4, true),
-          width: Number.isNaN(width) ? undefined : width,
-          hidden: view.getUint8(p + 16) === 1,
+          width,
+          hidden,
+          visible: !hidden && (width === undefined || width > 0),
         }),
       )
     }

@@ -465,6 +465,14 @@ def test_reports_hidden_columns_without_a_width():
         assert (rows.column_width(2), rows.column_hidden(3), rows.column_hidden(4)) == (None, True, False)
 
 
+def test_reports_zero_width_columns_as_not_visible():
+    data = _sheet_package('<worksheet><cols><col min="1" max="1" width="0"/><col min="2" max="2" width="8" hidden="1"/><col min="3" max="3" width="8"/></cols><sheetData/></worksheet>')
+    with hypaxel.open_workbook(data) as wb:
+        rows = wb.rows()
+        assert rows.column_widths[0] == (1, 1, 0.0, False)
+        assert [(rows.column_hidden(c), rows.column_visible(c)) for c in (1, 2, 3, 4)] == [(False, False), (True, False), (False, True), (False, True)]
+
+
 def test_applies_configured_limits():
     text = "x" * 100_000
     data = _sheet_package(f'<worksheet><sheetData><row r="1"><c t="inlineStr"><is><t>{text}</t></is></c><c t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>')

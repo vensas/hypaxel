@@ -525,6 +525,11 @@ impl RowIterator {
         Ok(self.layout()?.is_column_hidden(column))
     }
 
+    /// False if a 1-based column is hidden or has a width of 0; Excel shows neither.
+    fn column_visible(&mut self, column: u32) -> PyResult<bool> {
+        Ok(self.layout()?.is_column_visible(column))
+    }
+
     /// The width of a 1-based column, or None if the sheet leaves it at the default.
     fn column_width(&mut self, column: u32) -> PyResult<Option<f64>> {
         Ok(self.layout()?.column_width(column))

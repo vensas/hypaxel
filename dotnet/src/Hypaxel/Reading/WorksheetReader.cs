@@ -140,6 +140,23 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
         return false;
     }
 
+    /// <summary>False if a 1-based column is hidden or has a width of 0; Excel shows neither.</summary>
+    /// <exception cref="XlsxReadException">The worksheet part is damaged.</exception>
+    /// <exception cref="ObjectDisposedException">The reader was disposed before the layout was read.</exception>
+    public bool IsColumnVisible(int column)
+    {
+        ReadLayout();
+        foreach (var width in _columnWidths)
+        {
+            if (column >= width.FirstColumn && column <= width.LastColumn)
+            {
+                return width.Visible;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// The width of a 1-based column in characters of the default font; null if the sheet leaves it at the default
     /// or hides it without storing a width.
@@ -933,5 +950,9 @@ public sealed class WorksheetReader : IEnumerable<XlsxRow>, IDisposable
 /// Width in characters of the default font, as in <see cref="ColumnDefinition.Width"/>; null if the file stores
 /// none (a hidden run without a width).
 /// </param>
-/// <param name="Hidden">True if the columns are hidden.</param>
-public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double? Width, bool Hidden = false);
+/// <param name="Hidden">True if the file sets the hidden flag.</param>
+public readonly record struct ColumnWidth(int FirstColumn, int LastColumn, double? Width, bool Hidden = false)
+{
+    /// <summary>False if the columns are hidden or have a width of 0; Excel shows neither.</summary>
+    public bool Visible => !Hidden && Width is not <= 0;
+}

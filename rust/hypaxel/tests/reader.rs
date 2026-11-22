@@ -1006,6 +1006,26 @@ fn reads_hidden_columns_without_a_width() {
 }
 
 #[test]
+fn reports_zero_width_columns_as_not_visible() {
+    let sheet = single_sheet(
+        r#"<worksheet><cols><col min="1" max="1" width="0"/><col min="2" max="2" width="0" hidden="1"/><col min="3" max="3" width="8" hidden="1"/><col min="4" max="4" hidden="1"/><col min="5" max="5" width="8"/></cols><sheetData/></worksheet>"#,
+        "",
+        &[],
+    );
+    let mut reader = reader(&sheet);
+    let mut rows = reader.worksheet_at(0).unwrap();
+    let layout = rows.layout().unwrap();
+    let columns: Vec<_> = layout.column_widths().iter().map(|c| (c.width(), c.is_hidden(), c.is_visible())).collect();
+    assert_eq!(
+        columns,
+        [(Some(0.0), false, false), (Some(0.0), true, false), (Some(8.0), true, false), (None, true, false), (Some(8.0), false, true)]
+    );
+    assert_eq!((layout.column_width(1), layout.is_column_hidden(1), layout.is_column_visible(1)), (Some(0.0), false, false));
+    assert!((2..=4).all(|c| !layout.is_column_visible(c)));
+    assert!(layout.is_column_visible(5) && layout.is_column_visible(6));
+}
+
+#[test]
 fn round_trips_custom_table_styles() {
     let custom = Table::new(1, 1, 2, 1).name("Branded").columns(["a"]).style(TableStyle::Custom("Brand & Co_x0041_".into()));
     let lookalike = Table::new(1, 3, 2, 3).name("Lookalike").columns(["b"]).style(TableStyle::Custom("TableStyleMedium9".into()));

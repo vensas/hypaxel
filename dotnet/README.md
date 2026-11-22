@@ -287,8 +287,9 @@ foreach (var row in reader.OpenWorksheet(1)) { /* ... */ }
 - **Rows and columns:** each `XlsxRow` carries `OutlineLevel`, `Hidden`, `Collapsed` and `Height`
   (null when the row stores no height). `WorksheetReader` has `ColumnWidths` (runs of columns with
   `FirstColumn`, `LastColumn`, `Width` and `Hidden`, explicit and auto-fitted alike; `Width` is null for
-  a hidden run that stores no width),
-  `GetColumnWidth(column)`, `IsColumnHidden(column)`, `OutlineSummaryAbove` and `RowOutlineLevels`; they precede the rows in the file, so they are
+  a hidden run that stores no width; `Hidden` is the flag in the file, and `Visible` is false for hidden
+  and zero-width columns, which Excel does not show),
+  `GetColumnWidth(column)`, `IsColumnHidden(column)`, `IsColumnVisible(column)`, `OutlineSummaryAbove` and `RowOutlineLevels`; they precede the rows in the file, so they are
   available before the first `Read()`. Rows without values are skipped by default, whatever their
   properties; set `new XlsxReaderOptions { IncludeEmptyRows = true }` to also get the rows the file
   stores without values (a spacer row with a height, an empty hidden row), with `Count == 0`.

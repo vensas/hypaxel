@@ -73,8 +73,14 @@ impl ColumnWidth {
         self.width
     }
 
+    /// True if the file sets the hidden flag.
     pub fn is_hidden(&self) -> bool {
         self.hidden
+    }
+
+    /// False if the columns are hidden or have a width of 0; Excel shows neither.
+    pub fn is_visible(&self) -> bool {
+        !self.hidden && self.width.is_none_or(|w| w > 0.0)
     }
 }
 
@@ -102,6 +108,11 @@ impl SheetLayout {
     /// True if a 1-based column is hidden.
     pub fn is_column_hidden(&self, column: u32) -> bool {
         self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).is_some_and(|c| c.hidden)
+    }
+
+    /// False if a 1-based column is hidden or has a width of 0.
+    pub fn is_column_visible(&self, column: u32) -> bool {
+        self.columns.iter().find(|c| (c.first..=c.last).contains(&column)).is_none_or(ColumnWidth::is_visible)
     }
 
     /// True if summary rows sit above their groups ([`SheetOptions::outline_summary_above`](crate::SheetOptions::outline_summary_above)).
