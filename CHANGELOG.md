@@ -137,6 +137,12 @@ Python, Node.js, .NET, Java, Go and PHP).
   a module in a subdirectory. It first checks that every manifest declares the tag's version
   (`docs/releasing.md`). The PHP split workflow now only keeps the split repository's `main` in
   step.
+- .NET: both NuGet packages carry the README, a symbol package (`.snupkg`) and a project URL, and CI
+  builds are deterministic with Source Link. `Hypaxel.AspNetCore` gains its package README. The
+  README lists the `dotnet add package` commands, and its links work on nuget.org.
+
+## 0.3.0 (2026-11-20)
+
 ### Added
 
 - **Streaming XLSX reader (.NET, Rust, Python, Go, Java).** Rows are read one at a time, with
