@@ -11,7 +11,7 @@
     <Copyright>Copyright 2026 vensas GmbH</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/vensas/hypaxel</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/vensas/hypaxel/tree/main/dotnet</PackageProjectUrl>
+    <PackageProjectUrl>https://hypaxel.libs.vensas.de</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

@@ -19,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="https://hypaxel.libs.vensas.de"><b>Website</b></a> ·
   <a href="dotnet/README.md">.NET</a> ·
   <a href="rust/README.md">Rust</a> ·
   <a href="python/README.md">Python</a> ·
@@ -47,6 +48,8 @@ query is still running.
 All implementations share one design. .NET, Rust, Go, Java and PHP are independent native engines
 with no runtime dependencies; the Python and Node.js packages are thin, idiomatic layers over the
 Rust core. The Node.js package also runs in browsers, on the Rust core compiled to WebAssembly.
+
+Overview, examples and benchmarks: **[hypaxel.libs.vensas.de](https://hypaxel.libs.vensas.de)**
 
 ## At a glance
 
@@ -171,7 +174,7 @@ Shared by all seven implementations (milestone 1: creating Excel files).
 - **Strings:** inline (default, constant memory) or a shared string table
 - **Compact output:** cell references are only written after gaps
 - **Valid output:** checked against the Office Open XML schema validator and read back by independent readers
-  (Open XML SDK, calamine, openpyxl, LibreOffice)
+  (Open XML SDK, calamine, openpyxl, excelize, LibreOffice)
 
 Reading (.NET, Rust, Python, Node.js and browsers, Go, Java): streamed rows of strings, numbers, booleans, errors and dates, times and
 durations recognised from number formats, in both date systems; sheet list with visibility; Excel
@@ -191,7 +194,8 @@ go/        Go module: the library, hypaxelhttp/, and tests/ (nested module with 
 java/      Maven project: src/, benchmarks/ (separate project)
 php/       Composer package: src/, tests/, benchmarks/, examples/
 benchmarks/ highlights.json and the format of each implementation's benchmarks/results/*.json
-scripts/   check_benchmarks.py: checks the benchmark JSON against the README tables
+scripts/   check_benchmarks.py (checks the benchmark JSON against the README tables) and release helpers
+docs/      release and PHP publishing guides, README banner
 testdata/  workbooks saved by Excel and LibreOffice, read by every reader's tests
 .github/   CI: one workflow per implementation, each triggered only by changes to its own code
 ```
@@ -200,8 +204,7 @@ testdata/  workbooks saved by Excel and LibreOffice, read by every reader's test
 
 1. ✅ **Create Excel files** (this milestone)
 2. Hyperlinks, data validation, conditional formatting, images, document properties
-3. .NET: a source generator for object mapping (AOT-friendly). Rust: optional parallel compression.
-   Python: an Arrow-native DataFrame path
+3. .NET: a source generator for object mapping (AOT-friendly). Python: an Arrow-native DataFrame path
 4. ✅ Streaming readers for .NET, Rust, Python, Node.js (and browsers), Go and Java; PHP when there is demand
 5. Read-modify-write for templates
 

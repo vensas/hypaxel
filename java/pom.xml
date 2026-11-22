@@ -11,7 +11,7 @@
 
   <name>Hypaxel</name>
   <description>High-performance, constant-memory streaming XLSX (Excel) writer and reader for the JVM with zero runtime dependencies.</description>
-  <url>https://github.com/vensas/hypaxel</url>
+  <url>https://hypaxel.libs.vensas.de</url>
   <inceptionYear>2026</inceptionYear>
 
   <licenses>

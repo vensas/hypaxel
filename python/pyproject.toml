@@ -26,6 +26,7 @@ polars = ["polars>=0.20"]
 starlette = ["starlette>=0.27"]
 
 [project.urls]
+Homepage = "https://hypaxel.libs.vensas.de"
 Repository = "https://github.com/vensas/hypaxel"
 
 [tool.maturin]
