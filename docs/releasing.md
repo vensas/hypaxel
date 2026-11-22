@@ -14,6 +14,20 @@ It first checks that every manifest declares the tag's version, then publishes t
 | Maven Central | `de.vensas:hypaxel` (jar, sources, javadoc, signed) | Central Portal user token and GPG key | [below](#maven-central) |
 | Go module proxy | `github.com/vensas/hypaxel/go` | `go/vX.Y.Z` tag in this repository | none |
 
+## Dry run
+
+Before a release, or after changing the release workflow, run it without publishing:
+
+```bash
+gh workflow run release.yml --repo vensas/hypaxel --ref main -f dry_run=true
+```
+
+or *Actions → Release → Run workflow* on `main` with *dry run* ticked and the tag empty. It uses
+the commit of the selected branch and the version its manifests agree on, and runs every build,
+test, pack and smoke job, checks the PHP split and builds and signs the Maven artifacts with the
+real key. Nothing is published, no tag is created. A dry run needs no tag on purpose: pushing a
+`v*` tag starts a real release.
+
 ## Publishing a release
 
 1. Bump the version in every manifest if that has not happened yet (the files are listed in

@@ -135,8 +135,8 @@ Python, Node.js, .NET, Java, Go and PHP).
 - Releases: one `Release` workflow publishes a release tag to Packagist, to nuget.org, crates.io,
   npm and PyPI through Trusted Publishing, to Maven Central, and to the Go module proxy by creating the `go/vX.Y.Z` tag that Go needs for
   a module in a subdirectory. It first checks that every manifest declares the tag's version
-  (`docs/releasing.md`). The PHP split workflow now only keeps the split repository's `main` in
-  step.
+  (`docs/releasing.md`). A manual dry run builds, tests and smoke-tests everything without
+  publishing. The PHP split workflow now only keeps the split repository's `main` in step.
 - Rust: `hypaxel` and `hypaxel-axum` can be published to crates.io (they were marked
   `publish = false`). The README lists the `cargo add` commands, and its links work on crates.io.
 - Node.js: the npm package is released with the native addon for all five targets (Linux x64 and

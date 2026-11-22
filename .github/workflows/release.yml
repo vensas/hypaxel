@@ -4,20 +4,29 @@ name: Release
 # workflow without path filters: a tag on a commit that is already on main changes no files, so a
 # path-filtered workflow never starts. A manual run publishes an existing tag, to all registries or
 # to one; a version a registry already has is left alone. Every job that publishes runs in the
-# release environment; builds and tests run outside it. See docs/releasing.md.
+# release environment; builds and tests run outside it.
+#
+# A dry run (manual, with dry_run) builds, tests, packs and smoke-tests everything, validates the
+# PHP split and signs the Maven artifacts, but publishes nothing. Without a tag it uses the commit
+# of the selected branch and the version in its manifests, so no v* tag (which would release) is
+# needed. See docs/releasing.md.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag, for example v0.4.0
-        required: true
+        description: Existing release tag, for example v0.4.0 (may be empty for a dry run)
+        required: false
       registry:
         description: Where to publish it
         type: choice
         options: [all, packagist, nuget, crates, npm, pypi, maven, go]
         default: all
+      dry_run:
+        description: Build and test everything, publish nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,7 +36,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TAG: ${{ inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || (github.event_name == 'push' && github.ref_name) || '' }}
+  # The commit to release: the tag, or for a dry run without a tag the selected branch's commit.
+  REF: ${{ (inputs.tag && format('refs/tags/{0}', inputs.tag)) || github.sha }}
+  DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
 
 jobs:
   version:
@@ -35,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prefix: ${{ steps.version.outputs.prefix }}
       suffix: ${{ steps.version.outputs.suffix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,7 +55,15 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: version
-        run: scripts/release-version.sh "$TAG" | tee -a "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "$TAG" ]; then
+            scripts/release-version.sh "$TAG" | tee -a "$GITHUB_OUTPUT"
+          elif [ -n "$DRY_RUN" ]; then
+            scripts/release-version.sh --head | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "::error::A release needs a tag; only a dry run can go without one"
+            exit 1
+          fi
 
   packagist:
     needs: version
@@ -79,7 +100,12 @@ jobs:
       - name: Publish the tag to the split repository
         env:
           SPLIT_REMOTE: git@github.com:${{ vars.PHP_SPLIT_REPOSITORY }}.git
-        run: scripts/split-php.sh tag "$TAG"
+        run: |
+          if [ -n "$TAG" ]; then
+            scripts/split-php.sh tag "$TAG"
+          else
+            scripts/split-php.sh branch "$REF"
+          fi
 
   nuget-pack:
     needs: version
@@ -94,7 +120,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -122,6 +148,7 @@ jobs:
 
   nuget:
     needs: nuget-pack
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -151,7 +178,7 @@ jobs:
   # pre-release tag is not published to crates.io.
   crates-check:
     needs: version
-    if: needs.version.outputs.suffix == '' && ((inputs.registry || 'all') == 'all' || inputs.registry == 'crates')
+    if: (needs.version.outputs.suffix == '' || inputs.dry_run) && ((inputs.registry || 'all') == 'all' || inputs.registry == 'crates')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -159,7 +186,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
@@ -170,6 +197,7 @@ jobs:
 
   crates:
     needs: [version, crates-check]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -186,7 +214,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
@@ -229,7 +257,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -267,7 +295,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -327,7 +355,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
           sparse-checkout: node/scripts/smoke.mjs
           sparse-checkout-cone-mode: false
@@ -347,6 +375,7 @@ jobs:
 
   npm:
     needs: [version, npm-smoke]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -384,7 +413,7 @@ jobs:
   # requires-python allows; Linux wheels for manylinux (glibc) and musllinux (Alpine).
   pypi-wheels:
     needs: version
-    if: needs.version.outputs.suffix == '' && ((inputs.registry || 'all') == 'all' || inputs.registry == 'pypi')
+    if: (needs.version.outputs.suffix == '' || inputs.dry_run) && ((inputs.registry || 'all') == 'all' || inputs.registry == 'pypi')
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: true
@@ -400,7 +429,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: runner.os != 'Linux'
@@ -425,12 +454,12 @@ jobs:
 
   pypi-sdist:
     needs: version
-    if: needs.version.outputs.suffix == '' && ((inputs.registry || 'all') == 'all' || inputs.registry == 'pypi')
+    if: (needs.version.outputs.suffix == '' || inputs.dry_run) && ((inputs.registry || 'all') == 'all' || inputs.registry == 'pypi')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
@@ -478,11 +507,11 @@ jobs:
       run:
         shell: bash
     env:
-      VERSION: ${{ needs.version.outputs.version }}
+      VERSION: ${{ needs.version.outputs.prefix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
           sparse-checkout: python/scripts/smoke.py
           sparse-checkout-cone-mode: false
@@ -506,6 +535,7 @@ jobs:
 
   pypi:
     needs: [pypi-sdist, pypi-smoke]
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -538,7 +568,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ env.REF }}
           persist-credentials: false
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
@@ -561,10 +591,10 @@ jobs:
         run: >
           ./mvnw -B -q org.codehaus.mojo:versions-maven-plugin:2.21.0:set
           -DnewVersion="$VERSION" -DgenerateBackupPoms=false
-      - if: steps.published.outputs.done != 'true'
+      - if: steps.published.outputs.done != 'true' || env.DRY_RUN
         run: ./mvnw -B verify
-      - name: Publish to Maven Central
-        if: steps.published.outputs.done != 'true'
+      - name: Publish to Maven Central, or build and sign only in a dry run
+        if: steps.published.outputs.done != 'true' || env.DRY_RUN
         env:
           MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
@@ -574,11 +604,15 @@ jobs:
           for name in MAVEN_CENTRAL_USERNAME MAVEN_CENTRAL_PASSWORD MAVEN_GPG_KEY MAVEN_GPG_PASSPHRASE; do
             test -n "${!name}" || { echo "::error::$name is not set"; exit 1; }
           done
-          ./mvnw -B -Prelease deploy -DskipTests
+          if [ -n "$DRY_RUN" ]; then
+            ./mvnw -B -Prelease verify -DskipTests
+          else
+            ./mvnw -B -Prelease deploy -DskipTests
+          fi
 
   go:
     needs: version
-    if: (inputs.registry || 'all') == 'all' || inputs.registry == 'go'
+    if: ${{ !inputs.dry_run && ((inputs.registry || 'all') == 'all' || inputs.registry == 'go') }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
