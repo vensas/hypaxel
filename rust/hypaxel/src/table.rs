@@ -53,6 +53,18 @@ impl TableStyle {
         built_in(name).unwrap_or_else(|| TableStyle::Custom(name.to_owned()))
     }
 
+    /// Like [`from_name`](Self::from_name), for a name typed by a person or a program rather than
+    /// read from a file: `None` for a name that starts with `TableStyle` (in any case) but is not
+    /// a built-in style, such as `TableStyleMedium29` or `TableStyleMeduim2`, which is far more
+    /// likely a mistyped built-in name than a custom style.
+    pub fn parse(name: &str) -> Option<TableStyle> {
+        let looks_built_in = name.trim().get(..10).is_some_and(|prefix| prefix.eq_ignore_ascii_case("TableStyle"));
+        match TableStyle::from_name(name) {
+            TableStyle::Custom(_) if looks_built_in => None,
+            style => Some(style),
+        }
+    }
+
     fn validate(&self) -> Result<()> {
         let valid = match self {
             TableStyle::None => true,

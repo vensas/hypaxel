@@ -145,4 +145,15 @@ mod tests {
             assert_eq!(TableStyle::from_name(custom), TableStyle::Custom(custom.into()), "{custom}");
         }
     }
+
+    #[test]
+    fn parses_typed_style_names() {
+        assert_eq!(TableStyle::parse("TableStyleMedium9"), Some(TableStyle::Medium(9)));
+        assert_eq!(TableStyle::parse("Brand"), Some(TableStyle::Custom("Brand".into())));
+        assert_eq!(TableStyle::parse("Table"), Some(TableStyle::Custom("Table".into())));
+        assert_eq!(TableStyle::parse(""), Some(TableStyle::None));
+        for typo in ["TableStyleMedium29", "TableStyleMeduim2", "tablestylemedium2", " TableStyleDark0", "TABLESTYLE", "TableStyleÜ"] {
+            assert_eq!(TableStyle::parse(typo), None, "{typo}");
+        }
+    }
 }

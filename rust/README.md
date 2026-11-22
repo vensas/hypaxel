@@ -129,7 +129,8 @@ fn main() -> hypaxel::Result<()> {
   and are read only when you ask, so reading values costs the same as before. `autofilter` tells
   whether the file has filter buttons, and a custom (non-built-in) table style reads as
   `TableStyle::Custom(name)`, which `add_table` writes back by name (Excel applies it only if the
-  workbook defines the style). `TableStyle::from_name` maps a stored name to a style. `totals_row` tells whether the last row of the range is a totals row; such
+  workbook defines the style). `TableStyle::from_name` maps a stored name to a style; `TableStyle::parse` does the same for a
+  typed name but rejects `TableStyle…` names that are not built-in, which are usually typos. `totals_row` tells whether the last row of the range is a totals row; such
   a table can be read but not written.
 - **Rows and columns:** each `Row` has `outline_level()`, `is_hidden()`, `is_collapsed()` and
   `height()` (`None` when the row stores no height). `rows.layout()?` gives the `SheetLayout`:
