@@ -14,6 +14,7 @@ Run from `node/`. Node.js 22+, with the `wasm32-unknown-unknown` target and `was
 npm ci
 npm run build          # native, wasm and TypeScript
 npm test
+npm run test:types     # type-checks the published .d.ts files as a consumer would
 npm run test:browser
 cargo fmt --all --check
 cargo clippy --workspace --all-targets

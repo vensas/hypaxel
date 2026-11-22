@@ -76,6 +76,7 @@
     "build": "npm run build:native && npm run build:wasm && npm run build:ts",
     "test": "node --test test/*.test.mjs",
     "test:browser": "node test/browser/run.mjs",
+    "test:types": "tsc -p test/types/tsconfig.json && tsc -p test/types/tsconfig.browser.json",
     "bench": "node benchmarks/bench.mjs",
     "bench:browser": "node benchmarks/browser/run.mjs"
   },
